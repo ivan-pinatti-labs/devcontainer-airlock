@@ -54,7 +54,8 @@ carries and how the build works.
 ## Usage
 
 ```shell
-make workbench-build    # every image, locally
+host/workbench init     # once, in an existing project: egress sets, L2 image, make targets
+make workbench-build    # every image, locally (or make workbench-pull)
 make unlock             # the ssh key, for eight hours
 make claude             # Claude Code in its workbench, started if needed (or: codex)
 make claude-shell       # a terminal in that workbench (or: codex-shell)

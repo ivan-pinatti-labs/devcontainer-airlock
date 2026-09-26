@@ -145,6 +145,16 @@ live in `~/.local/share/workbench/claude` and `.../codex`, not in your own
 
 ### Per repository
 
+`host/workbench init` sets up an existing repository (run it in the
+repository, or pass its path): `.devcontainer/egress-sets` from the files it
+finds (Python and Node for any repository with pre-commit hooks, plus Go,
+Docker Hub or HashiCorp when it sees their files), `.devcontainer/l2/Dockerfile`
+on the published L2 image pinned by digest, and the `include` that gives its
+Makefile the workbench targets (a new Makefile when there is none). It writes
+only what is missing and never edits anything else, so it is safe to run
+again; check the egress sets it guessed before committing them. A project
+created from `ivan-pinatti-labs/github-template` has all of this already.
+
 A repository adds what its hooks and tests need on top of the shared L2
 image in `.devcontainer/l2/Dockerfile`. `l2` builds that image in the engine
 (behind the egress proxy) the first time it is needed, and again whenever the

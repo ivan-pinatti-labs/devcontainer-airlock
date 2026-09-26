@@ -7,6 +7,8 @@
     host/workbench build            build every image locally (localhost/*:local)
     host/workbench pull             or take the published ones instead, and tag
                                     them as the local ones
+    host/workbench init [DIR]       set up a repository for the workbench: its
+                                    egress sets, an L2 image, the make targets
     host/workbench up [WORKSPACE]   start the helpers, the L2 engine and the
                                     workbenches, one per agent
     host/workbench unlock           add the ssh key to the agent for 8 hours
@@ -348,16 +350,119 @@ cmd_build() {
 # not build them. Prints what each tag resolved to: the published index
 # digest, the one to pin by, rather than this platform's manifest.
 cmd_pull() {
-  local i ref mine index
+  local i ref
   for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy; do
-    ref="${REGISTRY}/airlock-${i}:${WORKBENCH_PULL_TAG:-latest}"
-    podman pull --quiet "${ref}" >/dev/null
-    podman tag "${ref}" "localhost/airlock-${i}:${TAG}"
-    mine="$(podman image inspect --format '{{.Digest}}' "${ref}")"
-    index="$(podman image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${ref}" \
-      | grep -F "${REGISTRY}/airlock-${i}@" | grep -vF "${mine}" | head -n1 || true)"
-    echo "workbench: ${i} ${index:-${REGISTRY}/airlock-${i}@${mine}}"
+    ref="$(pull_published "${i}")" || die "could not pull ${REGISTRY}/airlock-${i}"
+    echo "workbench: ${i} ${ref}"
   done
+}
+
+# Pull one published image, tag it as the local one, and print the reference
+# to pin it by: the published index digest, not this platform's manifest.
+# errexit does not reach into a command substitution, so every step returns
+# on failure itself, and callers check the status.
+pull_published() {
+  local ref mine index
+  ref="${REGISTRY}/airlock-$1:${WORKBENCH_PULL_TAG:-latest}"
+  podman pull --quiet "${ref}" >/dev/null || return 1
+  podman tag "${ref}" "localhost/airlock-$1:${TAG}" || return 1
+  mine="$(podman image inspect --format '{{.Digest}}' "${ref}")" || return 1
+  [ -n "${mine}" ] || return 1
+  index="$(podman image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${ref}" \
+    | grep -F "${REGISTRY}/airlock-$1@" | grep -vF "${mine}" | head -n1 || true)"
+  echo "${index:-${REGISTRY}/airlock-$1@${mine}}"
+}
+
+# Set a repository up for the workbench: the egress sets its files suggest,
+# an L2 image on the published one pinned by digest, and the make targets.
+# It writes only what is not there yet, and a Makefile gains the include
+# once; it never edits anything else, so it is safe to run again.
+cmd_init() {
+  local top f sets=() l2 files
+  top="$(git -C "${1:-${PWD}}" rev-parse --show-toplevel 2>/dev/null)" \
+    || die "${1:-${PWD}} is not in a git repository"
+  files="$(git -C "${top}" ls-files)"
+  has() { grep -qE "$1" <<<"${files}"; }
+  # The one step that can fail runs before anything is written, so a failed
+  # init leaves the repository as it found it.
+  if [ ! -e "${top}/.devcontainer/l2/Dockerfile" ]; then
+    l2="$(pull_published l2)" || die "could not pull ${REGISTRY}/airlock-l2; nothing written"
+  fi
+  mkdir -p "${top}/.devcontainer/l2"
+
+  f="${top}/.devcontainer/egress-sets"
+  if [ -e "${f}" ]; then
+    echo "workbench: kept ${f}"
+  else
+    # pre-commit builds its hook environments from PyPI and npm, so a
+    # repository with hooks gets both whatever its own language.
+    { has '(^|/)(pyproject\.toml|setup\.(py|cfg)|Pipfile|requirements[^/]*\.txt)$' || has '^\.pre-commit-config\.yaml$'; } && sets+=(python)
+    { has '(^|/)package\.json$' || has '^\.pre-commit-config\.yaml$'; } && sets+=(node)
+    has '(^|/)go\.mod$' && sets+=(golang)
+    has '(^|/)(Dockerfile|Containerfile|[^/]*compose[^/]*\.ya?ml)$' && sets+=(docker-hub)
+    has '\.tf$' && sets+=(hashicorp)
+    {
+      echo "# The network services this repository's hooks, tests and builds reach,"
+      echo "# through its egress proxy (workbench, github and ghcr are always on). One"
+      echo "# per line; \`podman run --rm localhost/airlock-egress-proxy:local"
+      echo "# egress-refresh --list\` lists every set. Written by host/workbench init"
+      echo "# from this repository's files: check it, and add what they missed."
+      if [ "${#sets[@]}" -gt 0 ]; then printf '%s\n' "${sets[@]}"; fi
+    } > "${f}"
+    echo "workbench: wrote ${f} (${sets[*]:-no sets})"
+    has '(^|/)(Cargo\.toml|Gemfile|composer\.json|pom\.xml|build\.gradle)$' \
+      && echo "workbench: this repository uses a package registry no egress set covers yet; its installs will be refused until one exists (images/egress-proxy/sets/)"
+  fi
+
+  f="${top}/.devcontainer/l2/Dockerfile"
+  if [ -e "${f}" ]; then
+    echo "workbench: kept ${f}"
+  else
+    cat > "${f}" <<DOCKERFILE
+# This repository's L2 image: where its hooks, tests and package installs
+# run, with the working tree and nothing else (no network, no credentials).
+# \`l2\` builds it inside the L2 engine the first time it is needed, and again
+# whenever this file changes. See docs/LAYERS.md in devcontainer-airlock.
+#
+# It starts from the shared L2 image, pinned by digest, which already carries
+# pre-commit, Python, Node, Go and the common linters. Add what this
+# repository's hooks and tests need below: prefer a distribution package,
+# then a vendor's own signed apt repository, then the tool's official
+# container image.
+ARG L2_IMAGE=${l2}
+# hadolint ignore=DL3006
+FROM \${L2_IMAGE}
+DOCKERFILE
+    echo "workbench: wrote ${f} (${l2})"
+  fi
+
+  f="${top}/Makefile"
+  if [ -e "${f}" ] && grep -q 'host/workbench\.mk' "${f}"; then
+    echo "workbench: kept ${f} (it already includes the workbench targets)"
+  else
+    # Recipe lines start with a tab, written by printf so this script holds none.
+    if [ ! -e "${f}" ]; then
+      printf '%s\n' '.PHONY: all help' '' 'all: help' '' 'help:' > "${f}"
+      printf '\t%s\n' '@$(MAKE) --no-print-directory workbench-help' >> "${f}"
+    fi
+    cat >> "${f}" <<'MAKEFILE'
+
+# The workbench targets (make claude, make codex, make unlock and the rest)
+# from a devcontainer-airlock clone, by default the one next to this
+# repository's main clone. Written by host/workbench init.
+WORKBENCH_HOME ?= $(abspath $(dir $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null))../devcontainer-airlock)
+-include $(WORKBENCH_HOME)/host/workbench.mk
+
+MAKEFILE
+    printf '%s\n' '' '.PHONY: workbench-help' \
+      'ifeq ($(wildcard $(WORKBENCH_HOME)/host/workbench.mk),)' 'workbench-help:' >> "${f}"
+    printf '\t%s\n' "@echo 'Workbench: clone ivan-pinatti-labs/devcontainer-airlock next to this repository, or set WORKBENCH_HOME.'" >> "${f}"
+    printf '%s\n' 'endif' >> "${f}"
+    echo "workbench: added the workbench targets to ${f}"
+  fi
+
+  echo "workbench: next: commit these, then make workbench-up (or make claude); in a workbench, l2-hooks-install once"
+  echo "workbench: a repository whose main clone holds data other containers use also wants an empty .devcontainer/workbench-worktree-only"
 }
 
 start_proxy() {
@@ -633,6 +738,7 @@ cmd_down() {
 case "${1:-}" in
   build) cmd_build ;;
   pull) cmd_pull ;;
+  init) cmd_init "${2:-}" ;;
   up) cmd_up "${2:-}" ;;
   unlock) cmd_unlock ;;
   shell) cmd_shell "${2:-}" "${3:-}" ;;
