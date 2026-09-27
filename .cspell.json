@@ -155,6 +155,8 @@
     "pythonhosted",
     "Qubes",
     "readline",
+    "readlink",
+    "realpath",
     "regid",
     "rekor",
     "renovate",

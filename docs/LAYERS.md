@@ -143,6 +143,49 @@ workbench (`host/workbench claude`, `host/workbench codex`); their logins
 live in `~/.local/share/workbench/claude` and `.../codex`, not in your own
 `~/.claude` or `~/.codex`.
 
+### More than one account
+
+Someone with two subscriptions (work and personal, say) lists the extra
+accounts in `WORKBENCH_ACCOUNTS` (`host/workbench help`): with
+`WORKBENCH_ACCOUNTS=personal`, `make claude-personal` and `make
+codex-personal` (and their `-shell` targets) start workbenches of their own,
+`workbench-claude-personal-<folder>`, from the same images, with their own
+login folder under `~/.local/share/workbench/`. Each logs in once. `make
+claude` stays the default account.
+
+Each workbench keeps its own Claude Code configuration and login: the
+host's `~/.claude/settings.json` carries hooks that run on the host, which a
+workbench must not be able to change. Session history can be shared all the
+same, with `WORKBENCH_HISTORY` (say, `claude=~/.claude
+claude-personal=~/.claude-personal`): the host's history for the workspace
+path and the paths under it (transcripts and memory, nothing else) is
+mounted into the matching workbench, so `claude --resume` there lists the
+sessions started on the host, and the other way round.
+
+### Several repositories at once
+
+For work that spans repositories, start the workspace from the folder that
+holds their clones side by side (one that is not itself in a git checkout):
+`host/workbench up` there, or `host/workbench claude`. Or `make claude`, with
+a Makefile in that folder that includes `devcontainer-airlock/host/workbench.mk`.
+That is a group workspace:
+
+- Each clone is mounted on its own, never the folder as a whole, so nothing
+  else in it is relabelled. A clone marked worktree only brings just its git
+  directory and its `.claude/worktrees`: its data stays where it is, and work
+  in it happens in a worktree created from inside the workbench.
+- Each repository keeps its own environment. `l2` in a checkout builds and
+  uses that repository's L2 image and cache, as in its own workspace, so its
+  hooks and tests run exactly as they would there.
+- The proxy allows every egress set any of the repositories asks for, and the
+  engine gets every profile any of them opts in to; each read from the
+  checkout and from the remote's default branch, since a main clone may be
+  behind. The folder's own `.devcontainer/egress-sets` and
+  `workbench-profile`, when it has them, add to those.
+- The folder's `CLAUDE.md`, `AGENTS.md` and `.claude` come along, so an
+  agent started there reads the same instructions as one started on the
+  host.
+
 ### Per repository
 
 `host/workbench init` sets up an existing repository (run it in the
