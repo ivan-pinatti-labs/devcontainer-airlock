@@ -143,6 +143,16 @@ workbench (`host/workbench claude`, `host/workbench codex`); their logins
 live in `~/.local/share/workbench/claude` and `.../codex`, not in your own
 `~/.claude` or `~/.codex`.
 
+### More than one account
+
+Someone with two subscriptions (work and personal, say) lists the extra
+accounts in `WORKBENCH_ACCOUNTS` (`host/workbench help`): with
+`WORKBENCH_ACCOUNTS=personal`, `make claude-personal` and `make
+codex-personal` (and their `-shell` targets) start workbenches of their own,
+`workbench-claude-personal-<folder>`, from the same images, with their own
+login folder under `~/.local/share/workbench/`. Each logs in once. `make
+claude` stays the default account.
+
 ### Several repositories at once
 
 For work that spans repositories, start the workspace from the folder that

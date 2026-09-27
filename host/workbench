@@ -16,7 +16,10 @@
     host/workbench codex [WORKSPACE]
                                     that agent, in its workbench, in the
                                     folder you are in
-    host/workbench shell claude|codex [WORKSPACE]
+    host/workbench claude-<account> [WORKSPACE]
+                                    the same, logged in as another account
+                                    (WORKBENCH_ACCOUNTS below)
+    host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
     host/workbench load-l2 [WORKSPACE]
                                     copy the local L2 images into the L2 engine
@@ -84,6 +87,9 @@
                           for this alone. Default: ~/.ssh/devcontainer/id_ed25519
     WORKBENCH_ROOT        the folder every workspace lives under (above)
     WORKBENCH_AGENTS      which workbenches `up` starts. Default: claude codex
+    WORKBENCH_ACCOUNTS    more logins for the agents, space separated (say,
+                          personal): claude-personal and codex-personal are
+                          workbenches of their own, with their own login
     WORKBENCH_TAG         the local image tag. Default: local
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
@@ -124,7 +130,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -140,6 +146,20 @@ wb_image() { echo "localhost/airlock-workbench-$1:${TAG}"; }
 # Every agent there is a workbench for, and the ones `up` starts.
 KNOWN_AGENTS="claude codex"
 AGENTS="${WORKBENCH_AGENTS:-${KNOWN_AGENTS}}"
+# More logins for the same agents (a second subscription, say): claude-<name>
+# is Claude Code in a workbench of its own, with its own login folder.
+ACCOUNTS="${WORKBENCH_ACCOUNTS//,/ }"
+
+# The agent a workbench runs (claude for claude-personal), and whether a name
+# is a workbench there can be: an agent, or an agent and one of the accounts.
+agent_of() { echo "${1%%-*}"; }
+valid_agent() {
+  local base="${1%%-*}" account="${1#*-}"
+  case " ${KNOWN_AGENTS} " in *" ${base} "*) ;; *) return 1 ;; esac
+  [ "$1" = "${base}" ] && return 0
+  case " ${ACCOUNTS} " in *" ${account} "*) return 0 ;; esac
+  return 1
+}
 L2_IMAGE="localhost/airlock-l2:${TAG}"
 ENGINE_IMAGE="localhost/airlock-l2-engine:${TAG}"
 BROKER_IMAGE="localhost/airlock-gh-broker:${TAG}"
@@ -716,12 +736,12 @@ start_workbench() {
     -e SSH_AUTH_SOCK=/run/devcontainer-ssh/agent.sock \
     -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
     "${gitdir[@]}" \
-    -v "${DATA}/${agent}:/home/dev/.${agent}:Z" \
+    -v "${DATA}/${agent}:/home/dev/.$(agent_of "${agent}"):Z" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
     -w "${ws}" \
-    --entrypoint catatonit "$(wb_image "${agent}")" -- workbench-init >/dev/null
+    --entrypoint catatonit "$(wb_image "$(agent_of "${agent}")")" -- workbench-init >/dev/null
 }
 
 cmd_up() {
@@ -791,6 +811,13 @@ UNIT
 
 cmd_unlock() {
   running devcontainer-ssh-agent || die "the ssh-agent is not running; host/workbench up first"
+  # An agent started by an older host/workbench mounted the key's folder,
+  # not the key itself. Holding nothing it could lose while locked, it is
+  # started again the current way.
+  if ! podman exec devcontainer-ssh-agent test -f /key/id; then
+    podman rm -f -t 3 devcontainer-ssh-agent >/dev/null
+    start_ssh_agent
+  fi
   podman exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent \
     ssh-add -t 8h /key/id
 }
@@ -799,10 +826,10 @@ cmd_unlock() {
 # in the folder you are in when it is inside the workspace.
 cmd_shell() {
   local agent="${1:-}" ws name cwd
-  case " ${KNOWN_AGENTS} " in
-    *" ${agent:-none} "*) ;;
-    *) echo "workbench: which agent? host/workbench shell claude|codex [WORKSPACE]" >&2; exit 2 ;;
-  esac
+  if ! valid_agent "${agent:-none}"; then
+    echo "workbench: which agent? host/workbench shell claude|codex[-<account>] [WORKSPACE] (accounts: ${ACCOUNTS:-none, see WORKBENCH_ACCOUNTS})" >&2
+    exit 2
+  fi
   ws="$(workspace "${2:-}")"
   shift 2 2>/dev/null || shift $#
   name="$(wb_name "${ws}" "${agent}")"
@@ -851,9 +878,11 @@ cmd_status() {
 cmd_down() {
   local ws
   ws="$(workspace "${1:-}")"
-  # workbench-<name> is the single workbench from before the split.
-  podman rm -f -t 5 "$(wb_name "${ws}" claude)" "$(wb_name "${ws}" codex)" \
-    "workbench-$(slug "${ws}")" "$(engine_name "${ws}")" "$(proxy_name "${ws}")" \
+  # Every workbench of the workspace, whatever agent or account, and
+  # workbench-<name>, the single workbench from before the split.
+  podman ps -a --filter label=workbench.workspace="${ws}" --format '{{.Names}}' \
+    | xargs -r podman rm -f -t 5 >/dev/null 2>&1 || true
+  podman rm -f -t 5 "workbench-$(slug "${ws}")" "$(engine_name "${ws}")" "$(proxy_name "${ws}")" \
     >/dev/null 2>&1 || true
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   echo "workbench: down"
@@ -866,7 +895,8 @@ case "${1:-}" in
   up) cmd_up "${2:-}" ;;
   unlock) cmd_unlock ;;
   shell) cmd_shell "${2:-}" "${3:-}" ;;
-  claude | codex) cmd_shell "$1" "${2:-}" "$1" ;;
+  claude | codex | claude-* | codex-*) cmd_shell "$1" "${2:-}" "$(agent_of "$1")" ;;
+  accounts) echo "${ACCOUNTS}" ;;
   load-l2) cmd_load_l2 "${2:-}" ;;
   status) cmd_status ;;
   down) cmd_down "${2:-}" ;;

@@ -28,6 +28,23 @@ workbench-help:
 		'  workbench-status            What is running.' \
 		'  workbench-build             Build every image locally.' \
 		'  workbench-pull              Or pull the published images instead.'
+	@$(foreach a,$(WORKBENCH_ACCOUNTS),printf '  %-27s %s\n' 'claude-$(a), codex-$(a)' 'The same, logged in as $(a) (and -shell).';)
+
+# One more set of targets per account in WORKBENCH_ACCOUNTS (claude-personal,
+# codex-personal and their shells), so Tab lists them too.
+WORKBENCH_ACCOUNTS := $(shell $(WORKBENCH) accounts 2>/dev/null)
+define workbench_account
+.PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell
+claude-$(1):
+	@$$(WORKBENCH) claude-$(1)
+codex-$(1):
+	@$$(WORKBENCH) codex-$(1)
+claude-$(1)-shell:
+	@$$(WORKBENCH) shell claude-$(1)
+codex-$(1)-shell:
+	@$$(WORKBENCH) shell codex-$(1)
+endef
+$(foreach a,$(WORKBENCH_ACCOUNTS),$(eval $(call workbench_account,$(a))))
 
 claude:
 	@$(WORKBENCH) claude
