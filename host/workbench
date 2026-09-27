@@ -301,6 +301,12 @@ group_repos() {
   done
 }
 
+# Where a group workspace keeps its state: named for the folder, and for its
+# full path, so two groups whose folders share a name never share state.
+group_state() {
+  echo "${DATA}/groups/$(slug "$1")-$(printf '%s' "$1" | sha256sum | cut -c1-12)"
+}
+
 # What a workspace mounts (and the git settings that go with it), as podman
 # arguments, each path at its own path. A
 # single checkout is mounted whole, with its git directory when that lives
@@ -321,7 +327,7 @@ ws_mounts() {
   # it guards (.gitconfig, .npmrc, .bashrc and more) before binding over it,
   # and the real folder cannot be mounted without relabelling everything in
   # it. What is created at the root lives there, not in the folder.
-  f="${DATA}/groups/$(slug "${ws}")/root"
+  f="$(group_state "${ws}")/root"
   mkdir -p "${f}"
   printf '%s\n' -v "${f}:${ws}:Z"
   while read -r r; do
@@ -351,7 +357,7 @@ ws_mounts() {
   if [ -e "${ws}/.mcp.json" ]; then
     printf '%s\n' -v "${ws}/.mcp.json:${ws}/.mcp.json:ro,Z"
   else
-    f="${DATA}/groups/$(slug "${ws}")/.mcp.json"
+    f="$(group_state "${ws}")/.mcp.json"
     mkdir -p "$(dirname "${f}")"
     [ -f "${f}" ] || printf '{"mcpServers":{}}\n' > "${f}"
     printf '%s\n' -v "${f}:${ws}/.mcp.json:ro,Z"

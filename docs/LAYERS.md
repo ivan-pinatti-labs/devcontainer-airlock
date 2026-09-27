@@ -186,8 +186,10 @@ That is a group workspace:
   agent started there reads the same instructions as one started on the
   host.
 - The folder itself, in the workbench, is a directory kept with the
-  workbench's state (`~/.local/share/workbench/groups/<name>/root`), with
-  the clones and those files mounted on top. It has to be writable, since
+  workbench's state, `~/.local/share/workbench/groups/<name>-<hash>/root`
+  (the hash is of the folder's full path, so two groups whose folders share
+  a name never share it), with the clones and those files mounted on top. It
+  has to be writable, since
   Claude Code's command sandbox creates a placeholder there for each file it
   guards, and the real folder cannot be mounted without relabelling
   everything in it. So a file created at the root in a workbench stays in
