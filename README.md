@@ -55,6 +55,7 @@ carries and how the build works.
 
 ```shell
 host/workbench init     # once, in an existing project: egress sets, L2 image, make targets
+host/workbench claude   # from a folder of clones: one workspace over all of them (docs/LAYERS.md)
 make workbench-build    # every image, locally (or make workbench-pull)
 make unlock             # the ssh key, for eight hours
 make claude             # Claude Code in its workbench, started if needed (or: codex)

@@ -193,6 +193,67 @@ is_main_checkout() {
   [ "${own}" = "${common}" ]
 }
 
+# Whether a repository is developed from worktrees only: the marker in its
+# checkout, or on its remote's default branch, so a main clone that has not
+# pulled since the marker landed still counts.
+is_worktree_only() {
+  local r="$1" m=.devcontainer/workbench-worktree-only ref
+  [ -f "${r}/${m}" ] && return 0
+  for ref in origin/HEAD origin/main; do
+    git -C "${r}" cat-file -e "${ref}:${m}" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+# A multi-repository workspace: a folder that is not itself in a git checkout
+# and holds clones side by side, an organization's repositories for instance,
+# for work that spans them.
+is_group() {
+  ! git -C "$1" rev-parse --git-dir >/dev/null 2>&1 && [ -n "$(group_repos "$1")" ]
+}
+
+# The main checkouts directly under a group folder.
+group_repos() {
+  local d
+  for d in "$1"/*/; do
+    d="${d%/}"
+    if is_main_checkout "${d}"; then echo "${d}"; fi
+  done
+}
+
+# What a workspace mounts (and the git settings that go with it), as podman
+# arguments, each path at its own path. A
+# single checkout is mounted whole, with its git directory when that lives
+# elsewhere. A group mounts each clone on its own, so nothing else in the
+# folder is relabelled: a worktree only clone brings only its git directory
+# and its worktrees, never the data its main clone holds, and the folder's
+# own agent files come along.
+ws_mounts() {
+  local ws="$1" r f n=0
+  if ! is_group "${ws}"; then
+    printf '%s\n' -v "${ws}:${ws}:Z"
+    git_dir_mount "${ws}"
+    return 0
+  fi
+  while read -r r; do
+    if is_worktree_only "${r}"; then
+      mkdir -p "${r}/.claude/worktrees"
+      printf '%s\n' -v "${r}/.git:${r}/.git:Z" -v "${r}/.claude/worktrees:${r}/.claude/worktrees:Z"
+      # Its folder in the container is only the parent of those two mounts,
+      # owned by root, and git refuses a repository it does not own unless
+      # told it is safe. Said for exactly these repositories, no others.
+      printf '%s\n' -e "GIT_CONFIG_KEY_${n}=safe.directory" -e "GIT_CONFIG_VALUE_${n}=${r}"
+      n=$((n + 1))
+    else
+      printf '%s\n' -v "${r}:${r}:Z"
+    fi
+  done < <(group_repos "${ws}")
+  if [ "${n}" -gt 0 ]; then printf '%s\n' -e "GIT_CONFIG_COUNT=${n}"; fi
+  for f in CLAUDE.md AGENTS.md CLAUDE.local.md .claude; do
+    if [ -e "${ws}/${f}" ]; then printf '%s\n' -v "${ws}/${f}:${ws}/${f}:Z"; fi
+  done
+}
+
 workspace() {
   local w="${1:-}" top common
   if [ -z "${w}" ]; then
@@ -208,8 +269,8 @@ workspace() {
   # the checkout you are in: its workspace is then that worktree, and never
   # the main clone, which up would relabel under those containers.
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  if is_main_checkout "${w}" && { [ -f "${w}/.devcontainer/workbench-worktree-only" ] \
-    || { [ -n "${top}" ] && [ -f "${top}/.devcontainer/workbench-worktree-only" ]; }; }; then
+  if is_main_checkout "${w}" && { is_worktree_only "${w}" \
+    || { [ -n "${top}" ] && is_worktree_only "${top}"; }; }; then
     if [ -z "${1:-}" ] && [ -n "${top}" ] && [ "${top}" != "${w}" ]; then
       w="${top}"
     else
@@ -290,8 +351,49 @@ set_proxy_env() {
 # name per line, comma separated for the proxy. The proxy refuses a name it
 # does not know; this only refuses one that could not be a name at all.
 egress_sets() {
-  local src f p out=""
-  src="$(profile_source "$1")"
+  local r
+  if is_group "$1"; then
+    # A group gets every set its repositories ask for, and the folder's own
+    # .devcontainer/egress-sets when it has one.
+    {
+      if [ -f "$1/.devcontainer/egress-sets" ]; then sets_of "$1"; fi
+      while read -r r; do group_sets_of "${r}"; done < <(group_repos "$1")
+    } | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -
+  else
+    sets_of "$(profile_source "$1")"
+  fi
+}
+
+# A file as a group reads it from one of its repositories: the checkout's copy
+# and the one on the remote's default branch together, since a main clone may
+# not have pulled since its repository last changed it.
+repo_file() {
+  local ref
+  if [ -f "$1/$2" ]; then cat "$1/$2"; fi
+  for ref in origin/HEAD origin/main; do
+    git -C "$1" show "${ref}:$2" 2>/dev/null && return 0
+  done
+  return 0
+}
+
+# The egress sets one repository of a group asks for, read through repo_file.
+group_sets_of() {
+  local r="$1" p out=""
+  while read -r p; do
+    case "${p}" in
+      '' | '#'*) ;;
+      *[!a-z0-9-]*) die "'${p}' in ${r}/.devcontainer/egress-sets is not an egress set name" ;;
+      *) out="${out:+${out},}${p}" ;;
+    esac
+  done < <(repo_file "${r}" .devcontainer/egress-sets)
+  if [ -z "${out}" ]; then out="${DEFAULT_SETS}"; fi
+  if [ -n "$(repo_file "${r}" .devcontainer/l2/Dockerfile)" ]; then out="${out},ubuntu,nodesource"; fi
+  echo "${out}"
+}
+
+# The egress sets one checkout (or a group folder) asks for.
+sets_of() {
+  local src="$1" f p out=""
   f="${src}/.devcontainer/egress-sets"
   if [ -f "${f}" ]; then
     while read -r p; do
@@ -321,8 +423,30 @@ profile_source() {
 }
 
 profiles() {
+  local r p
+  if is_group "$1"; then
+    # A group's engine gets every profile its repositories opt in to.
+    {
+      profiles_of "$1"
+      while read -r r; do
+        repo_file "${r}" .devcontainer/workbench-profile | while read -r p; do
+          case "${p}" in
+            '' | '#'*) ;;
+            nested-network | nested-devices | hooks-engine) echo "${p}" ;;
+            *) die "unknown profile '${p}' in ${r}/.devcontainer/workbench-profile" ;;
+          esac
+        done
+      done < <(group_repos "$1")
+    } | sort -u
+  else
+    profiles_of "$(profile_source "$1")"
+  fi
+}
+
+# The profiles one checkout (or a group folder) opts in to.
+profiles_of() {
   local f p
-  f="$(profile_source "$1")/.devcontainer/workbench-profile"
+  f="$1/.devcontainer/workbench-profile"
   [ -f "${f}" ] || return 0
   while read -r p; do
     case "${p}" in
@@ -553,7 +677,7 @@ start_engine() {
   mkdir -p "${dir}"
   chmod 700 "${dir}"
   set_proxy_env "${ws}"
-  mapfile -t gitdir < <(git_dir_mount "${ws}")
+  mapfile -t gitdir < <(ws_mounts "${ws}")
   podman volume exists "${name}" || podman volume create "${name}" >/dev/null
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
@@ -561,7 +685,7 @@ start_engine() {
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" --device /dev/fuse \
     "${extra[@]}" \
     --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
-    -v "${ws}:${ws}:Z" "${gitdir[@]}" \
+    "${gitdir[@]}" \
     -v "${dir}:/run/l2-engine:Z" \
     -v "${name}:/home/dev/.local/share/containers" \
     "${ENGINE_IMAGE}" >/dev/null
@@ -581,7 +705,7 @@ start_workbench() {
   running "${name}" && return
   mkdir -p "${DATA}/${agent}"
   set_proxy_env "${ws}"
-  mapfile -t gitdir < <(git_dir_mount "${ws}")
+  mapfile -t gitdir < <(ws_mounts "${ws}")
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
@@ -591,7 +715,7 @@ start_workbench() {
     -e GIT_COMMITTER_NAME="$(git config --get user.name || true)" -e GIT_COMMITTER_EMAIL="$(git config --get user.email || true)" \
     -e SSH_AUTH_SOCK=/run/devcontainer-ssh/agent.sock \
     -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
-    -v "${ws}:${ws}:Z" "${gitdir[@]}" \
+    "${gitdir[@]}" \
     -v "${DATA}/${agent}:/home/dev/.${agent}:Z" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
