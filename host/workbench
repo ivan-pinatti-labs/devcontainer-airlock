@@ -162,6 +162,14 @@ ACCOUNTS="${WORKBENCH_ACCOUNTS//,/ }"
 # only: settings.json, whose hooks run on the host, and the login stay apart.
 # The folder for the workspace itself is created first, so sessions started
 # there are shared from the first one.
+# Whether every path on stdin is $1 or under it.
+all_under() {
+  local p
+  while read -r p; do
+    case "${p}/" in "$1"/*) ;; *) return 1 ;; esac
+  done
+}
+
 history_mounts() {
   local ws="$1" agent="$2" pair host slug d cwd
   [ "$(agent_of "${agent}")" = claude ] || return 0
@@ -175,11 +183,15 @@ history_mounts() {
     for d in "${host}/${slug}" "${host}/${slug}"-*; do
       [ -d "${d}" ] || continue
       # The name encodes a path ambiguously (/work/foo-bar and /work/foo/bar
-      # both become -work-foo-bar), so a folder other than the workspace's
-      # own is mounted only when its transcripts say they ran under it.
-      if [ "$(basename "${d}")" != "${slug}" ]; then
-        cwd="$(grep -h -m1 -o '"cwd":"[^"]*"' "${d}"/*.jsonl 2>/dev/null | head -n1 | sed 's/^"cwd":"//; s/"$//')"
-        case "${cwd}/" in "${ws}"/*) ;; *) continue ;; esac
+      # both become -work-foo-bar, even the workspace's own), so a folder with
+      # transcripts is mounted only when every working directory they record
+      # is the workspace or under it. One with none yet is mounted only when
+      # it is the workspace's own, so its first session reaches the host.
+      cwd="$(grep -h -o '"cwd":"[^"]*"' "${d}"/*.jsonl 2>/dev/null | sed 's/^"cwd":"//; s/"$//' | sort -u)"
+      if [ -z "${cwd}" ]; then
+        [ "$(basename "${d}")" = "${slug}" ] || continue
+      elif ! all_under "${ws}" <<<"${cwd}"; then
+        continue
       fi
       printf '%s\n' -v "$(readlink -f "${d}"):/home/dev/.claude/projects/$(basename "${d}"):Z"
     done
