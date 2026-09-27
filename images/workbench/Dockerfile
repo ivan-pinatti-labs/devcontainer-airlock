@@ -137,7 +137,12 @@ COPY bin/finish-image /usr/local/libexec/workbench/finish-image
 # NODE_USE_ENV_PROXY makes Node's fetch honour the egress proxy variables the
 # workbench is started with. CONTAINER_HOST points podman, and so `l2`, at
 # the L2 engine.
+# DO_NOT_TRACK is the general opt out convention (consoledonottrack.com):
+# unset, npm, Next.js and other tools in here would phone home by default.
+# `host/workbench remote` clears it for that one run, since Claude Code's
+# remote control needs it unset to pair with a device.
 ENV NODE_USE_ENV_PROXY=1 \
+    DO_NOT_TRACK=1 \
     GH_BROKER_SOCK=/run/gh-broker/gh.sock \
     CONTAINER_HOST=unix:///run/l2-engine/podman.sock \
     L2_IMAGE=localhost/airlock-l2:local

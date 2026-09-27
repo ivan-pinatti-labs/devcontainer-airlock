@@ -19,6 +19,10 @@
     host/workbench claude-<account> [WORKSPACE]
                                     the same, logged in as another account
                                     (WORKBENCH_ACCOUNTS below)
+    host/workbench remote claude[-<account>] [WORKSPACE]
+                                    claude --remote-control there, to pair
+                                    with a device; DO_NOT_TRACK cleared for
+                                    this run only, as pairing needs
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
     host/workbench load-l2 [WORKSPACE]
@@ -913,6 +917,26 @@ cmd_shell() {
   exec podman exec -it -w "${cwd}" "${name}" "${@:-bash}"
 }
 
+# claude --remote-control, for the agent and account named (or the default
+# claude), pairing with a device over Anthropic's relay. DO_NOT_TRACK is
+# cleared for this one exec: pairing needs it unset, and the workbench sets
+# it by default for every other tool.
+cmd_remote() {
+  local agent="${1:-claude}" ws name cwd bin
+  valid_agent "${agent}" || { echo "workbench: which agent? host/workbench remote claude[-<account>] [WORKSPACE]" >&2; exit 2; }
+  bin="$(agent_of "${agent}")"
+  [ "${bin}" = claude ] || die "${bin} has no remote control mode (Codex's own experimental 'codex remote-control' runs a daemon; use host/workbench shell ${agent} and run it by hand)"
+  ws="$(workspace "${2:-}")"
+  name="$(wb_name "${ws}" "${agent}")"
+  if ! running "${name}"; then
+    cmd_up "${ws}" >/dev/null
+    running "${name}" || start_workbench "${ws}" "${agent}"
+  fi
+  cwd="${PWD}"
+  case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
+  exec podman exec -it -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
+}
+
 cmd_load_l2() {
   local ws name image
   ws="$(workspace "${1:-}")"
@@ -963,7 +987,8 @@ case "${1:-}" in
   init) cmd_init "${2:-}" ;;
   up) cmd_up "${2:-}" ;;
   unlock) cmd_unlock ;;
-  shell) cmd_shell "${2:-}" "${3:-}" ;;
+  shell) shift; cmd_shell "$@" ;;
+  remote) cmd_remote "${2:-}" "${3:-}" ;;
   claude | codex | claude-* | codex-*) cmd_shell "$1" "${2:-}" "$(agent_of "$1")" ;;
   accounts) echo "${ACCOUNTS}" ;;
   load-l2) cmd_load_l2 "${2:-}" ;;
