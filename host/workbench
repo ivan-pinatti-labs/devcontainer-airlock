@@ -315,6 +315,15 @@ ws_mounts() {
     git_dir_mount "${ws}"
     return 0
   fi
+  # The folder itself is backed by a directory kept with the workbench's
+  # state, with the clones mounted on top of it: it has to be writable, since
+  # Claude Code's command sandbox creates a placeholder there for every file
+  # it guards (.gitconfig, .npmrc, .bashrc and more) before binding over it,
+  # and the real folder cannot be mounted without relabelling everything in
+  # it. What is created at the root lives there, not in the folder.
+  f="${DATA}/groups/$(slug "${ws}")/root"
+  mkdir -p "${f}"
+  printf '%s\n' -v "${f}:${ws}:Z"
   while read -r r; do
     if is_worktree_only "${r}"; then
       mkdir -p "${r}/.claude/worktrees"
