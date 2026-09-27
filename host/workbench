@@ -90,6 +90,12 @@
     WORKBENCH_ACCOUNTS    more logins for the agents, space separated (say,
                           personal): claude-personal and codex-personal are
                           workbenches of their own, with their own login
+    WORKBENCH_HISTORY     share Claude Code session history with the host,
+                          as <workbench>=<host config folder> pairs, space
+                          separated (say, claude=~/.claude
+                          claude-personal=~/.claude-personal). Only the
+                          history of the workspace path and the paths
+                          under it; settings, hooks and logins stay apart
     WORKBENCH_TAG         the local image tag. Default: local
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
@@ -130,7 +136,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -149,6 +155,29 @@ AGENTS="${WORKBENCH_AGENTS:-${KNOWN_AGENTS}}"
 # More logins for the same agents (a second subscription, say): claude-<name>
 # is Claude Code in a workbench of its own, with its own login folder.
 ACCOUNTS="${WORKBENCH_ACCOUNTS//,/ }"
+
+# Claude Code session history shared with the host (WORKBENCH_HISTORY): the
+# host's projects/<path> folders for this workspace and the paths under it,
+# mounted into the workbench's own projects folder. Transcripts and memory
+# only: settings.json, whose hooks run on the host, and the login stay apart.
+# The folder for the workspace itself is created first, so sessions started
+# there are shared from the first one.
+history_mounts() {
+  local ws="$1" agent="$2" pair host slug d
+  [ "$(agent_of "${agent}")" = claude ] || return 0
+  for pair in ${WORKBENCH_HISTORY:-}; do
+    [ "${pair%%=*}" = "${agent}" ] || continue
+    host="${pair#*=}"
+    host="${host/#\~/${HOME}}/projects"
+    [ -d "${host}" ] || die "WORKBENCH_HISTORY: no ${host}"
+    slug="$(printf '%s' "${ws}" | tr -c 'A-Za-z0-9' -)"
+    [ -e "${host}/${slug}" ] || mkdir -p "${host}/${slug}"
+    for d in "${host}/${slug}" "${host}/${slug}"-*; do
+      [ -d "${d}" ] || continue
+      printf '%s\n' -v "$(readlink -f "${d}"):/home/dev/.claude/projects/$(basename "${d}"):Z"
+    done
+  done
+}
 
 # The agent a workbench runs (claude for claude-personal), and whether a name
 # is a workbench there can be: an agent, or an agent and one of the accounts.
@@ -371,14 +400,20 @@ set_proxy_env() {
 # name per line, comma separated for the proxy. The proxy refuses a name it
 # does not know; this only refuses one that could not be a name at all.
 egress_sets() {
-  local r
+  local r all="" one
   if is_group "$1"; then
     # A group gets every set its repositories ask for, and the folder's own
-    # .devcontainer/egress-sets when it has one.
-    {
-      if [ -f "$1/.devcontainer/egress-sets" ]; then sets_of "$1"; fi
-      while read -r r; do group_sets_of "${r}"; done < <(group_repos "$1")
-    } | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -
+    # .devcontainer/egress-sets when it has one. Collected here rather than
+    # in a pipeline, so a bad name in any of them fails the whole call.
+    if [ -f "$1/.devcontainer/egress-sets" ]; then
+      one="$(sets_of "$1")" || return 1
+      all="${one}"
+    fi
+    while read -r r; do
+      one="$(group_sets_of "${r}")" || return 1
+      all="${all:+${all},}${one}"
+    done < <(group_repos "$1")
+    printf '%s\n' "${all}" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -
   else
     sets_of "$(profile_source "$1")"
   fi
@@ -443,21 +478,22 @@ profile_source() {
 }
 
 profiles() {
-  local r p
+  local r p out
   if is_group "$1"; then
-    # A group's engine gets every profile its repositories opt in to.
-    {
-      profiles_of "$1"
-      while read -r r; do
-        repo_file "${r}" .devcontainer/workbench-profile | while read -r p; do
-          case "${p}" in
-            '' | '#'*) ;;
-            nested-network | nested-devices | hooks-engine) echo "${p}" ;;
-            *) die "unknown profile '${p}' in ${r}/.devcontainer/workbench-profile" ;;
-          esac
-        done
-      done < <(group_repos "$1")
-    } | sort -u
+    # A group's engine gets every profile its repositories opt in to. Read in
+    # this shell, not a pipeline, so an unknown profile in any of them stops
+    # the caller rather than one branch of it.
+    out="$(profiles_of "$1")" || return 1
+    while read -r r; do
+      while read -r p; do
+        case "${p}" in
+          '' | '#'*) ;;
+          nested-network | nested-devices | hooks-engine) out="${out}"$'\n'"${p}" ;;
+          *) die "unknown profile '${p}' in ${r}/.devcontainer/workbench-profile" ;;
+        esac
+      done < <(repo_file "${r}" .devcontainer/workbench-profile)
+    done < <(group_repos "$1")
+    printf '%s\n' "${out}" | awk 'NF' | sort -u
   else
     profiles_of "$(profile_source "$1")"
   fi
@@ -719,13 +755,14 @@ start_engine() {
 # The workbench of one agent. It mounts that agent's state folder and not the
 # other's.
 start_workbench() {
-  local ws="$1" agent="$2" name gitdir=()
+  local ws="$1" agent="$2" name gitdir=() history=()
   name="$(wb_name "${ws}" "${agent}")"
   check_owner "${name}" workbench.workspace "${ws}"
   running "${name}" && return
   mkdir -p "${DATA}/${agent}"
   set_proxy_env "${ws}"
   mapfile -t gitdir < <(ws_mounts "${ws}")
+  mapfile -t history < <(history_mounts "${ws}" "${agent}")
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
@@ -736,7 +773,7 @@ start_workbench() {
     -e SSH_AUTH_SOCK=/run/devcontainer-ssh/agent.sock \
     -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
     "${gitdir[@]}" \
-    -v "${DATA}/${agent}:/home/dev/.$(agent_of "${agent}"):Z" \
+    -v "${DATA}/${agent}:/home/dev/.$(agent_of "${agent}"):Z" "${history[@]}" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
@@ -747,7 +784,10 @@ start_workbench() {
 cmd_up() {
   local ws agent
   ws="$(workspace "${1:-}")"
-  profiles "${ws}" >/dev/null
+  # Checked here, in this shell, before anything starts: later these are read
+  # inside command substitutions, where a bad entry would only end that inner shell.
+  profiles "${ws}" >/dev/null || exit 1
+  egress_sets "${ws}" >/dev/null || exit 1
   case "${ws}/" in
     "${ROOT}"/*) ;;
     *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;

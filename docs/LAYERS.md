@@ -153,6 +153,15 @@ codex-personal` (and their `-shell` targets) start workbenches of their own,
 login folder under `~/.local/share/workbench/`. Each logs in once. `make
 claude` stays the default account.
 
+Each workbench keeps its own Claude Code configuration and login: the
+host's `~/.claude/settings.json` carries hooks that run on the host, which a
+workbench must not be able to change. Session history can be shared all the
+same, with `WORKBENCH_HISTORY` (say, `claude=~/.claude
+claude-personal=~/.claude-personal`): the host's history for the workspace
+path and the paths under it (transcripts and memory, nothing else) is
+mounted into the matching workbench, so `claude --resume` there lists the
+sessions started on the host, and the other way round.
+
 ### Several repositories at once
 
 For work that spans repositories, start the workspace from the folder that
