@@ -158,6 +158,7 @@ KNOWN_AGENTS="claude codex"
 AGENTS="${WORKBENCH_AGENTS:-${KNOWN_AGENTS}}"
 # More logins for the same agents (a second subscription, say): claude-<name>
 # is Claude Code in a workbench of its own, with its own login folder.
+WORKBENCH_ACCOUNTS="${WORKBENCH_ACCOUNTS:-}"
 ACCOUNTS="${WORKBENCH_ACCOUNTS//,/ }"
 
 # Claude Code session history shared with the host (WORKBENCH_HISTORY): the
@@ -331,6 +332,21 @@ ws_mounts() {
   for f in CLAUDE.md AGENTS.md CLAUDE.local.md .claude; do
     if [ -e "${ws}/${f}" ]; then printf '%s\n' -v "${ws}/${f}:${ws}/${f}:Z"; fi
   done
+  # Claude Code's command sandbox guards <workdir>/.mcp.json by binding over
+  # it, so the file has to exist, and the group folder itself is not a mount
+  # (only the clones in it are): nothing can be created there, and without
+  # this every command in that sandbox fails. The folder's own .mcp.json is mounted
+  # when it has one, else an empty server list kept with the workbench's
+  # state, never written into the folder. Read only either way, so nothing
+  # in a workbench can add a server to it.
+  if [ -e "${ws}/.mcp.json" ]; then
+    printf '%s\n' -v "${ws}/.mcp.json:${ws}/.mcp.json:ro,Z"
+  else
+    f="${DATA}/groups/$(slug "${ws}")/.mcp.json"
+    mkdir -p "$(dirname "${f}")"
+    [ -f "${f}" ] || printf '{"mcpServers":{}}\n' > "${f}"
+    printf '%s\n' -v "${f}:${ws}/.mcp.json:ro,Z"
+  fi
 }
 
 workspace() {
