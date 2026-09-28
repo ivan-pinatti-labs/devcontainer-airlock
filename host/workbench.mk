@@ -23,7 +23,7 @@ workbench-help:
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
 		'  claude-remote               claude --remote-control there, to pair a device.' \
-		'  claude-voice                Claude Code with voice mode (host/workbench voice-setup first).' \
+		'  claude-voice                Claude Code with the microphone, for voice mode (this session only).' \
 		'  unlock                      Unlock the ssh key for git push, for 8 hours.' \
 		'  workbench-up                Start this repository workbenches, L2 engine and proxy.' \
 		'  workbench-down              Stop them; the shared helpers keep running.' \
@@ -67,8 +67,8 @@ codex-shell:
 claude-remote:
 	@$(WORKBENCH) remote claude
 
-# Voice mode is off unless asked for; this asks. The workbench has to start
-# with it, so one already running without voice says so and stops.
+# Voice mode is off unless asked for; this asks, for this one session. The
+# microphone reaches it through a pipe that goes when the session ends.
 claude-voice:
 	@WORKBENCH_VOICE=1 $(WORKBENCH) claude
 

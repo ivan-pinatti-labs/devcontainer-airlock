@@ -171,14 +171,16 @@ RUN set -eu; \
   mkdir -p /root/version-check; \
   HOME=/root/version-check claude --version; \
   rm -rf /root/version-check
-# SoX, which Claude Code's voice mode records the microphone with (`rec`),
-# and its PulseAudio backend. They reach no microphone unless the workbench
-# is started with voice on (WORKBENCH_VOICE), which mounts the host's audio
-# socket; docs/LAYERS.md, "Voice".
+# SoX, which Claude Code's voice mode records with (`rec`), and a rec of our
+# own in front of it that reads a voice session's microphone pipe. There is
+# no audio device and no audio server here; without a voice session
+# (WORKBENCH_VOICE) rec fails. docs/LAYERS.md, "Voice".
 # hadolint ignore=DL3008
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends sox libsox-fmt-pulse \
+  && apt-get install -y --no-install-recommends sox \
   && rm -rf /var/lib/apt/lists/*
+COPY bin/rec /usr/local/bin/rec
+RUN bash -n /usr/local/bin/rec
 # The policies Claude Code cannot edit.
 COPY claude/managed-settings.json claude/CLAUDE.md /etc/claude-code/
 COPY --from=extensions /opt/vscode-extensions-claude /opt/vscode-extensions

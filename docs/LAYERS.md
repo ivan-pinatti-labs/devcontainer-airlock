@@ -330,46 +330,40 @@ token or the ssh key, and that L2 holds nothing at all.
 
 ## Voice
 
-Claude Code's voice mode records the microphone with SoX (`rec`), which the
-Claude workbench image carries with its PulseAudio backend. It is off by
-default: a workbench started without it has no way to the microphone at all.
-`make claude-voice` (or `WORKBENCH_VOICE=1`) starts the Claude workbench with
-it, and a workbench keeps what it started with until it is stopped, since a
-mount cannot be added to a running container. Asking for voice from one
-running without it stops with a message rather than quietly starting a
-session with no microphone.
+Claude Code's voice mode records the microphone with SoX (`rec`). The
+workbench has no audio device and no way to the host's audio server, so
+the microphone reaches it as a stream of bytes, for one session at a time:
 
-With voice on, the workbench mounts `~/.local/share/workbench/voice`, which
-holds a second socket of the host's PulseAudio server (PipeWire's
-pipewire-pulse), and points SoX at it (`PULSE_SERVER`, `AUDIODRIVER`). The
-audio goes to Anthropic's speech service like the rest of the agent's
-traffic, through the egress proxy.
+- `make claude-voice` (`WORKBENCH_VOICE=1 host/workbench claude`, or
+  `make claude-<account>-voice`) asks PipeWire on the host, through
+  `pactl`, to write the microphone into a named pipe (16 kHz, 16 bit, mono)
+  in that workbench's voice folder, and starts Claude Code with
+  `WORKBENCH_VOICE_MIC` naming it.
+- The `rec` in the Claude workbench image reads that pipe instead of a
+  device, dropping what was buffered before it started. In any other
+  session it fails, so Claude Code says there is no microphone.
+- When the session ends, the pipe and PipeWire's two modules go with it.
+  Nothing listens on the microphone between voice sessions.
 
-Host setup, once:
+Every Claude workbench mounts its own voice folder
+(`$XDG_RUNTIME_DIR/workbench/voice/<name>`) read only, and it stays empty
+unless a voice session runs. A workbench started before this existed has no
+such folder; `make claude-voice` says so, and it needs a restart
+(`host/workbench down`, which ends every session in it).
 
-1. `host/workbench voice-setup` creates that folder, labels it for the
-   workbench category, and writes a PipeWire drop-in
-   (`~/.config/pipewire/pipewire-pulse.conf.d/workbench-voice.conf`) giving
-   pipewire-pulse the second socket there. Then
-   `systemctl --user restart pipewire-pulse`.
-2. Someone with root installs
-   [host/selinux/devcontainer_voice.te](../host/selinux/devcontainer_voice.te).
-   pipewire-pulse runs as `unconfined_t`, and the stock policy refuses a
-   connection from `container_engine_t` to it, even through a relay socket in
-   a labelled folder (measured 2026-09-28). The module allows that one
-   permission and nothing else; the socket file still has to be one the
-   workbench can reach, which only the labelled folder is.
+Why a pipe and not the audio server's socket: the socket was tried first
+and measured 2026-09-28. Any client of it can load modules into the host's
+PipeWire, which can then open connections to the internet around the egress
+proxy, listen on the host, or create files there. It also needed a host
+SELinux module letting the workbench domain connect to desktop processes.
+Reading a pipe needs no policy change and gives the workbench audio and
+nothing else.
 
-   ```shell
-   checkmodule -M -m -o devcontainer_voice.mod host/selinux/devcontainer_voice.te
-   semodule_package -o devcontainer_voice.pp -m devcontainer_voice.mod
-   sudo semodule -i devcontainer_voice.pp
-   ```
-
-`sudo semodule -r devcontainer_voice` and removing the drop-in undo it.
-A workbench with voice can record whenever something in it runs `rec`, and
-play sound too, so turn it on for the sessions that need it. Voice mode is
-not available in a remote control session: Claude Code turns it off there.
+What it does allow: while a voice session runs, anything in that
+workbench able to read the pipe hears the microphone, and the audio goes to
+Anthropic's speech service like the rest of the agent's traffic, through
+the egress proxy. Voice mode is not available in a remote control session;
+Claude Code turns it off there.
 
 ## GitHub access
 
