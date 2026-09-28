@@ -1,0 +1,168 @@
+<!-- cspell:disable -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 910" width="1160" height="910" role="img" aria-labelledby="t d">
+<title id="t">devcontainer-airlock: what runs inside what, and how it reaches the outside</title>
+<desc id="d">The host runs podman. Two shared helpers hold the credentials: the ssh-agent (the ssh key, no network) and the gh broker (the GitHub token, straight to GitHub). Each workspace has an egress proxy on an internal network, one workbench per agent, and an L2 engine that starts L2 containers. Workbenches reach the helpers only by unix socket and the internet only through the proxy. L2 containers have no network and no credentials.</desc>
+<style>
+  svg { --ink:#1b2420; --muted:#5a6862; --rule:#c6d0ca; --tint:#e8ece8; --panel:#ffffff; --ground:#f4f6f3;
+        --net:#1d7a6c; --cred:#a5621a; --block:#b0383b; --sandbox:#6247aa; --ok:#3e6e48; }
+  @media (prefers-color-scheme: dark) {
+    svg { --ink:#e3e9e5; --muted:#97a59e; --rule:#3a463f; --tint:#222a26; --panel:#1a201d; --ground:#121614;
+          --net:#52bfae; --cred:#e3a24f; --block:#ee7474; --sandbox:#a68eec; --ok:#7cc08a; }
+  }
+  text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; fill: var(--ink); }
+  .t { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; font-size: 14px; }
+  .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .s { fill: var(--muted); font-size: 12.5px; }
+  .g { font-weight: 600; font-size: 12px; letter-spacing: .08em; fill: var(--muted); }
+  .bg { fill: var(--ground); }
+  .box { fill: var(--panel); stroke: var(--rule); stroke-width: 1.2; }
+  .grp { fill: var(--tint); stroke: var(--rule); }
+  .host { fill: none; stroke: var(--ink); stroke-width: 1.6; }
+  .out { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 6 5; }
+  .cred { fill: var(--panel); stroke: var(--cred); stroke-width: 2; }
+  .opt { fill: var(--panel); stroke: var(--cred); stroke-width: 1.6; stroke-dasharray: 5 4; }
+  .netbox { fill: var(--panel); stroke: var(--net); stroke-width: 2; }
+  .wb { fill: var(--panel); stroke: var(--ink); stroke-width: 1.6; }
+  .sbox { fill: none; stroke: var(--sandbox); stroke-width: 1.8; stroke-dasharray: 7 5; }
+  .chip { fill: var(--tint); stroke: var(--rule); }
+  .chipx { fill: var(--tint); stroke: var(--ok); stroke-width: 1.4; }
+  .ref { fill: var(--panel); stroke: var(--block); stroke-width: 1.4; }
+  .wire { fill: none; stroke: var(--net); stroke-width: 2.2; }
+  .bus { stroke: var(--net); stroke-width: 5; stroke-linecap: round; }
+  .sock { fill: none; stroke: var(--cred); stroke-width: 2.2; }
+  .sockopt { fill: none; stroke: var(--cred); stroke-width: 2; stroke-dasharray: 5 4; }
+  .dim { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .an { fill: var(--net); } .ac { fill: var(--cred); } .ad { fill: var(--muted); }
+  .sbl { fill: var(--sandbox); font-size: 12.5px; font-weight: 600; }
+  .red { fill: var(--block); } .credt { fill: var(--cred); } .okt { fill: var(--ok); }
+</style>
+<defs>
+  <marker id="an" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="an" d="M0 0L10 5L0 10z"/></marker>
+  <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ac" d="M0 0L10 5L0 10z"/></marker>
+  <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ad" d="M0 0L10 5L0 10z"/></marker>
+</defs>
+<rect class="bg" x="0" y="0" width="1160" height="910"/>
+
+<!-- host and outside -->
+<rect class="host" x="16" y="16" width="876" height="878" rx="8"/>
+<text class="g" x="34" y="38">HOST</text>
+<text class="s" x="82" y="38">rootless podman, SELinux enforcing. Keeps the key file, the token (a podman secret) and your logins.</text>
+<rect class="out" x="912" y="16" width="232" height="878" rx="8"/>
+<text class="g" x="928" y="100">OUTSIDE, THE INTERNET</text>
+
+<!-- shared helpers -->
+<rect class="grp" x="36" y="58" width="836" height="140" rx="6"/>
+<text class="g" x="52" y="80">SHARED BY EVERY WORKSPACE, REACHED ONLY BY UNIX SOCKET</text>
+<rect class="cred" x="56" y="94" width="262" height="88" rx="5"/>
+<text class="t" x="70" y="117">ssh-agent</text>
+<text class="s" x="70" y="138">holds the ssh key (make unlock, 8 h)</text>
+<text class="s" x="70" y="158">network: none; signs, never hands</text>
+<text class="s" x="70" y="174">the key out</text>
+<rect class="cred" x="334" y="94" width="262" height="88" rx="5"/>
+<text class="t" x="348" y="117">gh-broker</text>
+<text class="s" x="348" y="138">holds the GitHub token</text>
+<text class="s" x="348" y="158">runs allowlisted gh commands only;</text>
+<text class="s" x="348" y="174">no merge around the queue</text>
+<rect class="opt" x="612" y="94" width="240" height="88" rx="5"/>
+<text class="t" x="626" y="117">PipeWire (host)</text>
+<text class="s" x="626" y="138">writes the microphone into a pipe</text>
+<text class="s" x="626" y="158">for one voice session only;</text>
+<text class="s" x="626" y="174">nothing flows back</text>
+
+<!-- broker to GitHub -->
+<path class="sock" d="M560 94 V52 H928" marker-end="url(#ac)"/>
+<text class="s credt" x="640" y="46" style="font-size:11.5px">the token is added only here</text>
+<rect class="box" x="930" y="26" width="198" height="54" rx="5"/>
+<text class="m" x="944" y="48">api.github.com</text>
+<text class="s" x="944" y="68">pull requests, checks</text>
+
+<!-- outside targets of the proxy -->
+<rect class="box" x="930" y="232" width="198" height="54" rx="5"/>
+<text class="m" x="944" y="254">ssh.github.com:443</text>
+<text class="s" x="944" y="274">git fetch and push</text>
+<rect class="box" x="930" y="298" width="198" height="54" rx="5"/>
+<text class="m" x="944" y="320">api.anthropic.com, …</text>
+<text class="s" x="944" y="340">the agents' own services</text>
+<rect class="box" x="930" y="364" width="198" height="54" rx="5"/>
+<text class="m" x="944" y="386">npm, PyPI, ghcr, …</text>
+<text class="s" x="944" y="406">the egress sets a repo lists</text>
+<rect class="ref" x="930" y="438" width="198" height="54" rx="5"/>
+<text class="m red" x="944" y="460">any other host</text>
+<text class="s" x="944" y="480">refused: 403 from the proxy</text>
+
+<!-- workspace -->
+<rect class="grp" x="36" y="218" width="836" height="612" rx="6"/>
+<text class="g" x="52" y="240">ONE PER WORKSPACE</text>
+
+<rect class="netbox" x="672" y="258" width="180" height="116" rx="5"/>
+<text class="t" x="688" y="282">egress-proxy</text>
+<text class="s" x="688" y="302">squid, 10.203.N.2:8888</text>
+<text class="s" x="688" y="322">lets through only the</text>
+<text class="s" x="688" y="340">hosts of its egress sets</text>
+<text class="s" x="688" y="360">holds nothing</text>
+<path class="wire" d="M852 300 C890 300 890 259 928 259" marker-end="url(#an)"/>
+<path class="wire" d="M852 310 C892 310 892 325 928 325" marker-end="url(#an)"/>
+<path class="wire" d="M852 320 C892 320 892 391 928 391" marker-end="url(#an)"/>
+<path class="dim" d="M852 332 C895 332 895 465 928 465" stroke-dasharray="4 4" marker-end="url(#ad)"/>
+
+<line class="bus" x1="644" y1="314" x2="644" y2="792"/>
+<line class="wire" x1="644" y1="314" x2="672" y2="314"/>
+<text class="s" transform="translate(632 780) rotate(-90)" style="font-size:12px">internal network 10.203.N.0/24: no route out but the proxy</text>
+
+<!-- workbench -->
+<rect class="wb" x="56" y="258" width="548" height="318" rx="5"/>
+<text class="t" x="72" y="282">workbench-claude-&lt;workspace&gt;</text>
+<text class="s" x="72" y="302">holds that agent's login only; the working tree; no container runtime</text>
+<rect class="box" x="72" y="316" width="516" height="246" rx="5"/>
+<text x="88" y="338" style="font-weight:600">Claude Code, the VS Code server and its extensions</text>
+<rect class="sbox" x="88" y="352" width="484" height="196" rx="5"/>
+<text class="sbl" x="104" y="374">Claude Code's own command sandbox (bwrap, seccomp, its own proxy)</text>
+<text class="s" x="104" y="398">inside it: every Bash call, no unix sockets, only its allowed hosts</text>
+<rect class="chip" x="104" y="410" width="452" height="34" rx="4"/>
+<text class="m" x="120" y="432">ls, cat, grep, make, …</text>
+<text class="s" x="104" y="468">excluded, run outside it (still asking first): a plain call of</text>
+<rect class="chipx" x="104" y="480" width="452" height="34" rx="4"/>
+<text class="m" x="120" y="502">git, gh, ssh-add -l, l2, podman</text>
+<text class="s" x="104" y="536">A hook sends project code (tests, npm, pre-commit) to L2.</text>
+
+<!-- sockets up to helpers -->
+<path class="sock" d="M246 258 V184" marker-end="url(#ac)"/>
+<text class="m credt" x="254" y="212">agent.sock</text>
+<path class="sock" d="M506 258 V184" marker-end="url(#ac)"/>
+<text class="m credt" x="514" y="212">gh.sock</text>
+<path class="sockopt" d="M680 182 V236 H580 V256" marker-end="url(#ac)"/>
+<text class="m credt" x="692" y="212">voice pipe, optional</text>
+<line class="wire" x1="604" y1="420" x2="644" y2="420"/>
+
+<!-- engine -->
+<path class="dim" d="M330 576 V606" marker-end="url(#ad)"/>
+<text class="m" x="340" y="596" style="fill:var(--muted)">podman.sock (l2, podman)</text>
+<rect class="box" x="56" y="608" width="548" height="150" rx="5"/>
+<text class="t" x="72" y="632">l2-engine-&lt;workspace&gt;</text>
+<text class="s" x="72" y="652">rootless podman; holds nothing; pulls images through the proxy</text>
+<rect class="box" x="96" y="666" width="236" height="76" rx="4" style="fill:var(--tint)"/>
+<rect class="box" x="88" y="672" width="236" height="76" rx="4"/>
+<text class="t" x="102" y="694" style="font-size:13px">L2 run, thrown away after</text>
+<text class="s" x="102" y="714">hooks, tests, installs</text>
+<text class="s" x="102" y="734">no network, no credentials</text>
+<text class="m" x="348" y="694">l2 --net</text>
+<text class="s" x="420" y="694">the proxy, for installs</text>
+<text class="m" x="348" y="718">l2 --engine</text>
+<text class="s" x="438" y="718">containers of its own</text>
+<text class="s" x="348" y="742">sees the working tree, nothing else</text>
+<line class="wire" x1="604" y1="680" x2="644" y2="680"/>
+
+<!-- other workbenches -->
+<rect class="box" x="56" y="772" width="266" height="44" rx="5"/>
+<text class="m" x="70" y="791">workbench-codex-&lt;ws&gt;</text>
+<text class="s" x="70" y="808" style="font-size:11.5px">the same wiring, Codex and its login</text>
+<rect class="box" x="338" y="772" width="266" height="44" rx="5"/>
+<text class="m" x="352" y="791">workbench-claude-&lt;account&gt;-…</text>
+<text class="s" x="352" y="808" style="font-size:11.5px">the same wiring, another login</text>
+<line class="wire" x1="604" y1="792" x2="644" y2="792"/>
+
+<!-- host bottom row -->
+<rect class="box" x="36" y="846" width="836" height="34" rx="5"/>
+<text class="t" x="52" y="868" style="font-size:13px">VS Code window</text>
+<text class="s" x="180" y="868">on the host; attaches to a workbench, where its server and extensions run</text>
+</svg>

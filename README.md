@@ -24,9 +24,12 @@ into layers by what each one is trusted with:
   of `gh` commands, an ssh-agent that holds the key, and an egress proxy
   per workspace that allows only the services a project names.
 
-Nothing runs on the host but podman. [docs/LAYERS.md](docs/LAYERS.md)
-explains the layers, says plainly which parts are a boundary and which are
-only policy the agents are asked to follow, and covers the daily routine.
+Nothing runs on the host but podman.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the picture: what runs
+inside what, how the pieces talk to each other, and how anything reaches
+the internet. [docs/LAYERS.md](docs/LAYERS.md) explains the layers, says
+plainly which parts are a boundary and which are only policy the agents are
+asked to follow, and covers the daily routine.
 
 "devcontainer" here means a development container, not the Dev Containers
 specification: there is no `devcontainer.json`. VS Code attaches to a
