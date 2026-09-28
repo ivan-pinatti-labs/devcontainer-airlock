@@ -29,7 +29,12 @@ fi
 case "${1:-}" in
   --version | -h | --help) exec /usr/bin/sox "$@" ;;
 esac
-# Whatever PipeWire wrote while nothing was reading (up to one pipe buffer,
-# about two seconds) is old; drop it so a recording starts now.
-dd if="${mic}" iflag=nonblock of=/dev/null bs=65536 count=1 2>/dev/null || true
+# Whatever PipeWire wrote while nothing was reading (the pipe's buffer,
+# about two seconds) is old; drop it so a recording starts close to now. A
+# read that does not wait takes everything there up to its size, and fails
+# once the pipe is empty; a few passes catch what PipeWire adds meanwhile.
+# It is not an exact boundary, since PipeWire keeps writing.
+for _ in 1 2 3 4 5 6 7 8; do
+  dd if="${mic}" iflag=nonblock of=/dev/null bs=1048576 count=1 status=none 2>/dev/null || break
+done
 exec /usr/bin/sox -t raw -r 16000 -e signed -b 16 -c 1 "${mic}" "$@"
