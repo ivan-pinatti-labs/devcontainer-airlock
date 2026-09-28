@@ -24,7 +24,8 @@ into layers by what each one is trusted with:
   of `gh` commands, an ssh-agent that holds the key, and an egress proxy
   per workspace that allows only the services a project names.
 
-Nothing runs on the host but podman.
+No agent, extension or project code runs on the host: only podman, the
+editor window, and for voice mode PipeWire.
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the picture: what runs
 inside what, how the pieces talk to each other, and how anything reaches
 the internet. [docs/LAYERS.md](docs/LAYERS.md) explains the layers, says

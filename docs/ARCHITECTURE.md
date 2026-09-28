@@ -41,11 +41,12 @@ worked on together ([LAYERS.md](LAYERS.md), "Using it").
 
 ## How they talk to each other
 
-Nothing listens on a network port for another piece. Everything local is a
-unix socket in a folder the host creates and mounts only where it belongs,
+The egress proxy is the one piece listening on a network port: 8888, on the
+workspace's internal network, for outbound traffic. Everything else local is
+a unix socket in a folder the host creates and mounts only where it belongs,
 and SELinux lets these containers connect only to a socket held by one in
-their own domain and category. Voice is the one exception, and it is not a
-socket: a named pipe the workbench can only read.
+their own domain and category. Voice is not a socket either: a named pipe
+the workbench can only read.
 
 | From | To | Over | Carries |
 | --- | --- | --- | --- |
