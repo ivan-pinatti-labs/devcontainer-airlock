@@ -10,7 +10,7 @@
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
-.PHONY: claude codex claude-shell codex-shell claude-remote unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
+.PHONY: claude codex claude-shell codex-shell claude-remote claude-voice unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 
@@ -23,19 +23,20 @@ workbench-help:
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
 		'  claude-remote               claude --remote-control there, to pair a device.' \
+		'  claude-voice                Claude Code with the microphone, for voice mode (this session only).' \
 		'  unlock                      Unlock the ssh key for git push, for 8 hours.' \
 		'  workbench-up                Start this repository workbenches, L2 engine and proxy.' \
 		'  workbench-down              Stop them; the shared helpers keep running.' \
 		'  workbench-status            What is running.' \
 		'  workbench-build             Build every image locally.' \
 		'  workbench-pull              Or pull the published images instead.'
-	@$(foreach a,$(WORKBENCH_ACCOUNTS),printf '  %-27s %s\n' 'claude-$(a), codex-$(a)' 'The same, logged in as $(a) (-shell, and claude-$(a)-remote).';)
+	@$(foreach a,$(WORKBENCH_ACCOUNTS),printf '  %-27s %s\n' 'claude-$(a), codex-$(a)' 'The same, logged in as $(a) (-shell, and claude-$(a)-remote, -voice).';)
 
 # One more set of targets per account in WORKBENCH_ACCOUNTS (claude-personal,
 # codex-personal and their shells), so Tab lists them too.
 WORKBENCH_ACCOUNTS := $(shell $(WORKBENCH) accounts 2>/dev/null)
 define workbench_account
-.PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote
+.PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-voice
 claude-$(1):
 	@$$(WORKBENCH) claude-$(1)
 codex-$(1):
@@ -46,6 +47,8 @@ codex-$(1)-shell:
 	@$$(WORKBENCH) shell codex-$(1)
 claude-$(1)-remote:
 	@$$(WORKBENCH) remote claude-$(1)
+claude-$(1)-voice:
+	@WORKBENCH_VOICE=1 $$(WORKBENCH) claude-$(1)
 endef
 $(foreach a,$(WORKBENCH_ACCOUNTS),$(eval $(call workbench_account,$(a))))
 
@@ -63,6 +66,11 @@ codex-shell:
 
 claude-remote:
 	@$(WORKBENCH) remote claude
+
+# Voice mode is off unless asked for; this asks, for this one session. The
+# microphone reaches it through a pipe that goes when the session ends.
+claude-voice:
+	@WORKBENCH_VOICE=1 $(WORKBENCH) claude
 
 # The ssh-agent has to be running to take the key, so start the helpers
 # first; they are left alone when they already run.

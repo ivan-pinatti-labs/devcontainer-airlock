@@ -135,6 +135,7 @@ credentials and agents in the workbench, project tooling in L2.
 | pre-commit | Ubuntu | distribution repository signature | L2; 4.5.1 on 26.04 |
 | shellcheck, golang-go, make | Ubuntu | distribution repository signature | L2 (make also in the workbench) |
 | bubblewrap, socat, ripgrep, openssh-client | Ubuntu | distribution repository signature | workbench |
+| sox | Ubuntu | distribution repository signature | Claude workbench (voice mode records with SoX) |
 | squid | Ubuntu | distribution repository signature | egress proxy |
 | github-cli | `cli.github.com/packages stable main` | repository signature | gh broker only; the workbench's `gh` is a shim that asks the broker |
 | nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | workbench (the agent CLIs run on it) and L2 (node hooks) |

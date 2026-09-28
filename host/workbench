@@ -101,6 +101,10 @@
                           history of the workspace path and the paths
                           under it; settings, hooks and logins stay apart
     WORKBENCH_TAG         the local image tag. Default: local
+    WORKBENCH_VOICE       1 to give a Claude session the host microphone,
+                          for voice mode (make claude-voice passes it).
+                          Default: off. Only that session gets it, and only
+                          while it runs; it needs pactl on the host
     WORKBENCH_TZ          the time zone of the workbenches, as podman --tz
                           takes it (America/Toronto, say). Default: local,
                           the host one; L2 stays on UTC
@@ -114,6 +118,8 @@
     ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket
     ${XDG_RUNTIME_DIR}/workbench/<name>       the L2 engine socket
     ${XDG_RUNTIME_DIR}/devcontainer-ssh       the ssh-agent socket, known_hosts
+    ${XDG_RUNTIME_DIR}/workbench/voice/<name> the microphone pipe of a voice
+                                              session, only while it runs
     podman volume l2-engine-<name>            L2 images, pre-commit caches
     podman volume egress-cache                providers last good lists
 
@@ -143,7 +149,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -240,6 +246,9 @@ DATA="${XDG_DATA_HOME:-${HOME}/.local/share}/workbench"
 RUN="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
 GH_DIR="${RUN}/workbench/gh"
 SSH_DIR="${RUN}/devcontainer-ssh"
+# Per Claude workbench, the folder a voice session's microphone pipe appears
+# in (docs/LAYERS.md, Voice).
+VOICE_ROOT="${RUN}/workbench/voice"
 # The key the ssh-agent holds, the podman secret holding the GitHub token, and
 # the GitHub owners the broker may act on.
 SSH_KEY="${WORKBENCH_SSH_KEY:-${HOME}/.ssh/devcontainer/id_ed25519}"
@@ -816,10 +825,30 @@ start_engine() {
   die "the L2 engine did not open its socket; podman logs ${name}"
 }
 
+# Whether WORKBENCH_VOICE asks for voice mode. Off unless set.
+voice_on() {
+  case "${WORKBENCH_VOICE:-}" in
+    1 | on | yes | true) return 0 ;;
+    '' | 0 | off | no | false) return 1 ;;
+    *) die "WORKBENCH_VOICE is '${WORKBENCH_VOICE}'; use 1 or 0" ;;
+  esac
+}
+
+# Every Claude workbench gets a folder of its own, read only, for the
+# microphone pipe of a voice session. It stays empty unless one runs.
+voice_opts() {
+  local dir
+  [ "$(agent_of "$2")" = claude ] || return 0
+  dir="${VOICE_ROOT}/$1"
+  mkdir -p "${dir}"
+  chmod 700 "${VOICE_ROOT}" "${dir}"
+  printf '%s\n' --label workbench.voice=ready -v "${dir}:/run/workbench-voice:ro,Z"
+}
+
 # The workbench of one agent. It mounts that agent's state folder and not the
 # other's.
 start_workbench() {
-  local ws="$1" agent="$2" name gitdir=() history=() hist
+  local ws="$1" agent="$2" name gitdir=() history=() hist voice=()
   name="$(wb_name "${ws}" "${agent}")"
   check_owner "${name}" workbench.workspace "${ws}"
   running "${name}" && return
@@ -830,6 +859,8 @@ start_workbench() {
   # start instead of vanishing with a process substitution.
   hist="$(history_mounts "${ws}" "${agent}")" || exit 1
   if [ -n "${hist}" ]; then mapfile -t history <<<"${hist}"; fi
+  hist="$(voice_opts "${name}" "${agent}")" || exit 1
+  if [ -n "${hist}" ]; then mapfile -t voice <<<"${hist}"; fi
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
@@ -845,6 +876,7 @@ start_workbench() {
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
+    "${voice[@]}" \
     -w "${ws}" \
     --entrypoint catatonit "$(wb_image "$(agent_of "${agent}")")" -- workbench-init >/dev/null
 }
@@ -949,7 +981,33 @@ cmd_shell() {
   fi
   cwd="${PWD}"
   case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
+  if [ "$(agent_of "${agent}")" = claude ] && voice_on; then
+    voice_session "${name}" -w "${cwd}" "${name}" "${@:-bash}"
+  fi
   exec podman exec -it -w "${cwd}" "${name}" "${@:-bash}"
+}
+
+# A session with the host microphone. PipeWire, on the host, writes it into
+# a named pipe in this workbench's voice folder (16 kHz mono, what Claude
+# Code records), and only this session is told where the pipe is; the rec in
+# the workbench reads it. Nothing in the workbench can talk to the host's
+# audio server: it only reads bytes. The pipe goes when the session ends.
+voice_session() {
+  local name="$1" id sink loop
+  shift
+  [ "$(podman inspect --format '{{index .Config.Labels "workbench.voice"}}' "${name}")" = ready ] \
+    || die "voice: ${name} was started before voice existed; stop it (host/workbench down, which ends every session in it) and start it again"
+  command -v pactl >/dev/null || die "voice: no pactl on the host (PipeWire's pulse tools, or PulseAudio's)"
+  id="airlock_voice_$$"
+  sink="$(pactl load-module module-pipe-sink sink_name="${id}" file="${VOICE_ROOT}/${name}/mic-$$" \
+    format=s16le rate=16000 channels=1)" || die "voice: PipeWire refused the microphone pipe"
+  if ! loop="$(pactl load-module module-loopback source=@DEFAULT_SOURCE@ sink="${id}" latency_msec=20)"; then
+    pactl unload-module "${sink}" || true
+    die "voice: PipeWire refused to route the microphone"
+  fi
+  trap 'pactl unload-module "${loop}" 2>/dev/null; pactl unload-module "${sink}" 2>/dev/null; rm -f "${VOICE_ROOT}/${name}/mic-$$"' EXIT
+  podman exec -it -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" "$@"
+  exit $?
 }
 
 # claude --remote-control, for the agent and account named (or the default

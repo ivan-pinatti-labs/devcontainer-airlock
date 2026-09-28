@@ -337,6 +337,45 @@ determined agent (`sh -c` inside a script, for instance); what actually
 protects the credentials is that the workbench does not hold the GitHub
 token or the ssh key, and that L2 holds nothing at all.
 
+## Voice
+
+Claude Code's voice mode records the microphone with SoX (`rec`). The
+workbench has no audio device and no way to the host's audio server, so
+the microphone reaches it as a stream of bytes, for one session at a time:
+
+- `make claude-voice` (`WORKBENCH_VOICE=1 host/workbench claude`, or
+  `make claude-<account>-voice`) asks PipeWire on the host, through
+  `pactl`, to write the microphone into a named pipe (16 kHz, 16 bit, mono)
+  in that workbench's voice folder, and starts Claude Code with
+  `WORKBENCH_VOICE_MIC` naming it.
+- The `rec` in the Claude workbench image reads that pipe instead of a
+  device. It first drops what the pipe holds, which is most of what was
+  buffered before it started; PipeWire keeps writing meanwhile, so a few
+  milliseconds from just before can remain. In any other session it fails,
+  so Claude Code says there is no microphone.
+- When the session ends, the pipe and PipeWire's two modules go with it.
+  Nothing listens on the microphone between voice sessions.
+
+Every Claude workbench mounts its own voice folder
+(`$XDG_RUNTIME_DIR/workbench/voice/<name>`) read only, and it stays empty
+unless a voice session runs. A workbench started before this existed has no
+such folder; `make claude-voice` says so, and it needs a restart
+(`host/workbench down`, which ends every session in it).
+
+Why a pipe and not the audio server's socket: the socket was tried first
+and measured 2026-09-28. Any client of it can load modules into the host's
+PipeWire, which can then open connections to the internet around the egress
+proxy, listen on the host, or create files there. It also needed a host
+SELinux module letting the workbench domain connect to desktop processes.
+Reading a pipe needs no policy change and gives the workbench audio and
+nothing else.
+
+What it does allow: while a voice session runs, anything in that
+workbench able to read the pipe hears the microphone, and the audio goes to
+Anthropic's speech service like the rest of the agent's traffic, through
+the egress proxy. Voice mode is not available in a remote control session;
+Claude Code turns it off there.
+
 ## GitHub access
 
 The everyday flow runs entirely from the workbench, for you and for the
