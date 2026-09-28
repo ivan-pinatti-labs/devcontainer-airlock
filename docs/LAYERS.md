@@ -349,8 +349,10 @@ the microphone reaches it as a stream of bytes, for one session at a time:
   in that workbench's voice folder, and starts Claude Code with
   `WORKBENCH_VOICE_MIC` naming it.
 - The `rec` in the Claude workbench image reads that pipe instead of a
-  device, dropping what was buffered before it started. In any other
-  session it fails, so Claude Code says there is no microphone.
+  device. It first drops what the pipe holds, which is most of what was
+  buffered before it started; PipeWire keeps writing meanwhile, so a few
+  milliseconds from just before can remain. In any other session it fails,
+  so Claude Code says there is no microphone.
 - When the session ends, the pipe and PipeWire's two modules go with it.
   Nothing listens on the microphone between voice sessions.
 
