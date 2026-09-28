@@ -101,6 +101,9 @@
                           history of the workspace path and the paths
                           under it; settings, hooks and logins stay apart
     WORKBENCH_TAG         the local image tag. Default: local
+    WORKBENCH_TZ          the time zone of the workbenches, as podman --tz
+                          takes it (America/Toronto, say). Default: local,
+                          the host one; L2 stays on UTC
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
                           Default: ghcr.io/ivan-pinatti-labs
@@ -140,7 +143,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -301,6 +304,12 @@ group_repos() {
   done
 }
 
+# Where a group workspace keeps its state: named for the folder, and for its
+# full path, so two groups whose folders share a name never share state.
+group_state() {
+  echo "${DATA}/groups/$(slug "$1")-$(printf '%s' "$1" | sha256sum | cut -c1-12)"
+}
+
 # What a workspace mounts (and the git settings that go with it), as podman
 # arguments, each path at its own path. A
 # single checkout is mounted whole, with its git directory when that lives
@@ -315,6 +324,15 @@ ws_mounts() {
     git_dir_mount "${ws}"
     return 0
   fi
+  # The folder itself is backed by a directory kept with the workbench's
+  # state, with the clones mounted on top of it: it has to be writable, since
+  # Claude Code's command sandbox creates a placeholder there for every file
+  # it guards (.gitconfig, .npmrc, .bashrc and more) before binding over it,
+  # and the real folder cannot be mounted without relabelling everything in
+  # it. What is created at the root lives there, not in the folder.
+  f="$(group_state "${ws}")/root"
+  mkdir -p "${f}"
+  printf '%s\n' -v "${f}:${ws}:Z"
   while read -r r; do
     if is_worktree_only "${r}"; then
       mkdir -p "${r}/.claude/worktrees"
@@ -342,7 +360,7 @@ ws_mounts() {
   if [ -e "${ws}/.mcp.json" ]; then
     printf '%s\n' -v "${ws}/.mcp.json:${ws}/.mcp.json:ro,Z"
   else
-    f="${DATA}/groups/$(slug "${ws}")/.mcp.json"
+    f="$(group_state "${ws}")/.mcp.json"
     mkdir -p "$(dirname "${f}")"
     [ -f "${f}" ] || printf '{"mcpServers":{}}\n' > "${f}"
     printf '%s\n' -v "${f}:${ws}/.mcp.json:ro,Z"
@@ -815,6 +833,7 @@ start_workbench() {
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
+    --tz="${WORKBENCH_TZ:-local}" \
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
     --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
     -e GIT_AUTHOR_NAME="$(git config --get user.name || true)" -e GIT_AUTHOR_EMAIL="$(git config --get user.email || true)" \
