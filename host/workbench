@@ -101,6 +101,9 @@
                           history of the workspace path and the paths
                           under it; settings, hooks and logins stay apart
     WORKBENCH_TAG         the local image tag. Default: local
+    WORKBENCH_TZ          the time zone of the workbenches, as podman --tz
+                          takes it (America/Toronto, say). Default: local,
+                          the host one; L2 stays on UTC
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
                           Default: ghcr.io/ivan-pinatti-labs
@@ -140,7 +143,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -830,6 +833,7 @@ start_workbench() {
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
+    --tz="${WORKBENCH_TZ:-local}" \
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
     --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
     -e GIT_AUTHOR_NAME="$(git config --get user.name || true)" -e GIT_AUTHOR_EMAIL="$(git config --get user.email || true)" \
