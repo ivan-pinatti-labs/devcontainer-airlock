@@ -20,13 +20,7 @@
   "sandbox": {
     "enabled": true,
     "enableWeakerNestedSandbox": true,
-    "excludedCommands": ["l2 *", "git *", "podman *"],
-    "network": {
-      "allowUnixSockets": [
-        "/run/gh-broker/gh.sock",
-        "/run/devcontainer-ssh/agent.sock"
-      ]
-    }
+    "excludedCommands": ["l2 *", "git *", "podman *", "gh *", "ssh-add -l"]
   },
   "env": {
     "DISABLE_AUTOUPDATER": "1"
