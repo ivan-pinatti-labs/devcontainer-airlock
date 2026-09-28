@@ -317,7 +317,16 @@ files they cannot edit (root owned, read only):
   `pre-commit ...` into `l2-pre-commit ...`, so it runs in L2 without a
   prompt. `allowManagedHooksOnly` stops project or user settings removing
   it. Claude Code's own sandbox is on, in its nested mode, as an extra layer
-  inside the workbench.
+  inside the workbench. It blocks every unix socket on Linux (its per path
+  socket list is macOS only) and sends traffic through a proxy of its own,
+  so the commands that need the broker, the ssh-agent or the engine are in
+  its `excludedCommands`: `l2`, `git`, `podman`, `gh` and `ssh-add -l`.
+  A call leaves the sandbox only when every part of it matches an
+  exclusion: `cd ... && git push` and `gh ... | head` stay inside, since
+  `cd` and `head` are not excluded. `git -C` and `git -c` do not match
+  `git *` at all (measured with Claude Code 2.1.283). Whatever stays inside
+  cannot reach the sockets and fails. Excluded commands still go through
+  the permission prompts.
 - `/etc/codex/requirements.toml`: Codex keeps its own sandbox (measured
   working inside the workbench: read only, no network) and asks before
   acting, and the same hook refuses project code with the `l2` command line
