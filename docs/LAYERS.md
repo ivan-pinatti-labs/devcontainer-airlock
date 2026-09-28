@@ -328,6 +328,49 @@ determined agent (`sh -c` inside a script, for instance); what actually
 protects the credentials is that the workbench does not hold the GitHub
 token or the ssh key, and that L2 holds nothing at all.
 
+## Voice
+
+Claude Code's voice mode records the microphone with SoX (`rec`), which the
+Claude workbench image carries with its PulseAudio backend. It is off by
+default: a workbench started without it has no way to the microphone at all.
+`make claude-voice` (or `WORKBENCH_VOICE=1`) starts the Claude workbench with
+it, and a workbench keeps what it started with until it is stopped, since a
+mount cannot be added to a running container. Asking for voice from one
+running without it stops with a message rather than quietly starting a
+session with no microphone.
+
+With voice on, the workbench mounts `~/.local/share/workbench/voice`, which
+holds a second socket of the host's PulseAudio server (PipeWire's
+pipewire-pulse), and points SoX at it (`PULSE_SERVER`, `AUDIODRIVER`). The
+audio goes to Anthropic's speech service like the rest of the agent's
+traffic, through the egress proxy.
+
+Host setup, once:
+
+1. `host/workbench voice-setup` creates that folder, labels it for the
+   workbench category, and writes a PipeWire drop-in
+   (`~/.config/pipewire/pipewire-pulse.conf.d/workbench-voice.conf`) giving
+   pipewire-pulse the second socket there. Then
+   `systemctl --user restart pipewire-pulse`.
+2. Someone with root installs
+   [host/selinux/devcontainer_voice.te](../host/selinux/devcontainer_voice.te).
+   pipewire-pulse runs as `unconfined_t`, and the stock policy refuses a
+   connection from `container_engine_t` to it, even through a relay socket in
+   a labelled folder (measured 2026-09-28). The module allows that one
+   permission and nothing else; the socket file still has to be one the
+   workbench can reach, which only the labelled folder is.
+
+   ```shell
+   checkmodule -M -m -o devcontainer_voice.mod host/selinux/devcontainer_voice.te
+   semodule_package -o devcontainer_voice.pp -m devcontainer_voice.mod
+   sudo semodule -i devcontainer_voice.pp
+   ```
+
+`sudo semodule -r devcontainer_voice` and removing the drop-in undo it.
+A workbench with voice can record whenever something in it runs `rec`, and
+play sound too, so turn it on for the sessions that need it. Voice mode is
+not available in a remote control session: Claude Code turns it off there.
+
 ## GitHub access
 
 The everyday flow runs entirely from the workbench, for you and for the

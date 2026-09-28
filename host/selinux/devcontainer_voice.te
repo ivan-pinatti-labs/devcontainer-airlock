@@ -1,0 +1,27 @@
+module devcontainer_voice 1.0;
+
+# Host SELinux policy for Claude Code's voice mode in a workbench. See
+# docs/LAYERS.md, "Voice", for when it is needed and how to install it.
+#
+# Voice mode records the microphone through the host's PulseAudio server
+# (PipeWire's pipewire-pulse), which runs in the desktop session as
+# unconfined_t. `host/workbench voice-setup` gives that server a second
+# socket, in a folder labelled container_file_t for the workbench category
+# and mounted only into a Claude workbench started with voice on. The file
+# checks already allow the workbench to open that socket; what the stock
+# policy refuses is the connection itself (EACCES on connect(), measured
+# 2026-09-28, through a relay socket in the labelled folder too).
+#
+# This allows exactly that: container_engine_t, which only the workbench and
+# its helpers run in, may connect to a unix stream socket held by an
+# unconfined_t process. It still has to reach the socket's file, and every
+# host socket outside a folder labelled for it stays out of reach.
+# container_t, which ordinary containers run in, is unaffected.
+
+require {
+  type container_engine_t;
+  type unconfined_t;
+  class unix_stream_socket connectto;
+}
+
+allow container_engine_t unconfined_t:unix_stream_socket connectto;

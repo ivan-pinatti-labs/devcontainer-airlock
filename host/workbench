@@ -25,6 +25,9 @@
                                     this run only, as pairing needs
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
+    host/workbench voice-setup      prepare the host for Claude Code voice
+                                    mode (WORKBENCH_VOICE below); changes
+                                    your ~/.config/pipewire, run it yourself
     host/workbench load-l2 [WORKSPACE]
                                     copy the local L2 images into the L2 engine
                                     now (up does it when they differ)
@@ -101,6 +104,11 @@
                           history of the workspace path and the paths
                           under it; settings, hooks and logins stay apart
     WORKBENCH_TAG         the local image tag. Default: local
+    WORKBENCH_VOICE       1 to start a Claude workbench with voice mode:
+                          the host microphone, through a PulseAudio socket
+                          that voice-setup prepares. Default: off. A
+                          workbench keeps what it started with until it is
+                          stopped (make claude-voice passes it)
     WORKBENCH_TZ          the time zone of the workbenches, as podman --tz
                           takes it (America/Toronto, say). Default: local,
                           the host one; L2 stays on UTC
@@ -111,6 +119,7 @@
   State kept on the host:
     ${XDG_DATA_HOME}/workbench/claude, codex  the agents logins and settings,
         separate from your own ~/.claude and ~/.codex
+    ${XDG_DATA_HOME}/workbench/voice          the PulseAudio socket for voice
     ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket
     ${XDG_RUNTIME_DIR}/workbench/<name>       the L2 engine socket
     ${XDG_RUNTIME_DIR}/devcontainer-ssh       the ssh-agent socket, known_hosts
@@ -143,7 +152,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -240,6 +249,11 @@ DATA="${XDG_DATA_HOME:-${HOME}/.local/share}/workbench"
 RUN="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
 GH_DIR="${RUN}/workbench/gh"
 SSH_DIR="${RUN}/devcontainer-ssh"
+# The folder holding the second PulseAudio socket voice-setup asks PipeWire
+# for, labelled for the workbench category. It lives in XDG_DATA_HOME, not
+# the runtime folder, because PipeWire opens the socket at login, before
+# anything here has run.
+VOICE_DIR="${DATA}/voice"
 # The key the ssh-agent holds, the podman secret holding the GitHub token, and
 # the GitHub owners the broker may act on.
 SSH_KEY="${WORKBENCH_SSH_KEY:-${HOME}/.ssh/devcontainer/id_ed25519}"
@@ -816,10 +830,44 @@ start_engine() {
   die "the L2 engine did not open its socket; podman logs ${name}"
 }
 
+# Whether WORKBENCH_VOICE asks for voice mode. Off unless set.
+voice_on() {
+  case "${WORKBENCH_VOICE:-}" in
+    1 | on | yes | true) return 0 ;;
+    '' | 0 | off | no | false) return 1 ;;
+    *) die "WORKBENCH_VOICE is '${WORKBENCH_VOICE}'; use 1 or 0" ;;
+  esac
+}
+
+# The voice mounts for a Claude workbench when WORKBENCH_VOICE is on: the
+# folder with the PulseAudio socket, and the variables pointing SoX at it.
+# Nothing otherwise, so a workbench started without voice has no way to the
+# microphone.
+voice_opts() {
+  [ "$(agent_of "$1")" = claude ] || return 0
+  voice_on || return 0
+  [ -S "${VOICE_DIR}/native" ] \
+    || die "voice: no PulseAudio socket at ${VOICE_DIR}/native; run host/workbench voice-setup first (docs/LAYERS.md, Voice)"
+  printf '%s\n' --label workbench.voice=on -v "${VOICE_DIR}:/run/workbench-voice" \
+    -e PULSE_SERVER=unix:/run/workbench-voice/native -e AUDIODRIVER=pulseaudio
+}
+
+# A running Claude workbench keeps the voice setting it started with, since a
+# mount cannot be added later. Asking for voice from one started without it
+# stops here, rather than silently giving a workbench with no microphone.
+check_voice() {
+  local name="$1" agent="$2"
+  [ "$(agent_of "${agent}")" = claude ] || return 0
+  voice_on || return 0
+  running "${name}" || return 0
+  [ "$(podman inspect --format '{{index .Config.Labels "workbench.voice"}}' "${name}")" = on ] && return 0
+  die "voice: ${name} is running without voice; stop it (host/workbench down, which ends every session in it) and start it again with voice"
+}
+
 # The workbench of one agent. It mounts that agent's state folder and not the
 # other's.
 start_workbench() {
-  local ws="$1" agent="$2" name gitdir=() history=() hist
+  local ws="$1" agent="$2" name gitdir=() history=() hist voice=()
   name="$(wb_name "${ws}" "${agent}")"
   check_owner "${name}" workbench.workspace "${ws}"
   running "${name}" && return
@@ -830,6 +878,8 @@ start_workbench() {
   # start instead of vanishing with a process substitution.
   hist="$(history_mounts "${ws}" "${agent}")" || exit 1
   if [ -n "${hist}" ]; then mapfile -t history <<<"${hist}"; fi
+  hist="$(voice_opts "${agent}")" || exit 1
+  if [ -n "${hist}" ]; then mapfile -t voice <<<"${hist}"; fi
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
@@ -845,6 +895,7 @@ start_workbench() {
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
+    "${voice[@]}" \
     -w "${ws}" \
     --entrypoint catatonit "$(wb_image "$(agent_of "${agent}")")" -- workbench-init >/dev/null
 }
@@ -941,6 +992,7 @@ cmd_shell() {
   ws="$(workspace "${2:-}")"
   shift 2 2>/dev/null || shift $#
   name="$(wb_name "${ws}" "${agent}")"
+  check_voice "${name}" "${agent}"
   # An agent asked for by name starts even when WORKBENCH_AGENTS leaves it
   # out of `up`.
   if ! running "${name}"; then
@@ -963,6 +1015,7 @@ cmd_remote() {
   [ "${bin}" = claude ] || die "${bin} has no remote control mode (Codex's own experimental 'codex remote-control' runs a daemon; use host/workbench shell ${agent} and run it by hand)"
   ws="$(workspace "${2:-}")"
   name="$(wb_name "${ws}" "${agent}")"
+  check_voice "${name}" "${agent}"
   if ! running "${name}"; then
     cmd_up "${ws}" >/dev/null
     running "${name}" || start_workbench "${ws}" "${agent}"
@@ -970,6 +1023,40 @@ cmd_remote() {
   cwd="${PWD}"
   case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
   exec podman exec -it -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
+}
+
+# Host setup for voice mode, once: the folder for the socket, labelled for
+# the workbench category the way a Z mount labels it, and a PipeWire drop-in
+# giving pipewire-pulse a second socket there. PipeWire reads it when it
+# restarts, and the SELinux module in host/selinux/ lets the workbench
+# connect; both are left to you, as they touch your desktop session and need
+# root.
+cmd_voice_setup() {
+  local conf="${XDG_CONFIG_HOME:-${HOME}/.config}/pipewire/pipewire-pulse.conf.d/workbench-voice.conf"
+  mkdir -p "${VOICE_DIR}"
+  chmod 700 "${VOICE_DIR}"
+  podman run --rm --network=none "${LABEL_OPTS[@]}" -v "${VOICE_DIR}:/voice:Z" \
+    --entrypoint true "${BASE}"
+  mkdir -p "$(dirname "${conf}")"
+  cat > "${conf}" <<CONF
+# Written by ${HERE}/host/workbench voice-setup: a second PulseAudio socket,
+# in a folder labelled for the workbench containers, for Claude Code's voice
+# mode there. The first one (native) is kept as it was. Remove this file and
+# restart pipewire-pulse to undo it.
+pulse.properties = {
+    server.address = [
+        "unix:native"
+        "unix:${VOICE_DIR}/native"
+    ]
+}
+CONF
+  echo "workbench: wrote ${conf}"
+  echo "workbench: next, once: systemctl --user restart pipewire-pulse (a short gap in any audio playing)"
+  echo "workbench: and, with root, the SELinux module (docs/LAYERS.md, Voice):"
+  echo "  checkmodule -M -m -o devcontainer_voice.mod ${HERE}/host/selinux/devcontainer_voice.te"
+  echo "  semodule_package -o devcontainer_voice.pp -m devcontainer_voice.mod"
+  echo "  sudo semodule -i devcontainer_voice.pp"
+  echo "workbench: then make claude-voice (or WORKBENCH_VOICE=1 host/workbench claude)"
 }
 
 cmd_load_l2() {
@@ -1033,6 +1120,7 @@ case "${1:-}" in
   helpers-down) cmd_helpers_down ;;
   restart-broker) cmd_restart_broker ;;
   install-units) cmd_install_units ;;
+  voice-setup) cmd_voice_setup ;;
   -h | --help | help) sed -n '3,/^    2  usage error$/p' "$0" ;;
   *) sed -n '3,/run it yourself)$/p' "$0" >&2; exit 2 ;;
 esac
