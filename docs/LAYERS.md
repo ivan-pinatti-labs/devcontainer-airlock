@@ -2,6 +2,8 @@
 
 How the images in this repository fit together, what each one is allowed to
 see, and how to use them day to day.
+[ARCHITECTURE.md](ARCHITECTURE.md) has the same in one picture, with tables
+of who talks to whom and how anything reaches the internet.
 
 <!-- cspell:words tinyproxy userns initializeCommand codeload -->
 
