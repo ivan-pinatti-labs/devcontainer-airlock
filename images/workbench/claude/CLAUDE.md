@@ -16,6 +16,16 @@ devcontainer-airlock has the full picture):
   commands; interactive prompts are not available, so pass the flags a
   prompt would ask for. A refusal names the allowlist.
 - `git push` works over ssh through an agent that holds the key.
+- `git`, `gh` and `ssh-add -l` reach the broker, the agent and GitHub only
+  outside Claude Code's command sandbox, which they leave only when the call
+  is that one plain command. `cd` into the repository in a call of its own,
+  then run `git push` or `gh pr checks 12` alone: no `cd ... &&`, no pipe,
+  no `git -C` or `git -c`. Those shapes stay inside the sandbox, where the
+  sockets are blocked and `git` goes to `github.com:22` through the
+  sandbox's own proxy and fails with "Bad Gateway".
+- A `Permission denied (publickey)` from `git` means the agent holds no key
+  (`ssh-add -l` says "no identities"): ask the user to run `make unlock` on
+  the host.
 - The pull request flow is yours to run: push the branch, open it with
   `gh pr create --draft`, follow `gh pr checks`, and `gh pr ready` once they
   are green (that starts the CodeRabbit review). Answer the review, then
