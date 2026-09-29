@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""The package mirror's gate: the only part of the mirror clients talk to.
+
+Clients are configured with its fixed paths (/npm/, /pypi/simple/, /go/,
+/apt/ubuntu/, /apk/alpine/, /yum/fedora/) and registry ports (5000 for
+docker.io, 5001 for ghcr.io). Which backend answers behind them is a routes
+file (MIRROR_BACKEND, default nexus), so a different backend changes no
+client. On the way through, versions OSV lists as malicious are taken out of
+npm, PyPI and Go answers and refused for download; with MIN_AGE_DAYS, npm
+and Go versions younger than that are too. Only OpenSSF MAL- entries block;
+vulnerabilities never do.
+
+Read only: it forwards GET and HEAD (and the registry token POST) and
+refuses every other method.
+
+It also serves /go/sumdb/<name>/ from the checksum database through the
+egress proxy, so GOSUMDB stays on with nothing else reachable, and accepts
+plain http requests addressed to the hosts its routes file forwards (apt
+with the gate as its http proxy). /_status says what is armed.
+
+Environment:
+  MIRROR_BACKEND        routes file name in /etc/mirror-gate/routes (nexus)
+  MIRROR_PORT           main port (8081)
+  MIN_AGE_DAYS          hide versions younger than this (0: off)
+  OSV_REFRESH_SECONDS   how often the OSV feeds sync (21600)
+  HTTPS_PROXY           the egress proxy, for OSV and the checksum database
+"""
+# cspell:words sumdb
+import datetime
+import http.client
+import http.server
+import json
+import os
+import pathlib
+import sys
+import threading
+import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
+
+sys.path.insert(0, "/usr/local/lib/mirror-gate")
+import filters  # noqa: E402
+import osvdb  # noqa: E402
+
+ROUTES_DIR = pathlib.Path(os.environ.get("MIRROR_ROUTES_DIR", "/etc/mirror-gate/routes"))
+CONF = tomllib.loads((ROUTES_DIR / f"{os.environ.get('MIRROR_BACKEND', 'nexus')}.toml").read_text())
+BACKEND = urllib.parse.urlsplit(CONF["backend"])
+MIN_AGE = float(os.environ.get("MIN_AGE_DAYS", "0") or 0)
+HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+        "trailer", "transfer-encoding", "upgrade", "content-length", "content-encoding"}
+SUMDB = {"sum.golang.org"}
+
+
+def log(*a):
+    print(*a, flush=True)
+
+
+class Gate(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    registry = None  # set per registry port
+
+    def log_message(self, fmt, *args):
+        pass
+
+    # -- plumbing ---------------------------------------------------------
+
+    def client_base(self):
+        return f"http://{self.headers.get('Host', 'localhost')}"
+
+    def reply(self, status, body=b"", ctype="text/plain; charset=utf-8", headers=()):
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in headers:
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def refuse(self, what, why):
+        log(f"REFUSE {self.path} {what}: {why}")
+        self.reply(403, f"mirror-gate: {what} refused: {why}\n".encode())
+
+    def backend(self, path, method=None, headers=None, body=None):
+        conn = http.client.HTTPConnection(BACKEND.hostname, BACKEND.port or 80, timeout=300)
+        h = {k: v for k, v in self.headers.items() if k.lower() not in HOP | {"host", "accept-encoding"}}
+        h.update(headers or {})
+        conn.request(method or self.command, path, body=body, headers=h)
+        return conn, conn.getresponse()
+
+    def rewrite(self, text, route_prefix, target):
+        """Backend addresses in an answer, as the client reaches them."""
+        mine = self.client_base() + route_prefix
+        for theirs in (CONF["backend"].rstrip("/") + target,):
+            text = text.replace(theirs, mine)
+        return text
+
+    def relay(self, resp, route_prefix, target, body=None):
+        """Send the backend's answer, streamed unless `body` replaces it."""
+        self.send_response(resp.status)
+        for k, v in resp.getheaders():
+            if k.lower() in HOP:
+                continue
+            if k.lower() in ("location", "www-authenticate"):
+                v = self.rewrite(v, route_prefix, target)
+                v = v.replace(CONF["backend"].rstrip("/"), self.client_base())
+            self.send_header(k, v)
+        if body is not None:
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return
+        length = resp.getheader("Content-Length")
+        if length is not None:
+            self.send_header("Content-Length", length)
+            self.end_headers()
+            while self.command != "HEAD" and (chunk := resp.read(1 << 16)):
+                self.wfile.write(chunk)
+        else:
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            while chunk := resp.read(1 << 16):
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+            self.wfile.write(b"0\r\n\r\n")
+
+    # -- requests ---------------------------------------------------------
+
+    def do_HEAD(self):
+        self.do_GET()
+
+    def do_POST(self):
+        # Registry token requests only; nothing is ever published.
+        if self.registry and "/token" in self.path:
+            return self.do_GET()
+        self.reply(405, b"mirror-gate: read only\n")
+
+    def do_PUT(self):
+        self.reply(405, b"mirror-gate: read only\n")
+
+    do_DELETE = do_PATCH = do_PUT
+
+    def do_GET(self):
+        try:
+            self.route()
+        except (http.client.HTTPException, OSError) as e:
+            log(f"ERROR {self.path}: {e}")
+            try:
+                self.reply(502, f"mirror-gate: backend error: {e}\n".encode())
+            except OSError:
+                pass
+
+    def route(self):
+        path = self.path
+        if self.registry:
+            return self.registry_request(path)
+        if path.startswith("http://"):
+            for f in CONF.get("forward", []):
+                if path.startswith(f["url"]):
+                    path = f["to"] + path[len(f["url"]):]
+                    break
+            else:
+                return self.reply(403, b"mirror-gate: not a host this mirror serves\n")
+        if path == "/_status":
+            return self.status()
+        if path.startswith("/go/sumdb/"):
+            return self.sumdb(path[len("/go/sumdb/"):])
+        for r in CONF["route"]:
+            if path.startswith(r["prefix"]):
+                return self.proxied(r, path[len(r["prefix"]):])
+        self.reply(404, b"mirror-gate: no such path\n")
+
+    def status(self):
+        feeds = {e: {"synced": f.synced, "entries": len(f.entries)} for e, f in osvdb.FEEDS.items()}
+        self.reply(200, json.dumps({"backend": os.environ.get("MIRROR_BACKEND", "nexus"),
+                                    "min_age_days": MIN_AGE, "osv": feeds}, indent=1).encode() + b"\n",
+                    "application/json")
+
+    def sumdb(self, rest):
+        name, _, tail = rest.partition("/")
+        if name not in SUMDB:
+            return self.reply(404, b"mirror-gate: unknown checksum database\n")
+        if tail == "supported":
+            return self.reply(200, b"")
+        try:
+            with urllib.request.urlopen(f"https://{name}/{tail}", timeout=60) as r:  # noqa: S310
+                return self.reply(r.status, r.read(), r.headers.get("Content-Type", "text/plain"))
+        except urllib.error.HTTPError as e:
+            return self.reply(e.code, e.read())
+
+    def registry_request(self, path):
+        r = self.registry
+        if not path.startswith("/v2"):
+            return self.reply(404, b"mirror-gate: registry API only\n")
+        target = r["target"]
+        conn, resp = self.backend(target.rstrip("/") + path)
+        try:
+            self.relay(resp, "", target.rstrip("/"))
+        finally:
+            conn.close()
+
+    def proxied(self, route, rest):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        eco = route.get("filter")
+        feed = osvdb.FEEDS.get(eco) if eco else None
+        target = route["target"]
+        prefix = route["prefix"]
+        want_body = None  # a filter that needs the whole answer
+
+        if eco == "npm":
+            tb = filters.npm_tarball(rest.split("?")[0])
+            if tb:
+                name, version = tb
+                if feed.blocked(name, version):
+                    return self.refuse(f"{name}@{version}", "listed as malicious in OSV")
+                if MIN_AGE:
+                    meta = self.fetch_json(target + urllib.parse.quote(name, safe="@"))
+                    if filters.too_young((meta or {}).get("time", {}).get(version), MIN_AGE, now):
+                        return self.refuse(f"{name}@{version}", f"published less than {MIN_AGE:g} days ago")
+            elif filters.npm_package(rest.split("?")[0]):
+                want_body = "npm"
+        elif eco == "PyPI":
+            if rest.startswith("simple/"):
+                want_body = "pypi"
+            else:
+                nv = filters.pypi_file(rest.rsplit("/", 1)[-1].split("#")[0])
+                if nv and feed.blocked(*nv):
+                    return self.refuse(f"{nv[0]}=={nv[1]}", "listed as malicious in OSV")
+        elif eco == "Go":
+            g = filters.go_request(rest.split("?")[0])
+            if g:
+                module, kind, version = g
+                if version and feed.blocked(module, version):
+                    return self.refuse(f"{module}@{version}", "listed as malicious in OSV")
+                if kind == "list":
+                    want_body = "go"
+                elif kind == "latest" or (MIN_AGE and version):
+                    want_body = "go-info"
+
+        headers = {"Accept": "application/json"} if want_body == "npm" else None
+        conn, resp = self.backend(target + rest, headers=headers)
+        try:
+            if want_body is None or resp.status != 200:
+                return self.relay(resp, prefix, target)
+            body = resp.read()
+            removed = []
+            if want_body == "npm":
+                body, removed = filters.npm_packument(body, feed, MIN_AGE, now)
+                body = self.rewrite(body.decode(), prefix, target).encode()
+            elif want_body == "pypi":
+                body, removed = filters.pypi_simple(body, feed)
+            elif want_body == "go":
+                body, removed = filters.go_list(body, module, feed)
+            elif want_body == "go-info" and kind in ("info", "latest"):
+                info = json.loads(body)
+                v = info.get("Version", version)
+                if feed.blocked(module, v):
+                    return self.refuse(f"{module}@{v}", "listed as malicious in OSV")
+                if filters.too_young(info.get("Time"), MIN_AGE, now):
+                    return self.refuse(f"{module}@{v}", f"published less than {MIN_AGE:g} days ago")
+            if removed:
+                log(f"FILTER {self.path}: left out {', '.join(removed[:10])}{' ...' if len(removed) > 10 else ''}")
+            return self.relay(resp, prefix, target, body=body)
+        finally:
+            conn.close()
+
+    def fetch_json(self, path):
+        conn, resp = self.backend(path, "GET", {"Accept": "application/json"})
+        try:
+            return json.loads(resp.read()) if resp.status == 200 else None
+        except ValueError:
+            return None
+        finally:
+            conn.close()
+
+
+def serve(port, registry=None):
+    handler = type("GateHandler", (Gate,), {"registry": registry})
+    srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), handler)  # noqa: S104
+    srv.daemon_threads = True
+    log(f"mirror-gate: listening on {port}" + (f" for {registry['upstream']}" if registry else ""))
+    srv.serve_forever()
+
+
+def main():
+    threading.Thread(target=osvdb.refresh_forever,
+                      args=(int(os.environ.get("OSV_REFRESH_SECONDS", "21600")),), daemon=True).start()
+    for r in CONF.get("registry", []):
+        threading.Thread(target=serve, args=(r["port"], r), daemon=True).start()
+    serve(int(os.environ.get("MIRROR_PORT", "8081")))
+
+
+if __name__ == "__main__":
+    main()

@@ -43,7 +43,7 @@ set -o pipefail
 
 # workbench-<agent> is a target of images/workbench/Dockerfile; the two share
 # every layer below their agent stage, so the second build reuses the first.
-IMAGES=(workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy)
+IMAGES=(workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate)
 PREFIX=airlock
 
 # Pinned by digest; Renovate keeps them current.

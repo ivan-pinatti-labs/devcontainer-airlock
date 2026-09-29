@@ -1,0 +1,60 @@
+# How the gate's fixed paths map onto the Nexus Repository backend. The paths
+# on the left are what clients are configured with and never change; a
+# different backend (Pulp, say) is another file like this one, selected with
+# MIRROR_BACKEND, plus its own provisioning under backends/.
+
+backend = "http://mirror-nexus:8081"
+
+# Paths on the gate's main port. `filter` names the ecosystem whose
+# malicious versions are taken out (npm, PyPI, Go); none for the others.
+[[route]]
+prefix = "/npm/"
+target = "/repository/npm/"
+filter = "npm"
+
+[[route]]
+prefix = "/pypi/"
+target = "/repository/pypi/"
+filter = "PyPI"
+
+[[route]]
+prefix = "/go/"
+target = "/repository/go/"
+filter = "Go"
+
+[[route]]
+prefix = "/apt/ubuntu/"
+target = "/repository/apt-ubuntu/"
+
+[[route]]
+prefix = "/apt/ubuntu-security/"
+target = "/repository/apt-ubuntu-security/"
+
+[[route]]
+prefix = "/yum/fedora/"
+target = "/repository/yum-fedora/"
+
+[[route]]
+prefix = "/apk/alpine/"
+target = "/repository/apk-alpine/"
+
+# Registry mirrors, one port each: the registry API (/v2/...) under target.
+[[registry]]
+port = 5000
+upstream = "docker.io"
+target = "/repository/docker-hub/"
+
+[[registry]]
+port = 5001
+upstream = "ghcr.io"
+target = "/repository/ghcr/"
+
+# Plain http requests addressed to these hosts (apt configured with the gate
+# as its http proxy) are served from these routes instead.
+[[forward]]
+url = "http://archive.ubuntu.com/ubuntu/"
+to = "/apt/ubuntu/"
+
+[[forward]]
+url = "http://security.ubuntu.com/ubuntu/"
+to = "/apt/ubuntu-security/"

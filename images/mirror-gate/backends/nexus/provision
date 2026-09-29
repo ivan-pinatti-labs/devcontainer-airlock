@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Provision the Nexus Repository backend of the package mirror.
+
+Read through only: every repository it keeps is a proxy of a public
+registry, the anonymous account can read and nothing else, and the admin
+password is replaced by a random one kept in a file only this program
+reads. Every repository it did not create is deleted, the hosted ones
+Nexus ships with included, so there is nowhere to publish to.
+
+Run it (again) whenever the backend starts; each step checks before it
+changes anything.
+
+Usage:
+  provision REPOSITORIES_JSON
+
+Environment:
+  NEXUS_URL            the backend, e.g. http://mirror-nexus:8081
+  NEXUS_INITIAL_PASSWORD_FILE
+                      admin.password as Nexus writes it on first start
+  NEXUS_PASSWORD_FILE  where the admin password this sets is kept
+  UPSTREAM_PROXY       host:port of the egress proxy, Nexus's only way out
+
+Exit status codes:
+  0  provisioned
+  1  the backend did not come up, or refused a step (the message says which)
+"""
+# cspell:words extdirect coreui
+import base64
+import json
+import os
+import pathlib
+import secrets
+import sys
+import time
+import urllib.error
+import urllib.request
+
+URL = os.environ.get("NEXUS_URL", "http://mirror-nexus:8081").rstrip("/")
+INITIAL = pathlib.Path(os.environ.get("NEXUS_INITIAL_PASSWORD_FILE", "/nexus-data/admin.password"))
+KEPT = pathlib.Path(os.environ.get("NEXUS_PASSWORD_FILE", "/var/lib/mirror-admin/password"))
+
+
+def log(msg):
+    print(f"provision: {msg}", file=sys.stderr, flush=True)
+
+
+def call(method, path, body=None, password=None, headers=None, raw=False):
+    data = None if body is None else (body if raw else json.dumps(body)).encode()
+    req = urllib.request.Request(URL + path, data=data, method=method)
+    req.add_header("Content-Type", "text/plain" if raw else "application/json")
+    if password is not None:
+        tok = base64.b64encode(f"admin:{password}".encode()).decode()
+        req.add_header("Authorization", f"Basic {tok}")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    # Straight to the backend, never through a proxy variable.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=60) as r:
+        text = r.read().decode()
+        return r.status, (json.loads(text) if text.strip().startswith(("{", "[")) else text)
+
+
+def wait_up():
+    for _ in range(120):
+        try:
+            if call("GET", "/service/rest/v1/status/writable")[0] == 200:
+                return
+        except (urllib.error.URLError, OSError):
+            pass
+        time.sleep(3)
+    log("the backend did not answer within six minutes")
+    sys.exit(1)
+
+
+def works(password):
+    try:
+        return call("GET", "/service/rest/v1/security/realms/active", password=password)[0] == 200
+    except urllib.error.HTTPError:
+        return False
+
+
+def admin_password():
+    """The kept password when it works; else the first start's, replaced."""
+    if KEPT.exists() and works(KEPT.read_text().strip()):
+        return KEPT.read_text().strip()
+    if not INITIAL.exists():
+        log(f"no working admin password: neither {KEPT} nor {INITIAL}")
+        sys.exit(1)
+    first = INITIAL.read_text().strip()
+    new = secrets.token_urlsafe(32)
+    call("PUT", "/service/rest/v1/security/users/admin/change-password", new, first, raw=True)
+    KEPT.parent.mkdir(parents=True, exist_ok=True)
+    KEPT.write_text(new)
+    KEPT.chmod(0o600)
+    log("admin password replaced; kept for the next run only")
+    return new
+
+
+def extdirect(password, action, method, data):
+    """The web UI's own API, for the one setting the REST API lacks."""
+    tok = secrets.token_hex(8)
+    body = {"action": action, "method": method, "type": "rpc", "tid": 1, "data": data}
+    _, out = call("POST", "/service/extdirect", body, password,
+                  {"X-Requested-With": "XMLHttpRequest", "NX-ANTI-CSRF-TOKEN": tok,
+                    "Cookie": f"NX-ANTI-CSRF-TOKEN={tok}"})
+    if not (isinstance(out, dict) and out.get("result", {}).get("success")):
+        log(f"{action}.{method} refused: {out}")
+        sys.exit(1)
+
+
+def main(argv):
+    if len(argv) != 1:
+        print(__doc__, file=sys.stderr)
+        return 1
+    wanted = json.loads(pathlib.Path(argv[0]).read_text())
+    wait_up()
+    pw = admin_password()
+
+    _, eula = call("GET", "/service/rest/v1/system/eula", password=pw)
+    if not eula.get("accepted"):
+        call("POST", "/service/rest/v1/system/eula", {"accepted": True, "disclaimer": eula["disclaimer"]}, pw)
+        log("Community Edition EULA accepted")
+
+    # Nexus's only way out. Nothing Sonatype runs is on any egress set, so its
+    # telemetry is refused there like any other host.
+    host, _, port = os.environ["UPSTREAM_PROXY"].rpartition(":")
+    extdirect(pw, "coreui_HttpSettings", "update", [{
+        "userAgentSuffix": None, "timeout": 60, "retries": 2,
+        "httpEnabled": True, "httpHost": host, "httpPort": int(port), "httpAuthEnabled": False,
+        "httpsEnabled": True, "httpsHost": host, "httpsPort": int(port), "httpsAuthEnabled": False,
+        "nonProxyHosts": []}])
+
+    # Read only for anyone: the default anonymous role browses and reads.
+    # Docker clients need the bearer token realm to pull anonymously.
+    call("PUT", "/service/rest/v1/security/anonymous",
+          {"enabled": True, "userId": "anonymous", "realmName": "NexusAuthorizingRealm"}, pw)
+    call("PUT", "/service/rest/v1/security/realms/active",
+          ["NexusAuthenticatingRealm", "DockerToken"], pw)
+
+    _, have = call("GET", "/service/rest/v1/repositories", password=pw)
+    have = {r["name"]: r for r in have}
+    for repo in wanted:
+        fmt, name = repo["format"], repo["spec"]["name"]
+        kind = "docker" if fmt == "docker" else fmt
+        if name in have:
+            call("PUT", f"/service/rest/v1/repositories/{kind}/proxy/{name}", repo["spec"], pw)
+        else:
+            call("POST", f"/service/rest/v1/repositories/{kind}/proxy", repo["spec"], pw)
+            log(f"created {fmt} proxy {name} of {repo['spec']['proxy']['remoteUrl']}")
+    keep = {r["spec"]["name"] for r in wanted}
+    for name, r in have.items():
+        if name not in keep:
+            call("DELETE", f"/service/rest/v1/repositories/{name}", password=pw)
+            log(f"deleted {r.get('type')} {r.get('format')} repository {name}")
+    log(f"ready: {len(keep)} proxy repositories, nothing hosted, anonymous read only")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except urllib.error.HTTPError as e:
+        log(f"{e.code} from {e.url}: {e.read().decode()[:300]}")
+        sys.exit(1)

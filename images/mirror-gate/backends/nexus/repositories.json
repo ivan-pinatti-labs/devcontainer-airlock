@@ -1,0 +1,247 @@
+[
+  {
+    "format": "npm",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "npm",
+      "proxy": {
+        "remoteUrl": "https://registry.npmjs.org",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 30
+      }
+    }
+  },
+  {
+    "format": "pypi",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "pypi",
+      "proxy": {
+        "remoteUrl": "https://pypi.org",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 30
+      }
+    }
+  },
+  {
+    "format": "go",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "go",
+      "proxy": {
+        "remoteUrl": "https://proxy.golang.org",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 30
+      }
+    }
+  },
+  {
+    "format": "docker",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "docker-hub",
+      "proxy": {
+        "remoteUrl": "https://registry-1.docker.io",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 1440
+      },
+      "docker": {
+        "v1Enabled": false,
+        "forceBasicAuth": false,
+        "pathEnabled": true
+      },
+      "dockerProxy": {
+        "indexType": "HUB",
+        "cacheForeignLayers": false
+      }
+    }
+  },
+  {
+    "format": "docker",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "ghcr",
+      "proxy": {
+        "remoteUrl": "https://ghcr.io",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 1440
+      },
+      "docker": {
+        "v1Enabled": false,
+        "forceBasicAuth": false,
+        "pathEnabled": true
+      },
+      "dockerProxy": {
+        "indexType": "REGISTRY",
+        "cacheForeignLayers": false
+      }
+    }
+  },
+  {
+    "format": "apt",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "apt-ubuntu",
+      "proxy": {
+        "remoteUrl": "http://archive.ubuntu.com/ubuntu/",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 60
+      },
+      "apt": {
+        "distribution": "noble",
+        "flat": false
+      }
+    }
+  },
+  {
+    "format": "apt",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "apt-ubuntu-security",
+      "proxy": {
+        "remoteUrl": "http://security.ubuntu.com/ubuntu/",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 60
+      },
+      "apt": {
+        "distribution": "noble-security",
+        "flat": false
+      }
+    }
+  },
+  {
+    "format": "yum",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "yum-fedora",
+      "proxy": {
+        "remoteUrl": "https://dl.fedoraproject.org/pub/fedora/linux/",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 60
+      }
+    }
+  },
+  {
+    "format": "raw",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "apk-alpine",
+      "proxy": {
+        "remoteUrl": "https://dl-cdn.alpinelinux.org/alpine/",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 60
+      },
+      "raw": {
+        "contentDisposition": "ATTACHMENT"
+      }
+    }
+  }
+]

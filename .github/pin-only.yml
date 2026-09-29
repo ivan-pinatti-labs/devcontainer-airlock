@@ -22,6 +22,7 @@ allowed_paths:
   - images/l2-engine/Dockerfile
   - images/gh-broker/Dockerfile
   - images/egress-proxy/Dockerfile
+  - images/mirror-gate/Dockerfile
 
 # The coding agent CLI versions are annotated ARGs in the workbench's
 # Dockerfile.
