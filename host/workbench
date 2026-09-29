@@ -1079,7 +1079,10 @@ cmd_shell() {
   if [ "$(agent_of "${agent}")" = claude ] && voice_on; then
     voice_session "${name}" -w "${cwd}" "${name}" "${@:-bash}"
   fi
-  exec podman exec -it -w "${cwd}" "${name}" "${@:-bash}"
+  # TERM and COLORTERM from your terminal (bare -e copies them, and skips one
+  # that is unset): podman exec would set TERM=xterm and no COLORTERM, and
+  # Claude Code would then draw in 16 colors instead of the terminal's own.
+  exec podman exec -it -e TERM -e COLORTERM -w "${cwd}" "${name}" "${@:-bash}"
 }
 
 # A session with the host microphone, push to talk. PipeWire, on the host,
@@ -1116,7 +1119,7 @@ voice_session() {
   voice_listen "$$" "${ctl}" &
   reader=$!
   trap 'kill "${reader}" 2>/dev/null; wait "${reader}" 2>/dev/null; pactl unload-module "${sink}" 2>/dev/null; rm -f "${dir}/mic-$$" "${ctl}"' EXIT
-  podman exec -it -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
+  podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
     -e WORKBENCH_VOICE_CTL="/run/workbench-voice/ctl-$$" "$@"
   exit $?
 }
@@ -1173,7 +1176,7 @@ cmd_remote() {
   if voice_on; then
     voice_session "${name}" -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
   fi
-  exec podman exec -it -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
+  exec podman exec -it -e TERM -e COLORTERM -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
 }
 
 cmd_load_l2() {
