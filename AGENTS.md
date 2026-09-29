@@ -136,7 +136,7 @@ and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 | l2 | `images/l2/` | where hooks, tests and installs run; no network, no credentials |
 | l2-engine | `images/l2-engine/` | the rootless podman that starts L2 containers |
 | gh-broker | `images/gh-broker/` | holds the GitHub token; runs allowlisted gh commands |
-| egress-proxy | `images/egress-proxy/` | one per workspace, the only way out to the network, by egress sets |
+| egress-proxy | `images/egress-proxy/` | one per host, the only way out to the network, by each workspace's egress sets |
 
 `host/workbench` starts them; it runs on the host and does nothing there but
 call podman.

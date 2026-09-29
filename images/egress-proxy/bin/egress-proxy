@@ -1,8 +1,9 @@
 #!/bin/sh
 : '
   The egress proxy container main process: generate the rules from the
-  selected sets, start squid, and refresh the providers lists every
-  EGRESS_REFRESH_SECONDS (default six hours), reloading squid in place.
+  registered workspaces and their sets, start squid, and refresh the
+  providers lists every EGRESS_REFRESH_SECONDS (default six hours),
+  reloading squid in place.
 '
 set -eu
 egress-refresh
@@ -12,8 +13,6 @@ trap 'kill "${squid_pid}" 2>/dev/null; wait "${squid_pid}"; exit 0' TERM INT
 while kill -0 "${squid_pid}" 2>/dev/null; do
   sleep "${EGRESS_REFRESH_SECONDS:-21600}" &
   wait $! || true
-  if egress-refresh; then
-    squid -k reconfigure -f /etc/squid/squid.conf || true
-  fi
+  egress-reload --fetch || true
 done
 wait "${squid_pid}"

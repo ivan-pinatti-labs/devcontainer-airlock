@@ -5,7 +5,7 @@ see, and how to use them day to day.
 [ARCHITECTURE.md](ARCHITECTURE.md) has the same in one picture, with tables
 of who talks to whom and how anything reaches the internet.
 
-<!-- cspell:words tinyproxy userns initializeCommand codeload -->
+<!-- cspell:words tinyproxy userns initializeCommand codeload conmon -->
 
 ## Why layers
 
@@ -24,7 +24,7 @@ The layers separate what you trust from what you only run.
 host         podman, the VS Code desktop, podman secrets. Nothing else runs here.
  ├─ ssh-agent        holds the ssh key; the key never leaves it
  ├─ gh-broker        holds the GitHub token; runs allowlisted gh commands
- ├─ egress-proxy     one per workspace: the only way out, by egress sets
+ ├─ egress-proxy     one per host: the only way out, by each workspace's sets
  ├─ workbench-claude you, Claude Code, its editor extension, git
  ├─ workbench-codex  you, Codex, its editor extension, git
  │                   each: no GitHub token, no ssh key, no direct network,
@@ -39,7 +39,7 @@ host         podman, the VS Code desktop, podman secrets. Nothing else runs here
 | host | podman, the editor's window | everything, which is why nothing else runs here |
 | ssh-agent | `ssh-agent` | nothing: no network, read only, no capabilities |
 | gh-broker | `gh` with the token | GitHub, for the commands in its allowlist |
-| egress-proxy | squid, one per workspace | the domains of its workspace's egress sets |
+| egress-proxy | squid, one per host | for each workspace, the domains of that workspace's egress sets |
 | workbench (one per agent) | that agent, the VS Code server and that agent's extensions, git | the proxy, the broker socket, the agent socket, the engine socket, the workspace, that agent's own login |
 | L2 engine | rootless podman | the proxy, the workspace |
 | L2 | pre-commit hooks, tests, package installs, anything the agents run that executes project code | the working tree, and the proxy only when a run asks for network |
@@ -229,8 +229,9 @@ worktree the command runs in, and `up` refuses the main clone, which it
 would otherwise mount and relabel under those containers.
 
 When a branch changes `.devcontainer/egress-sets` or adds an L2 image, start
-the workspace from that branch's worktree: the proxy takes its sets from the
-checkout `up` runs in.
+the workspace from that branch's worktree: the proxy takes a workspace's sets
+from the checkout `up` runs in, and every `up` registers them again, so a
+changed file takes effect on the next one.
 
 ## L2
 
@@ -428,9 +429,28 @@ unlock` adds the key for eight hours at a time.
 ## Network
 
 Each workspace has an internal podman network of its own (no route, no DNS)
-holding its workbench and its L2 engine, and an egress proxy of its own on
-that network, which is their only way out. One project's allowances never
-apply to another's.
+holding its workbenches and its L2 engine. One egress proxy serves every
+workspace on the host: it sits at `.2` on each of those networks, which is
+their only way out, and on podman's own network for its way out. One
+project's allowances never apply to another's: a request is matched to a
+workspace by the subnet it comes from and by the proxy address it arrived
+at, and gets only that workspace's sets. A container on one workspace
+network has no route to another's (measured 2026-09-29: a connection from
+one workspace to the proxy's address on another fails, and a request
+reaching the proxy from podman's own network is refused with a 403).
+
+`host/workbench up` registers the workspace with the proxy, a file per
+workspace in `$XDG_RUNTIME_DIR/workbench/egress` holding its subnet and
+sets, connects the proxy to its network and reloads squid; `down` does the
+reverse. A reload leaves every open connection alone (measured: a tunnel
+kept carrying data through two reloads, one workspace joining and one
+leaving) and takes about 0.1 seconds. A set name the proxy does not know
+stops that workspace's `up` and leaves the others as they were.
+
+Restarting the proxy itself (`host/workbench restart-proxy`, after
+rebuilding its image, or `helpers-down`) cuts every workspace off for the
+few seconds it takes. It starts again with every registered workspace's
+network, so nothing needs to be brought up again.
 
 ### Egress sets
 
@@ -483,11 +503,14 @@ should not stop anyone working while the domain list still holds.
 
 squid, tuned to decide and forward only (no cache, small lookup tables): 13
 MB resident with seven sets and every AWS range loaded, measured 2026-09-25,
-against 89 MB with squid's defaults. tinyproxy, which Qubes OS uses for its
+against 89 MB with squid's defaults. One proxy for every workspace rather
+than one each: measured 2026-09-29 in an L2 engine, four workspaces took 146
+MB resident behind four proxies (36 MB each, with its shell and conmon) and
+37 MB behind one. tinyproxy, which Qubes OS uses for its
 updates proxy, is lighter still (4 MB), but it can only match a host name,
 and checking where that name resolves is what makes a provider's ranges
 worth having. A refused request answers `403 Forbidden`, and `podman logs
-egress-proxy-<folder>` shows each decision (`TCP_DENIED` or `TCP_TUNNEL`,
+egress-proxy` shows each decision (by client address, so by workspace) (`TCP_DENIED` or `TCP_TUNNEL`,
 with the address the name resolved to), which is the first place to look
 when a tool fails to download something.
 

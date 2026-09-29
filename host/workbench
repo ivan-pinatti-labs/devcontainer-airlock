@@ -30,15 +30,20 @@
                                     copy the local L2 images into the L2 engine
                                     now (up does it when they differ)
     host/workbench status           what is running
-    host/workbench down [WORKSPACE] stop that workspace (its workbench, engine,
-                                    proxy and network); the shared helpers
-                                    keep running for other workspaces
+    host/workbench down [WORKSPACE] stop that workspace (its workbenches,
+                                    engine and network) and take it off the
+                                    egress proxy; the shared helpers keep
+                                    running for other workspaces
     host/workbench helpers          start only the helpers (proxy, broker,
                                     ssh-agent); what the login unit runs
     host/workbench helpers-down     stop the shared helpers, which drops the
-                                    unlocked ssh key
+                                    unlocked ssh key and cuts every workspace
+                                    off the network
     host/workbench restart-broker   restart the gh broker alone (after
                                     rebuilding it), keeping the unlocked key
+    host/workbench restart-proxy    restart the egress proxy alone (after
+                                    rebuilding it); every workspace is cut
+                                    off for the few seconds it takes
     host/workbench install-units    install a systemd user unit that starts
                                     the helpers at login (changes your
                                     ~/.config/systemd/user; run it yourself)
@@ -75,12 +80,18 @@
                       Needs the host SELinux module in host/selinux/, which
                       only root can install (docs/IMAGES.md)
 
-  Each workspace has its own egress proxy and internal network. The proxy
-  allows the egress sets the checkout lists in .devcontainer/egress-sets, one
-  name per line (default: python, node), plus workbench, github and
-  ghcr, which are always on, and ubuntu and nodesource when the checkout has
-  an L2 image of its own to build (.devcontainer/l2/Dockerfile). `podman run --rm localhost/airlock-egress-proxy
-  egress-refresh --list` shows every set.
+  Each workspace has its own internal network, 10.203.N.0/24. One egress
+  proxy serves them all: it sits at .2 on each, and allows a workspace the
+  egress sets its checkout lists in .devcontainer/egress-sets, one name per
+  line (default: python, node), plus workbench, github and ghcr, which are
+  always on, and ubuntu and nodesource when the checkout has an L2 image of
+  its own to build (.devcontainer/l2/Dockerfile). A request is matched to a
+  workspace by the network it comes from, so one workspace never gets the
+  sets of another. `up` registers the workspace (again, so a changed file
+  takes effect) and `down` takes it off, each with a reload that leaves the
+  connections of the other workspaces open. Restarting the proxy cuts every
+  workspace off for a moment. `podman run --rm
+  localhost/airlock-egress-proxy egress-refresh --list` shows every set.
 
   Settings, from the environment or ${XDG_CONFIG_HOME}/workbench/config
   (KEY=value lines, read and never run; the environment wins):
@@ -118,6 +129,8 @@
     ${XDG_DATA_HOME}/workbench/claude, codex  the agents logins and settings,
         separate from your own ~/.claude and ~/.codex
     ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket
+    ${XDG_RUNTIME_DIR}/workbench/egress       the workspaces the egress proxy
+                                              serves, and their sets
     ${XDG_RUNTIME_DIR}/workbench/<name>       the L2 engine socket
     ${XDG_RUNTIME_DIR}/devcontainer-ssh       the ssh-agent socket, known_hosts
     ${XDG_RUNTIME_DIR}/workbench/voice/<name> the microphone pipe of a voice
@@ -235,6 +248,8 @@ L2_IMAGE="localhost/airlock-l2:${TAG}"
 ENGINE_IMAGE="localhost/airlock-l2-engine:${TAG}"
 BROKER_IMAGE="localhost/airlock-gh-broker:${TAG}"
 PROXY_IMAGE="localhost/airlock-egress-proxy:${TAG}"
+# The one egress proxy of the host, shared by every workspace.
+PROXY=egress-proxy
 
 # Egress sets every workspace gets when it names none of its own; workbench,
 # github and ghcr are always added by the proxy itself.
@@ -247,6 +262,8 @@ LABEL_OPTS=(--security-opt label=type:container_engine_t --security-opt label=le
 DATA="${XDG_DATA_HOME:-${HOME}/.local/share}/workbench"
 RUN="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
 GH_DIR="${RUN}/workbench/gh"
+# The workspaces the egress proxy serves, one file each, which it reads.
+EGRESS_DIR="${RUN}/workbench/egress"
 SSH_DIR="${RUN}/devcontainer-ssh"
 # Per Claude workbench, the folder a voice session's microphone pipe appears
 # in (docs/LAYERS.md, Voice).
@@ -420,7 +437,6 @@ wb_name() { echo "workbench-$2-$(slug "$1")"; }
 engine_name() { echo "l2-engine-$(slug "$1")"; }
 engine_dir() { echo "${RUN}/workbench/$(slug "$1")"; }
 net_name() { echo "workbench-net-$(slug "$1")"; }
-proxy_name() { echo "egress-proxy-$(slug "$1")"; }
 
 # Each workspace has an internal network of its own, 10.203.N.0/24 with N
 # picked when the network is first created, and its proxy at .2 on it.
@@ -453,11 +469,16 @@ git_dir_mount() {
   esac
 }
 
-proxy_ip() {
+net_subnet() {
+  podman network inspect "$1" --format '{{range .Subnets}}{{.Subnet}}{{end}}'
+}
+net_proxy_ip() {
   local subnet
-  subnet="$(podman network inspect "$(net_name "$1")" --format '{{range .Subnets}}{{.Subnet}}{{end}}')"
+  subnet="$(net_subnet "$1")"
   echo "${subnet%.0/24}.2"
 }
+# The proxy's address on workspace $1's network.
+proxy_ip() { net_proxy_ip "$(net_name "$1")"; }
 
 # The proxy variables for a container on this workspace's network, into the
 # global PROXY_ENV array.
@@ -720,30 +741,89 @@ MAKEFILE
   echo "workbench: a repository whose main clone holds data other containers use also wants an empty .devcontainer/workbench-worktree-only"
 }
 
+# The egress proxy, one for the host, on the podman network for its own way
+# out and on every registered workspace's internal network, at .2 there. It
+# is started with the networks of the workspaces already registered, so a
+# restart puts every workspace back.
 start_proxy() {
-  local ws="$1" name sets
-  ensure_net "${ws}"
-  name="$(proxy_name "${ws}")"
-  check_owner "${name}" workbench.proxy "${ws}"
-  running "${name}" && return
-  sets="$(egress_sets "${ws}")"
-  podman rm -f "${name}" >/dev/null 2>&1 || true
+  local f net nets=()
+  running "${PROXY}" && return
+  mkdir -p "${EGRESS_DIR}"
+  # The proxy runs as its own account, not as you, so it reads the folder
+  # (mounted on its own, past the private folder around it) as anyone.
+  # It holds workspace paths, subnets and set names, nothing secret.
+  chmod 700 "${RUN}/workbench"
+  chmod 755 "${EGRESS_DIR}"
+  for f in "${EGRESS_DIR}"/*.conf; do
+    [ -f "${f}" ] || continue
+    net="workbench-net-$(basename "${f}" .conf)"
+    if podman network exists "${net}"; then
+      nets+=(--network "${net}:ip=$(net_proxy_ip "${net}")")
+    else
+      rm -f "${f}"
+    fi
+  done
+  podman rm -f "${PROXY}" >/dev/null 2>&1 || true
   podman volume exists egress-cache || podman volume create egress-cache >/dev/null
-  podman run -d --name "${name}" \
-    --label workbench.proxy="${ws}" \
-    --network podman --network "$(net_name "${ws}"):ip=$(proxy_ip "${ws}")" \
+  podman run -d --name "${PROXY}" \
+    --network podman "${nets[@]}" \
     --cap-drop=all --security-opt no-new-privileges --read-only \
     --tmpfs /run/egress:U --tmpfs /run/squid:U --tmpfs /tmp \
     -v egress-cache:/var/lib/egress:U \
-    -e EGRESS_SETS="${sets}" \
+    -v "${EGRESS_DIR}:/etc/egress/workspaces:ro,Z" \
     "${PROXY_IMAGE}" >/dev/null
   for _ in $(seq 1 100); do
-    podman logs "${name}" 2>&1 | grep -q 'Accepting HTTP' && return
-    running "${name}" || break
+    podman logs "${PROXY}" 2>&1 | grep -q 'Accepting HTTP' && return
+    running "${PROXY}" || break
     sleep 0.3
   done
-  podman logs "${name}" 2>&1 | tail -5 >&2
-  die "the egress proxy for ${ws} did not start (sets: ${sets})"
+  podman logs "${PROXY}" 2>&1 | tail -5 >&2
+  die "the egress proxy did not start; podman logs ${PROXY}"
+}
+
+# Give a workspace its way out: its internal network, its registration with
+# the proxy (the subnet and the sets it selected), the proxy on that network,
+# and a reload, which leaves every other workspace's tunnels open. Run on
+# every `up`, so a changed .devcontainer/egress-sets takes effect then.
+proxy_join() {
+  local ws="$1" slug net f owner sets
+  slug="$(slug "${ws}")"
+  net="$(net_name "${ws}")"
+  f="${EGRESS_DIR}/${slug}.conf"
+  sets="$(egress_sets "${ws}")"
+  mkdir -p "${EGRESS_DIR}"
+  chmod 755 "${EGRESS_DIR}"
+  owner="$(sed -n 's/^workspace=//p' "${f}" 2>/dev/null || true)"
+  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
+    || die "the egress proxy already serves ${owner} as ${slug}, another folder of the same name; stop it first (host/workbench down ${owner})"
+  ensure_net "${ws}"
+  # A workspace started before the proxy was shared has a proxy of its own
+  # holding .2 on its network. Its workbenches find the shared one at the
+  # same address, so they keep working across the swap.
+  podman rm -f -t 5 "egress-proxy-${slug}" >/dev/null 2>&1 || true
+  printf 'workspace=%s\nsubnet=%s\nsets=%s\n' "${ws}" "$(net_subnet "${net}")" "${sets}" > "${f}.tmp"
+  chmod 644 "${f}.tmp"
+  mv "${f}.tmp" "${f}"
+  start_proxy
+  if ! podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "${PROXY}" \
+    | tr ' ' '\n' | grep -qx "${net}"; then
+    podman network connect --ip "$(proxy_ip "${ws}")" "${net}" "${PROXY}"
+  fi
+  if ! podman exec "${PROXY}" egress-reload >/dev/null; then
+    rm -f "${f}"
+    podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
+    podman logs --tail 5 "${PROXY}" >&2
+    die "the egress proxy refused the sets of ${ws} (${sets}); the other workspaces keep theirs"
+  fi
+}
+
+# Take a workspace off the proxy: its rules first, then the network.
+proxy_leave() {
+  local ws="$1"
+  rm -f "${EGRESS_DIR}/$(slug "${ws}").conf"
+  running "${PROXY}" || return 0
+  podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
+  podman network disconnect -f "$(net_name "${ws}")" "${PROXY}" >/dev/null 2>&1 || true
 }
 
 start_broker() {
@@ -895,7 +975,7 @@ cmd_up() {
     *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
   esac
   start_helpers
-  start_proxy "${ws}"
+  proxy_join "${ws}"
   start_engine "${ws}"
   sync_l2 "${ws}"
   for agent in ${AGENTS}; do
@@ -909,15 +989,28 @@ start_helpers() {
   mkdir -p "${SSH_DIR}" "${GH_DIR}"
   start_broker
   start_ssh_agent
+  start_proxy
 }
 
 cmd_helpers() {
   start_helpers
-  echo "workbench: helpers up (gh-broker, devcontainer-ssh-agent)"
+  echo "workbench: helpers up (gh-broker, devcontainer-ssh-agent, ${PROXY})"
 }
 
+# Stopping the proxy cuts every workspace off the network until it is back;
+# the registrations stay, so the next start puts them all back.
 cmd_helpers_down() {
-  podman rm -f -t 5 gh-broker devcontainer-ssh-agent >/dev/null 2>&1 || true
+  podman rm -f -t 5 gh-broker devcontainer-ssh-agent "${PROXY}" >/dev/null 2>&1 || true
+}
+
+cmd_restart_proxy() {
+  local f served=""
+  podman rm -f -t 5 "${PROXY}" >/dev/null 2>&1 || true
+  start_proxy
+  for f in "${EGRESS_DIR}"/*.conf; do
+    [ -f "${f}" ] && served="${served} $(basename "${f}" .conf)"
+  done
+  echo "workbench: egress proxy restarted, serving:${served:- nothing yet}"
 }
 
 cmd_restart_broker() {
@@ -1110,7 +1203,7 @@ sync_l2() {
 }
 
 cmd_status() {
-  podman ps -a --filter name='^(egress-proxy-.*|gh-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)$' \
+  podman ps -a --filter name='^(egress-proxy.*|gh-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)$' \
     --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 }
 
@@ -1121,8 +1214,10 @@ cmd_down() {
   # workbench-<name>, the single workbench from before the split.
   podman ps -a --filter label=workbench.workspace="${ws}" --format '{{.Names}}' \
     | xargs -r podman rm -f -t 5 >/dev/null 2>&1 || true
-  podman rm -f -t 5 "workbench-$(slug "${ws}")" "$(engine_name "${ws}")" "$(proxy_name "${ws}")" \
+  # egress-proxy-<name>: the workspace's own proxy, from before it was shared.
+  podman rm -f -t 5 "workbench-$(slug "${ws}")" "$(engine_name "${ws}")" "egress-proxy-$(slug "${ws}")" \
     >/dev/null 2>&1 || true
+  proxy_leave "${ws}"
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   echo "workbench: down"
 }
@@ -1143,6 +1238,7 @@ case "${1:-}" in
   helpers) cmd_helpers ;;
   helpers-down) cmd_helpers_down ;;
   restart-broker) cmd_restart_broker ;;
+  restart-proxy) cmd_restart_proxy ;;
   install-units) cmd_install_units ;;
   -h | --help | help) sed -n '3,/^    2  usage error$/p' "$0" ;;
   *) sed -n '3,/run it yourself)$/p' "$0" >&2; exit 2 ;;
