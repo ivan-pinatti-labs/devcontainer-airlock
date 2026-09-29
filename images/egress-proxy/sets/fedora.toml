@@ -1,0 +1,3 @@
+# cspell:words metalink fedoraproject
+description = "Fedora's package repositories on its primary download server, for yum and dnf: the package mirror's yum proxy reads them from here. Its metalink and mirror list services are left out on purpose, since they hand out mirrors anywhere."
+domains = ["dl.fedoraproject.org"]

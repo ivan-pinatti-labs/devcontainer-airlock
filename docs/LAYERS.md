@@ -447,7 +447,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
 | `docker-hub`, `quay` | those registries and their CDNs | |
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
-| `alpine`, `trivy`, `sigstore` | Alpine packages, trivy's database, sigstore's trust root | |
+| `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages, trivy's database, sigstore's trust root | |
 | `aws` | AWS service APIs | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh
