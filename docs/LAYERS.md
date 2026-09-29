@@ -412,8 +412,10 @@ output. Anything running in the workbench can use GitHub through it; nothing
 can take the token away. Every request is logged: `podman logs gh-broker`.
 
 Refused: anything outside the allowlist (including `gh auth token`, `repo
-delete`, `secret`), repositories outside the organization, `gh api` with a
-method other than GET, and GraphQL mutations. Interactive prompts are not
+delete`, `secret`), repositories and owners outside `WORKBENCH_GH_OWNERS`
+(named by `-R`, `--repo`, `--owner`, a URL, or a `repo:`, `org:` or `user:`
+qualifier in a search), `gh api` with a method other than GET, and GraphQL
+mutations. Interactive prompts are not
 available, so pass the flags a prompt would ask for. The broker never reads
 a file named on the command line, since it would read it beside the token;
 the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the

@@ -1,5 +1,6 @@
 """Allow and refuse cases for the gh broker, run when its image is built, so
 an allowlist or parser change that reopens one fails the build."""
+# cspell:words Rsomeone
 import os
 import sys
 os.environ["GH_BROKER_OWNERS"] = "ivan-pinatti-labs"
@@ -38,6 +39,17 @@ cases = [
   (False, "pr merge 25 --admin"), (False, "pr merge 25 --auto --admin=true"),
   (False, "pr merge https://github.com/evil/x/pull/1 --auto"),
   (False, "auth token"), (False, "repo delete ivan-pinatti-labs/x --yes"), (False, "secret list"), (False, "api user"),
+  # Search is scoped by --owner as well as --repo, and by qualifiers in the
+  # query; each is held to the same owners.
+  (True,  "search issues flaky --owner ivan-pinatti-labs"), (True, "search prs --owner=IVAN-PINATTI-LABS --state open"),
+  (True,  "search issues --repo ivan-pinatti-labs/x,ivan-pinatti-labs/y deadlock"),
+  (True,  "search issues repo:ivan-pinatti-labs/x is:open"), (True, "search prs org:ivan-pinatti-labs review"),
+  (False, "search issues --owner someone-else"), (False, "search issues --owner=someone-else"),
+  (False, "search prs --owner ivan-pinatti-labs,someone-else"), (False, "search prs --owner ivan-pinatti-labs-evil"),
+  (False, "search issues --owner"), (False, "search issues --repo someone-else/x"),
+  (False, "search issues --repo ivan-pinatti-labs/x,someone-else/y"), (False, "pr list -Rsomeone-else/x"), (False, "pr comment 1 -Rsomeone-else/x --body spam"),
+  (False, "search issues repo:someone-else/x"), (False, "search issues is:open org:someone-else"),
+  (False, "search prs user:someone-else"), (False, "search issues -repo:someone-else/x"),
 ]
 # Cases whose arguments hold spaces or newlines, given as argv lists.
 Q = "api graphql -f".split()
@@ -52,6 +64,9 @@ argv_cases = [
   (False, Q + ["query=mutation{resolveReviewThread(input:{threadId:\"T x\"}){thread{id}}}"]),
   (False, Q + ["query=mutation{﻿deleteRepository(input:{repositoryId:\"R\"}){clientMutationId}}"]),
   (False, Q + ["query=mutation"]),
+  (True,  ["search", "issues", "repo:ivan-pinatti-labs/x is:open deadlock"]),
+  (False, ["search", "issues", "deadlock (org:someone-else)"]),
+  (False, ["search", "prs", "is:open repo:someone-else/x"]),
 ]
 bad = [(exp, c) for exp, c in cases if allowed(c.split()) != exp]
 # Owners come from the environment, and nothing is allowed without them.
@@ -71,6 +86,7 @@ why_cases = [
   ("pr create -t t --body-file /tmp/body.md", "stdin"),
   ("auth token", "not on the allowlist"),
   ("pr view 1 -R evil/x", "allowed owner"),
+  ("search issues --owner evil", "allowed owner"),
   ("pr merge 25 --admin", "merge queue"),
   ("api -X DELETE repos/ivan-pinatti-labs/x", "gh api call"),
 ]

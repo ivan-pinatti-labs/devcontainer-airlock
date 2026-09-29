@@ -7,8 +7,8 @@ Listens on a unix socket. Each connection carries one JSON line:
 
 The token comes from the GH_TOKEN environment variable, which the host
 passes as a podman secret and which never leaves this container. Refused:
-anything not in /etc/gh-broker/allowlist.json, any repository outside the
-allowed owners, flags that read a file, `pr merge --admin`, and every
+anything not in /etc/gh-broker/allowlist.json, any repository or owner
+outside the allowed owners (-R, --owner, a URL, a search qualifier), flags that read a file, `pr merge --admin`, and every
 `gh api` write except replying to a review comment and the GraphQL mutations
 the allowlist names (resolving a review thread).
 """
@@ -30,9 +30,31 @@ OWNER_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 OWNERS = tuple(o.lower() + "/" for o in _OWNER_NAMES if OWNER_NAME.match(o))
 SOCK = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
 REPO_FLAGS = ("-R", "--repo")
+# gh search scopes to a user or organization with --owner, and to a
+# repository with --repo, each repeatable and comma separated.
+OWNER_FLAGS = ("--owner",)
 
 
 URL = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/", re.I)
+# The same scopes written into a search query itself (`repo:x/y`, `org:x`,
+# `user:x`), which gh passes through to GitHub unchanged.
+QUALIFIER = re.compile(r"(?:^|[\s(])-?(repo|org|user|owner):(\S+)", re.I)
+
+
+def flag_values(argv, flags):
+    """Every value given to one of these flags, as `--flag v`, `--flag=v` or,
+    for a short flag, `-Rv`, split at commas."""
+    values = []
+    for i, a in enumerate(argv):
+        if a in flags:
+            values.append(argv[i + 1] if i + 1 < len(argv) else "")
+            continue
+        for f in flags:
+            if f.startswith("--") and a.startswith(f + "="):
+                values.append(a.split("=", 1)[1])
+            elif not f.startswith("--") and a.startswith(f) and len(a) > len(f):
+                values.append(a[len(f):])
+    return [v.strip() for value in values for v in value.split(",")]
 
 
 def repos_ok(argv):
@@ -43,14 +65,19 @@ def repos_ok(argv):
         for owner in URL.findall(a):
             if not (owner.lower() + "/").startswith(OWNERS):
                 return False
-    for i, a in enumerate(argv):
-        value = None
-        if a in REPO_FLAGS and i + 1 < len(argv):
-            value = argv[i + 1]
-        elif a.startswith("--repo="):
-            value = a.split("=", 1)[1]
-        if value is not None and not value.lower().startswith(OWNERS):
-            return False
+    if not all(v.lower().startswith(OWNERS) for v in flag_values(argv, REPO_FLAGS)):
+        return False
+    if not all(v.lower() + "/" in OWNERS for v in flag_values(argv, OWNER_FLAGS)):
+        return False
+    if argv[:1] == ["search"]:
+        for a in argv[2:]:
+            for kind, value in QUALIFIER.findall(a):
+                value = value.strip("\"'").lower()
+                if kind.lower() == "repo":
+                    if not value.startswith(OWNERS):
+                        return False
+                elif value + "/" not in OWNERS:
+                    return False
     return True
 
 
