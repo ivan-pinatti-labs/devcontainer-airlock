@@ -43,11 +43,29 @@ say() {
 # An earlier recording of this session that was never stopped (Claude Code
 # can start a new rec without stopping the last one, when it retries) would
 # keep reading the pipe and take part of this one's audio. Stop them, and
-# wait for their rec to tell the host stop before this one says start.
-if pgrep -f -- "^/usr/bin/sox .* ${mic} " >/dev/null; then
-  pkill -KILL -f -- "^/usr/bin/sox .* ${mic} " || true
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    pgrep -f -- "^/bin/bash /usr/local/bin/rec " | grep -qvx "$$" || break
+# wait for their rec to tell the host stop before this one says start. If
+# one is still there after a second, its stop could come after this start
+# and cut the microphone off, so this recording is refused instead. The
+# path is matched literally (pgrep takes a regular expression).
+mic_re="$(printf '%s' "${mic}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
+old_sox="$(pgrep -f -- "^/usr/bin/sox .* ${mic_re} " || true)"
+if [ -n "${old_sox}" ]; then
+  # shellcheck disable=SC2086 # one pid per word
+  old_rec="$(ps -o ppid= -p "$(echo ${old_sox} | tr ' ' ,)" || true)"
+  # shellcheck disable=SC2086
+  kill -KILL ${old_sox} 2>/dev/null || true
+  tries=0
+  while true; do
+    alive=""
+    for p in ${old_rec}; do
+      if [ "${p}" != "$$" ] && kill -0 "${p}" 2>/dev/null; then alive=1; fi
+    done
+    [ -n "${alive}" ] || break
+    tries=$((tries + 1))
+    if [ "${tries}" -gt 10 ]; then
+      echo "rec: an earlier recording of this session is still stopping; try again" >&2
+      exit 1
+    fi
     sleep 0.1
   done
 fi

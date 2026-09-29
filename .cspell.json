@@ -150,6 +150,7 @@
     "Pipfile",
     "popen",
     "powercap",
+    "ppid",
     "precommit",
     "prettier",
     "println",
