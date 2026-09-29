@@ -22,7 +22,8 @@
     host/workbench remote claude[-<account>] [WORKSPACE]
                                     claude --remote-control there, to pair
                                     with a device; DO_NOT_TRACK cleared for
-                                    this run only, as pairing needs
+                                    this run only, as Remote Control needs
+                                    feature flags, which it turns off
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
     host/workbench load-l2 [WORKSPACE]
@@ -101,10 +102,11 @@
                           history of the workspace path and the paths
                           under it; settings, hooks and logins stay apart
     WORKBENCH_TAG         the local image tag. Default: local
-    WORKBENCH_VOICE       1 to give a Claude session the host microphone,
-                          for voice mode (make claude-voice passes it).
-                          Default: off. Only that session gets it, and only
-                          while it runs; it needs pactl on the host
+    WORKBENCH_VOICE       1 to give a Claude session (claude, or remote) the
+                          host microphone for voice mode, push to talk: it is
+                          routed only while Claude Code records. Default: off;
+                          the make targets turn it on (make claude-plain does
+                          not). Needs pactl on the host
     WORKBENCH_TZ          the time zone of the workbenches, as podman --tz
                           takes it (America/Toronto, say). Default: local,
                           the host one; L2 stays on UTC
@@ -987,33 +989,81 @@ cmd_shell() {
   exec podman exec -it -w "${cwd}" "${name}" "${@:-bash}"
 }
 
-# A session with the host microphone. PipeWire, on the host, writes it into
-# a named pipe in this workbench's voice folder (16 kHz mono, what Claude
-# Code records), and only this session is told where the pipe is; the rec in
-# the workbench reads it. Nothing in the workbench can talk to the host's
-# audio server: it only reads bytes. The pipe goes when the session ends.
+# A session with the host microphone, push to talk. PipeWire, on the host,
+# gives the session a named pipe in this workbench's voice folder (16 kHz
+# mono, what Claude Code records), and a second pipe the other way, on which
+# the rec in the workbench writes one word: start when Claude Code begins a
+# recording (while space is held), stop when it ends. Only in between is the
+# microphone routed into the pipe (voice_listen). Nothing in the workbench
+# can talk to the host's audio server. When voice cannot be set up, this
+# says why and returns, and the session starts without it.
 voice_session() {
-  local name="$1" id sink loop
+  local name="$1" dir ctl sink reader
   shift
-  [ "$(podman inspect --format '{{index .Config.Labels "workbench.voice"}}' "${name}")" = ready ] \
-    || die "voice: ${name} was started before voice existed; stop it (host/workbench down, which ends every session in it) and start it again"
-  command -v pactl >/dev/null || die "voice: no pactl on the host (PipeWire's pulse tools, or PulseAudio's)"
-  id="airlock_voice_$$"
-  sink="$(pactl load-module module-pipe-sink sink_name="${id}" file="${VOICE_ROOT}/${name}/mic-$$" \
-    format=s16le rate=16000 channels=1)" || die "voice: PipeWire refused the microphone pipe"
-  if ! loop="$(pactl load-module module-loopback source=@DEFAULT_SOURCE@ sink="${id}" latency_msec=20)"; then
-    pactl unload-module "${sink}" || true
-    die "voice: PipeWire refused to route the microphone"
+  dir="${VOICE_ROOT}/${name}"
+  ctl="${dir}/ctl-$$"
+  if [ "$(podman inspect --format '{{index .Config.Labels "workbench.voice"}}' "${name}")" != ready ]; then
+    echo "workbench: voice: ${name} was started before voice existed, so this session has no microphone; host/workbench down (which ends every session in it) and start again for it" >&2
+    return 0
   fi
-  trap 'pactl unload-module "${loop}" 2>/dev/null; pactl unload-module "${sink}" 2>/dev/null; rm -f "${VOICE_ROOT}/${name}/mic-$$"' EXIT
-  podman exec -it -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" "$@"
+  if ! command -v pactl >/dev/null; then
+    echo "workbench: voice: no pactl on the host (PipeWire's or PulseAudio's tools), so this session has no microphone" >&2
+    return 0
+  fi
+  if ! sink="$(pactl load-module module-pipe-sink sink_name="airlock_voice_$$" file="${dir}/mic-$$" \
+    format=s16le rate=16000 channels=1)"; then
+    echo "workbench: voice: PipeWire refused the microphone pipe, so this session has no microphone" >&2
+    return 0
+  fi
+  if ! mkfifo -m 600 "${ctl}"; then
+    pactl unload-module "${sink}" 2>/dev/null || true
+    echo "workbench: voice: could not make the control pipe, so this session has no microphone" >&2
+    return 0
+  fi
+  voice_listen "$$" "${ctl}" &
+  reader=$!
+  trap 'kill "${reader}" 2>/dev/null; wait "${reader}" 2>/dev/null; pactl unload-module "${sink}" 2>/dev/null; rm -f "${dir}/mic-$$" "${ctl}"' EXIT
+  podman exec -it -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
+    -e WORKBENCH_VOICE_CTL="/run/workbench-voice/ctl-$$" "$@"
   exit $?
 }
 
+# The host end of a voice session's control pipe. It routes the microphone
+# into the session's pipe on "start", and stops on "stop", after ten minutes
+# of one recording, and when the session ends. What arrives is compared
+# with those two words, never run, and read at most 16 bytes at a time.
+voice_listen() {
+  local id="$1" ctl="$2" loop="" word
+  trap '[ -z "${loop}" ] || pactl unload-module "${loop}" 2>/dev/null; exit 0' TERM
+  # Open for reading and writing, so the pipe never reports end of file
+  # between one recording and the next.
+  exec 3<>"${ctl}"
+  while true; do
+    word=""
+    if [ -n "${loop}" ]; then
+      read -r -n 16 -t 600 -u 3 word || word=stop
+    else
+      read -r -n 16 -u 3 word || continue
+    fi
+    case "${word}" in
+      start)
+        if [ -z "${loop}" ]; then
+          loop="$(pactl load-module module-loopback source=@DEFAULT_SOURCE@ sink="airlock_voice_${id}" latency_msec=20)" || loop=""
+        fi ;;
+      stop)
+        if [ -n "${loop}" ]; then
+          pactl unload-module "${loop}" 2>/dev/null || true
+          loop=""
+        fi ;;
+    esac
+  done
+}
+
 # claude --remote-control, for the agent and account named (or the default
-# claude), pairing with a device over Anthropic's relay. DO_NOT_TRACK is
-# cleared for this one exec: pairing needs it unset, and the workbench sets
-# it by default for every other tool.
+# claude), pairing with a device over Anthropic's relay, with voice when
+# WORKBENCH_VOICE asks. DO_NOT_TRACK is cleared for this one exec: Remote
+# Control refuses to start without feature flags, which DO_NOT_TRACK turns
+# off (Claude Code 2.1.283), and the workbench sets it for everything else.
 cmd_remote() {
   local agent="${1:-claude}" ws name cwd bin
   valid_agent "${agent}" || { echo "workbench: which agent? host/workbench remote claude[-<account>] [WORKSPACE]" >&2; exit 2; }
@@ -1027,6 +1077,9 @@ cmd_remote() {
   fi
   cwd="${PWD}"
   case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
+  if voice_on; then
+    voice_session "${name}" -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
+  fi
   exec podman exec -it -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
 }
 

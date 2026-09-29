@@ -62,7 +62,8 @@ host/workbench init     # once, in an existing project: egress sets, L2 image, m
 host/workbench claude   # from a folder of clones: one workspace over all of them (docs/LAYERS.md)
 make workbench-build    # every image, locally (or make workbench-pull)
 make unlock             # the ssh key, for eight hours
-make claude             # Claude Code in its workbench, started if needed (or: codex)
+make claude             # Claude Code in its workbench, started if needed, with voice (or: codex)
+make claude-remote      # the same with remote control; claude-plain has neither
 make claude-shell       # a terminal in that workbench (or: codex-shell)
 ```
 

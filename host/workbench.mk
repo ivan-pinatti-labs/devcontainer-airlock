@@ -8,37 +8,45 @@
 # is named for the workbench, so none collides with a repository's own
 # (`up` and `down` are often taken). `make <Tab><Tab>` lists them.
 #
+# host/workbench on its own starts Claude Code with neither voice nor remote
+# control. These targets are the daily ones: `claude` has voice (push to
+# talk, the microphone routed only while space is held), `claude-remote` has
+# voice and remote control (which needs DO_NOT_TRACK cleared, for that
+# session only), and `claude-plain` has neither. `make claude VOICE=0` turns
+# voice off for one run. Codex has no voice mode.
+#
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
-.PHONY: claude codex claude-shell codex-shell claude-remote claude-voice unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
+.PHONY: claude codex claude-shell codex-shell claude-remote claude-plain unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
+VOICE ?= 1
 
 # A repository's own `help` target lists these by depending on this one.
 workbench-help:
 	@printf '%s\n' \
 		'Workbench:' \
-		'  claude                      Run Claude Code in its workbench, here (starts it if needed).' \
+		'  claude                      Claude Code in its workbench, here, with voice (hold space).' \
+		'  claude-remote               The same with remote control, to pair a device (DO_NOT_TRACK off).' \
+		'  claude-plain                Claude Code with neither voice nor remote control.' \
 		'  codex                       Run Codex in its workbench, here (starts it if needed).' \
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
-		'  claude-remote               claude --remote-control there, to pair a device.' \
-		'  claude-voice                Claude Code with the microphone, for voice mode (this session only).' \
 		'  unlock                      Unlock the ssh key for git push, for 8 hours.' \
 		'  workbench-up                Start this repository workbenches, L2 engine and proxy.' \
 		'  workbench-down              Stop them; the shared helpers keep running.' \
 		'  workbench-status            What is running.' \
 		'  workbench-build             Build every image locally.' \
 		'  workbench-pull              Or pull the published images instead.'
-	@$(foreach a,$(WORKBENCH_ACCOUNTS),printf '  %-27s %s\n' 'claude-$(a), codex-$(a)' 'The same, logged in as $(a) (-shell, and claude-$(a)-remote, -voice).';)
+	@$(foreach a,$(WORKBENCH_ACCOUNTS),printf '  %-27s %s\n' 'claude-$(a), codex-$(a)' 'The same, logged in as $(a) (-shell, and claude-$(a)-remote, -plain).';)
 
 # One more set of targets per account in WORKBENCH_ACCOUNTS (claude-personal,
 # codex-personal and their shells), so Tab lists them too.
 WORKBENCH_ACCOUNTS := $(shell $(WORKBENCH) accounts 2>/dev/null)
 define workbench_account
-.PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-voice
+.PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-plain
 claude-$(1):
-	@$$(WORKBENCH) claude-$(1)
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) claude-$(1)
 codex-$(1):
 	@$$(WORKBENCH) codex-$(1)
 claude-$(1)-shell:
@@ -46,14 +54,20 @@ claude-$(1)-shell:
 codex-$(1)-shell:
 	@$$(WORKBENCH) shell codex-$(1)
 claude-$(1)-remote:
-	@$$(WORKBENCH) remote claude-$(1)
-claude-$(1)-voice:
-	@WORKBENCH_VOICE=1 $$(WORKBENCH) claude-$(1)
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) remote claude-$(1)
+claude-$(1)-plain:
+	@WORKBENCH_VOICE=0 $$(WORKBENCH) claude-$(1)
 endef
 $(foreach a,$(WORKBENCH_ACCOUNTS),$(eval $(call workbench_account,$(a))))
 
 claude:
-	@$(WORKBENCH) claude
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) claude
+
+claude-remote:
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) remote claude
+
+claude-plain:
+	@WORKBENCH_VOICE=0 $(WORKBENCH) claude
 
 codex:
 	@$(WORKBENCH) codex
@@ -63,14 +77,6 @@ claude-shell:
 
 codex-shell:
 	@$(WORKBENCH) shell codex
-
-claude-remote:
-	@$(WORKBENCH) remote claude
-
-# Voice mode is off unless asked for; this asks, for this one session. The
-# microphone reaches it through a pipe that goes when the session ends.
-claude-voice:
-	@WORKBENCH_VOICE=1 $(WORKBENCH) claude
 
 # The ssh-agent has to be running to take the key, so start the helpers
 # first; they are left alone when they already run.
