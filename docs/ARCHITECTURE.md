@@ -14,7 +14,8 @@ Reading the picture:
 
 - **Boxes inside boxes** are containers started by the one around them, or
   grouped by what they are shared with: the host starts everything, the
-  helpers serve every workspace, and each workspace has its own proxy,
+  helpers serve every workspace, and each workspace (the folder you start
+  the workbench in, [below](#what-a-workspace-is)) has its own proxy,
   workbenches and engine.
 - **Amber** marks what holds a credential and the unix sockets that lead to
   it. A dashed amber line is optional: the microphone pipes of a voice
@@ -36,8 +37,29 @@ Reading the picture:
 | L2 engine | one per workspace | rootless podman | nothing | the internal network only |
 | L2 run | one per command, thrown away | hooks, tests, package installs, throwaway binaries | nothing | none (the proxy with `l2 --net`) |
 
-A workspace is a repository, one of its worktrees, or a folder of clones
-worked on together ([LAYERS.md](LAYERS.md), "Using it").
+## What a workspace is
+
+A workspace is the folder you start the workbench in (`make claude`,
+`host/workbench up`), and everything in the picture's "one per workspace"
+box exists once for it. That folder is one of three things:
+
+| The folder | Example | What is mounted |
+| --- | --- | --- |
+| a repository's main clone | `~/src/app` | the clone, with all its worktrees |
+| one worktree of a repository | `~/src/app/.claude/worktrees/fix-login` | that worktree, and the clone's git directory |
+| a folder holding several clones side by side | `~/src` | each clone on its own, never the folder as a whole ([LAYERS.md](LAYERS.md), "Several repositories at once") |
+
+Run from inside a repository, the default is its main clone, or the
+worktree you are in when the repository is marked worktree only. Run from a
+folder that is not in a checkout but holds clones, it is that folder.
+
+The containers are named after the folder: `<workspace>` in
+`workbench-claude-<workspace>`, `l2-engine-<workspace>` and the others is
+the folder's own name (`app`, `src`), or `<clone>-<worktree>` for a worktree
+under a clone's `.claude/worktrees` (`app-fix-login`), so two repositories'
+worktrees of the same name never share containers. Two different folders
+with the same name cannot both be running; the second is refused and told
+which folder holds the name.
 
 ## How they talk to each other
 
