@@ -142,6 +142,7 @@
     "pactl",
     "passt",
     "pathlib",
+    "pgrep",
     "pinatti",
     "pipefail",
     "pipestatus",

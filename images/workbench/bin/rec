@@ -40,6 +40,18 @@ say() {
   printf '%s\n' "$1" | dd of="${ctl}" oflag=nonblock status=none 2>/dev/null || true
 }
 
+# An earlier recording of this session that was never stopped (Claude Code
+# can start a new rec without stopping the last one, when it retries) would
+# keep reading the pipe and take part of this one's audio. Stop them, and
+# wait for their rec to tell the host stop before this one says start.
+if pgrep -f -- "^/usr/bin/sox .* ${mic} " >/dev/null; then
+  pkill -KILL -f -- "^/usr/bin/sox .* ${mic} " || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -f -- "^/bin/bash /usr/local/bin/rec " | grep -qvx "$$" || break
+    sleep 0.1
+  done
+fi
+
 # Whatever is still in the microphone pipe (the end of an earlier
 # recording) is old; drop it so a recording starts now. A read that does not
 # wait takes everything there up to its size, and fails once the pipe is
@@ -50,11 +62,20 @@ done
 
 # Claude Code ends a recording by stopping rec (SIGTERM); SoX also ends on
 # its own when its silence effect says so. Either way, the host is told to
-# stop routing the microphone.
+# stop routing the microphone. SoX, on SIGTERM, only sets a flag and
+# finishes (writing out what it holds) after its next read, so it is stopped
+# while the microphone still flows, and killed outright if it has not ended
+# half a second later; once the host stops the microphone, that read would
+# never return and SoX would hang on the pipe.
 pid=""
 finish() {
   if [ -n "${pid}" ]; then
-    kill "${pid}" 2>/dev/null || true
+    kill -TERM "${pid}" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      kill -0 "${pid}" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -KILL "${pid}" 2>/dev/null || true
   fi
   say stop
 }
