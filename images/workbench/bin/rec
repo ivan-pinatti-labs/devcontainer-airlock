@@ -3,9 +3,12 @@
   rec for Claude Code voice mode in a workbench: SoX recording from the
   microphone pipe of a voice session instead of an audio device. The
   workbench has no audio device and no way to the host audio server.
-  `make claude-voice` has PipeWire, on the host, write the microphone into
-  a named pipe for that session (16 kHz, 16 bit, mono) and tells only that
-  session where it is, in WORKBENCH_VOICE_MIC. docs/LAYERS.md, "Voice".
+  A session started with voice (make claude, the default) gets two named
+  pipes from the host, named only to that session: WORKBENCH_VOICE_MIC,
+  which PipeWire writes the microphone into (16 kHz, 16 bit, mono), and
+  WORKBENCH_VOICE_CTL, on which this writes "start" when it begins and
+  "stop" when it ends. Claude Code runs rec only while space is held, so the
+  host routes the microphone only then. docs/LAYERS.md, "Voice".
 
   Takes what SoX rec takes after its input: the output format, the output
   file and the effects, as Claude Code passes them. Without a voice session
@@ -16,25 +19,54 @@ set -o errexit
 set -o nounset
 
 mic="${WORKBENCH_VOICE_MIC:-}"
-case "${mic}" in
-  /run/workbench-voice/*) ;;
+ctl="${WORKBENCH_VOICE_CTL:-}"
+case "${mic}:${ctl}" in
+  /run/workbench-voice/*:/run/workbench-voice/*) ;;
   *)
-    echo "rec: no microphone in this session; start it with make claude-voice (docs/LAYERS.md, Voice)" >&2
+    echo "rec: no microphone in this session; start it with make claude (make claude-plain has none; docs/LAYERS.md, Voice)" >&2
     exit 1 ;;
 esac
-if [ ! -p "${mic}" ]; then
-  echo "rec: the microphone pipe ${mic} is gone; its voice session has ended" >&2
+if [ ! -p "${mic}" ] || [ ! -p "${ctl}" ]; then
+  echo "rec: the microphone pipes of this session are gone; its voice session has ended" >&2
   exit 1
 fi
 case "${1:-}" in
   --version | -h | --help) exec /usr/bin/sox "$@" ;;
 esac
-# Whatever PipeWire wrote while nothing was reading (the pipe's buffer,
-# about two seconds) is old; drop it so a recording starts close to now. A
-# read that does not wait takes everything there up to its size, and fails
-# once the pipe is empty; a few passes catch what PipeWire adds meanwhile.
-# It is not an exact boundary, since PipeWire keeps writing.
+
+# One word to the host. Opened without waiting, so a host end that has gone
+# makes this fail instead of hanging.
+say() {
+  printf '%s\n' "$1" | dd of="${ctl}" oflag=nonblock status=none 2>/dev/null || true
+}
+
+# Whatever is still in the microphone pipe (the end of an earlier
+# recording) is old; drop it so a recording starts now. A read that does not
+# wait takes everything there up to its size, and fails once the pipe is
+# empty.
 for _ in 1 2 3 4 5 6 7 8; do
   dd if="${mic}" iflag=nonblock of=/dev/null bs=1048576 count=1 status=none 2>/dev/null || break
 done
-exec /usr/bin/sox -t raw -r 16000 -e signed -b 16 -c 1 "${mic}" "$@"
+
+# Claude Code ends a recording by stopping rec (SIGTERM); SoX also ends on
+# its own when its silence effect says so. Either way, the host is told to
+# stop routing the microphone.
+pid=""
+finish() {
+  if [ -n "${pid}" ]; then
+    kill "${pid}" 2>/dev/null || true
+  fi
+  say stop
+}
+trap 'finish; exit 143' TERM
+trap 'finish; exit 130' INT
+trap 'finish; exit 129' HUP
+say start
+/usr/bin/sox -t raw -r 16000 -e signed -b 16 -c 1 "${mic}" "$@" &
+pid=$!
+set +o errexit
+wait "${pid}"
+status=$?
+pid=""
+finish
+exit "${status}"

@@ -17,7 +17,7 @@ Reading the picture:
   helpers serve every workspace, and each workspace has its own proxy,
   workbenches and engine.
 - **Amber** marks what holds a credential and the unix sockets that lead to
-  it. A dashed amber line is optional: the microphone pipe of a voice
+  it. A dashed amber line is optional: the microphone pipes of a voice
   session.
 - **Green** is the network. Inside a workspace there is one internal network
   with no route out; the proxy is the only thing on it that also has one.
@@ -45,8 +45,9 @@ The egress proxy is the one piece listening on a network port: 8888, on the
 workspace's internal network, for outbound traffic. Everything else local is
 a unix socket in a folder the host creates and mounts only where it belongs,
 and SELinux lets these containers connect only to a socket held by one in
-their own domain and category. Voice is not a socket either: a named pipe
-the workbench can only read.
+their own domain and category. Voice is not a socket either: two named
+pipes, one carrying microphone audio in and one carrying `start` and `stop`
+out.
 
 | From | To | Over | Carries |
 | --- | --- | --- | --- |
@@ -54,7 +55,8 @@ the workbench can only read.
 | workbench (`git`, `ssh`) | ssh-agent | `agent.sock` | signing requests; the key never leaves the agent |
 | workbench (`l2`, `podman`) | L2 engine | `podman.sock` | the podman API: start an L2 run, build an L2 image |
 | L2 engine | L2 run | inside the engine | the run gets the working tree, and nothing of the workbench (not its processes, not its localhost) |
-| PipeWire on the host | workbench | a named pipe, read only | microphone audio, for one `make claude-voice` session and only while it runs; nothing flows back ([LAYERS.md](LAYERS.md), "Voice") |
+| PipeWire on the host | workbench | a named pipe | microphone audio for a session with voice (`make claude`), only while Claude Code records ([LAYERS.md](LAYERS.md), "Voice") |
+| workbench (`rec`) | `host/workbench` | a second named pipe | the words `start` and `stop`, nothing else understood; they switch the microphone on and off |
 | VS Code window | workbench | podman, from the host | the editor attaches to the running container; its server and extensions run there |
 
 What is deliberately missing: L2 has no socket to the broker, the agent or

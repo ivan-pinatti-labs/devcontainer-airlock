@@ -90,8 +90,10 @@ Each day, from the repository you are working on:
 
 ```shell
 make unlock              # type the key's passphrase; lasts 8 hours
-make claude              # Claude Code, in its workbench, in the folder you are in
-make codex               # the same for Codex
+make claude              # Claude Code, in its workbench, in the folder you are in, with voice
+make claude-remote       # the same with remote control, to pair a device
+make claude-plain        # neither voice nor remote control
+make codex               # Codex, the same way (no voice)
 make claude-shell        # or codex-shell: a plain terminal in that workbench
 ```
 
@@ -341,28 +343,37 @@ token or the ssh key, and that L2 holds nothing at all.
 
 ## Voice
 
-Claude Code's voice mode records the microphone with SoX (`rec`). The
-workbench has no audio device and no way to the host's audio server, so
-the microphone reaches it as a stream of bytes, for one session at a time:
+Claude Code's voice mode records the microphone with SoX (`rec`), while
+space is held. The workbench has no audio device and no way to the host's
+audio server, so the microphone reaches it as a stream of bytes, per
+session and only while Claude Code records:
 
-- `make claude-voice` (`WORKBENCH_VOICE=1 host/workbench claude`, or
-  `make claude-<account>-voice`) asks PipeWire on the host, through
-  `pactl`, to write the microphone into a named pipe (16 kHz, 16 bit, mono)
-  in that workbench's voice folder, and starts Claude Code with
-  `WORKBENCH_VOICE_MIC` naming it.
-- The `rec` in the Claude workbench image reads that pipe instead of a
-  device. It first drops what the pipe holds, which is most of what was
-  buffered before it started; PipeWire keeps writing meanwhile, so a few
-  milliseconds from just before can remain. In any other session it fails,
-  so Claude Code says there is no microphone.
-- When the session ends, the pipe and PipeWire's two modules go with it.
-  Nothing listens on the microphone between voice sessions.
+- `make claude` and `make claude-remote` (and `make claude-<account>`,
+  `-remote`) start Claude Code with voice; `make claude-plain`,
+  `make claude VOICE=0`, `host/workbench` on its own and Codex have none.
+  With `WORKBENCH_VOICE=1`, `host/workbench` asks PipeWire on the host,
+  through `pactl`, for a named pipe (16 kHz, 16 bit, mono) in that
+  workbench's voice folder, makes a second pipe the other way, and starts
+  Claude Code with `WORKBENCH_VOICE_MIC` and `WORKBENCH_VOICE_CTL` naming
+  them.
+- The `rec` in the Claude workbench image writes `start` on the second
+  pipe when Claude Code starts it and `stop` when it ends. Only then does
+  `host/workbench` route the microphone into the first pipe, and a single
+  recording is cut off after ten minutes. It reads at most 16 bytes at a
+  time from that pipe and compares them with those two words; nothing it
+  reads is run. `rec` reads the first pipe instead of a device, dropping
+  what an earlier recording left. Outside a voice session it fails, so
+  Claude Code says there is no microphone.
+- When the session ends, both pipes and PipeWire's modules go with it.
+- When voice cannot be set up (no `pactl`, PipeWire refusing), the session
+  says why and starts without it.
 
 Every Claude workbench mounts its own voice folder
 (`$XDG_RUNTIME_DIR/workbench/voice/<name>`) read only, and it stays empty
 unless a voice session runs. A workbench started before this existed has no
-such folder; `make claude-voice` says so, and it needs a restart
-(`host/workbench down`, which ends every session in it).
+such folder; a voice session there says so and starts without the
+microphone until the workbench is restarted (`host/workbench down`, which
+ends every session in it).
 
 Why a pipe and not the audio server's socket: the socket was tried first
 and measured 2026-09-28. Any client of it can load modules into the host's
@@ -372,11 +383,17 @@ SELinux module letting the workbench domain connect to desktop processes.
 Reading a pipe needs no policy change and gives the workbench audio and
 nothing else.
 
-What it does allow: while a voice session runs, anything in that
-workbench able to read the pipe hears the microphone, and the audio goes to
-Anthropic's speech service like the rest of the agent's traffic, through
-the egress proxy. Voice mode is not available in a remote control session;
-Claude Code turns it off there.
+What it does allow: while a voice session runs, anything in that workbench
+able to write `start` on its control pipe turns the microphone on, and
+anything able to read the other pipe hears it, for at most ten minutes at a
+time. The audio goes to Anthropic's speech service like the rest of the
+agent's traffic, through the egress proxy.
+
+Voice works in a remote control session too (`make claude-remote`), with
+the host's microphone, so from the computer rather than from the paired
+device. Remote Control itself needs `DO_NOT_TRACK` cleared: Claude Code
+2.1.283 refuses to start it without feature flags, which `DO_NOT_TRACK`
+turns off. `host/workbench remote` clears it for that one session.
 
 ## GitHub access
 
