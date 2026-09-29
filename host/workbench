@@ -801,6 +801,10 @@ proxy_join() {
   # holding .2 on its network. Its workbenches find the shared one at the
   # same address, so they keep working across the swap.
   podman rm -f -t 5 "egress-proxy-${slug}" >/dev/null 2>&1 || true
+  # The registration it replaces, if any, comes back when the new one is
+  # refused, so a bad set name never costs a running workspace its rules.
+  rm -f "${f}.prev"
+  if [ -f "${f}" ]; then cp -p "${f}" "${f}.prev"; fi
   printf 'workspace=%s\nsubnet=%s\nsets=%s\n' "${ws}" "$(net_subnet "${net}")" "${sets}" > "${f}.tmp"
   chmod 644 "${f}.tmp"
   mv "${f}.tmp" "${f}"
@@ -810,11 +814,12 @@ proxy_join() {
     podman network connect --ip "$(proxy_ip "${ws}")" "${net}" "${PROXY}"
   fi
   if ! podman exec "${PROXY}" egress-reload >/dev/null; then
-    rm -f "${f}"
+    if [ -f "${f}.prev" ]; then mv "${f}.prev" "${f}"; else rm -f "${f}"; fi
     podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
     podman logs --tail 5 "${PROXY}" >&2
-    die "the egress proxy refused the sets of ${ws} (${sets}); the other workspaces keep theirs"
+    die "the egress proxy refused the sets of ${ws} (${sets}); it keeps the ones it had, and so do the other workspaces"
   fi
+  rm -f "${f}.prev"
 }
 
 # Take a workspace off the proxy: its rules first, then the network.
