@@ -35,6 +35,8 @@ Reading the picture:
 | egress-proxy | one per host | squid | nothing | every workspace's internal network, at `.2` on each, and out for the hosts of each workspace's egress sets |
 | workbench | one per agent and login, per workspace | the agent, the VS Code server and extensions, git, a `gh` client of the broker | that agent's own login | the internal network only |
 | L2 engine | one per workspace | rootless podman | nothing | the internal network only |
+| mirror gate | one per host, optional | the package mirror's front: fixed paths, registry mirror ports, the OSV malicious package filter | nothing | `.3` on every workspace network, and the mirror network |
+| mirror backend | one per host, optional | Nexus Repository CE, proxy repositories only | cached packages | the mirror network only; out through the egress proxy |
 | L2 run | one per command, thrown away | hooks, tests, package installs, throwaway binaries | nothing | none (the proxy with `l2 --net`) |
 
 A workspace is a repository, one of its worktrees, or a folder of clones
@@ -73,6 +75,7 @@ workbench has no container runtime of its own, only a client of the engine.
 | `git fetch`, `git push` | workbench ssh, tunnelled through the proxy to `ssh.github.com:443`, signed by the ssh-agent | the `github` egress set, always on; host keys checked strictly against GitHub's published ones |
 | `gh` | workbench to the broker by socket, then the broker straight to GitHub | the broker's allowlist of commands and owners |
 | package installs, tool downloads | an L2 run with `l2 --net`, or the engine pulling an image, through the proxy | the egress sets the repository lists in `.devcontainer/egress-sets` |
+| the same, with the package mirror on | an L2 run or the engine to the mirror gate, the gate to its backend, the backend through the proxy | the gate's filter, and the mirror's own upstream sets ([LAYERS.md](LAYERS.md), "Package mirror") |
 | everything else | the proxy | nothing: refused with a 403 |
 | the proxy itself | out, to refresh GitHub's and other providers' address ranges | its own configuration |
 

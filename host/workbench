@@ -93,6 +93,14 @@
   workspace off for a moment. `podman run --rm
   localhost/airlock-egress-proxy egress-refresh --list` shows every set.
 
+  With WORKBENCH_MIRROR=1 a package mirror runs beside the proxy, one for
+  the host: its gate at .3 on each workspace network, which L2 and the
+  engine install and pull through, and its backend (Nexus Repository CE) on
+  a network of its own, whose only way out is the proxy. The gate leaves
+  out npm, PyPI and Go versions listed as malicious in OSV. A workspace
+  whose .devcontainer/egress-sets lists mirror (and nothing else) reaches no
+  registry but through it. docs/LAYERS.md, Package mirror.
+
   Settings, from the environment or ${XDG_CONFIG_HOME}/workbench/config
   (KEY=value lines, read and never run; the environment wins):
     WORKBENCH_GH_OWNERS   the GitHub owners (users or organizations) the gh

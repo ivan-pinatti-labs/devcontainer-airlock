@@ -540,6 +540,124 @@ pinned to a version missing from the list fails with "module lookup disabled
 by GOPROXY=off": bump the list first, then the pin. Select `golang` only
 to build Go against the network, as building the L2 image itself does.
 
+## Package mirror
+
+An optional read through mirror of the public registries, one for the host
+like the egress proxy, turned on with `WORKBENCH_MIRROR=1`. Installs and
+image pulls in L2 and the engine then go through it, and a workspace that
+runs code nobody has reviewed can be given the mirror and nothing else.
+
+```text
+L2 run, engine  ──>  gate (.3 on every workspace network)  ──>  backend  ──>  egress proxy  ──>  registries
+                     fixed paths, OSV filter                     Nexus CE      the upstream sets only
+```
+
+| Piece | Runs | Network |
+| --- | --- | --- |
+| `mirror-gate` | the only part clients reach: fixed paths per ecosystem, registry mirror ports, the malicious package filter | `.3` on each workspace network, and the mirror network |
+| `mirror-nexus` | Nexus Repository Community Edition, the first backend: proxy repositories only | the mirror network only, never a workspace network |
+| provisioning | a one shot run of the gate image each time the backend starts | the mirror network |
+
+### What clients see
+
+`l2 --net` gives a run the gate's addresses (`AIRLOCK_MIRROR` in the
+workbench says where it is):
+
+| Ecosystem | Setting | Gate path |
+| --- | --- | --- |
+| PyPI (pip, uv, pre-commit's python hooks) | `PIP_INDEX_URL`, `UV_DEFAULT_INDEX` | `/pypi/simple/` |
+| npm (and pre-commit's node hooks) | `NPM_CONFIG_REGISTRY` | `/npm/` |
+| Go | `GOPROXY`; `GOSUMDB` stays on, the gate serves `sum.golang.org` too | `/go/` |
+| apt (Ubuntu, main and security) | the gate as the plain http proxy | `/apt/ubuntu/`, `/apt/ubuntu-security/` |
+| Alpine apk | a repositories line pointing at the gate | `/apk/alpine/` |
+| yum and dnf (Fedora) | a baseurl pointing at the gate | `/yum/fedora/` |
+| docker.io, ghcr.io | the engine's registries.conf, mirrors on ports 5000 and 5001 | `/v2/` |
+
+The engine gets the same for its own pulls and for the images it builds:
+registry mirrors in a registries.conf drop-in, and the gate as its plain http
+proxy, so apt in an image build is served from the mirror. pip and npm in an
+image build still go through the egress proxy unless the Dockerfile points
+them at the gate.
+
+`mirror` in `.devcontainer/egress-sets` is not an egress set: it says the
+workspace installs through the mirror, and `up` refuses it when the mirror is
+off. A workspace that lists it and nothing else reaches no registry directly
+(measured below: pypi.org refused through the proxy, installs through the
+gate working).
+
+### The filter
+
+The gate takes out of npm, PyPI and Go answers every version that OSV lists
+as malicious (the OpenSSF malicious packages feed, entries named `MAL-`), and
+refuses their downloads with a 403 that says why. `WORKBENCH_MIRROR_MIN_AGE`
+also hides npm and Go versions published fewer days ago than that. The first
+sync downloads each ecosystem's full OSV file once; later ones fetch only the
+entries changed since, every six hours. The last good copy is kept in the
+`mirror-osv` volume, and `/_status` on the gate says when each feed synced.
+
+Vulnerabilities (CVE and GHSA entries) never block anything here; they are
+reported, as everywhere in the organization. Docker Hub has no malicious
+package feed in OSV, so images are not filtered; the registries are mirrored
+for caching and for keeping the engine off the open network.
+
+### Read through only
+
+Every repository the provisioning keeps is a proxy of a public registry;
+everything else, the hosted repositories Nexus ships with included, is
+deleted. The anonymous account reads and nothing more, an upload is refused
+(401 from the backend, 405 from the gate), and the admin password is replaced
+by a random one kept in the `mirror-admin` volume, which only the
+provisioning run mounts.
+
+### Telemetry
+
+Community Edition sends usage telemetry that cannot be turned off. Here it
+has nowhere to go: the backend is on a network whose only way out is the
+egress proxy, and the mirror's registration there holds only the upstream
+registries' sets. No Sonatype host is on any set, so every attempt is refused
+like any other host (Sonatype says the server works on without it).
+
+### A different backend
+
+The gate reads the mapping from its fixed paths to backend paths from a
+routes file (`images/mirror-gate/routes/nexus.toml`), and the provisioning
+lives beside it (`images/mirror-gate/backends/nexus/`). Moving to Pulp, say,
+is a `pulp.toml` and a `backends/pulp/`; no client changes. The one Nexus
+specific step with no stable API is setting its outbound proxy: the REST API
+has no endpoint for it, so the provisioning uses the web UI's own
+(`coreui_HttpSettings`), which a Nexus upgrade could change.
+
+### Community Edition's terms
+
+Nexus Repository CE is free under Sonatype's own license (the open source
+core, under the EPL, lacks the npm, PyPI, Docker and Go formats). It is
+limited to 40,000 components and 100,000 requests a day; failed requests
+count too. Past either, it stops adding components until usage is back under
+both, and keeps serving what it has.
+
+### Measured
+
+2026-09-29, in an L2 engine, with `host/workbench`'s own functions starting
+the mirror beside a shared egress proxy, Nexus Repository CE 3.96.3 with a
+1 GB heap, and two workspaces: one listing only `mirror`, one listing
+`python`.
+
+| Check | Result |
+| --- | --- |
+| first start: backend image pull, boot, provisioning, gate | 69 s; later starts 46 s |
+| resident memory | backend 1.48 GB, gate 144 MB with every OSV feed loaded, proxy 36 MB |
+| OSV feeds, first sync | npm 221,698 malicious entries, PyPI 11,762, Go 18, in under a minute |
+| the `mirror` only workspace: npm, pip, go (checksum database on), docker.io, apt | all through the gate |
+| the same workspace straight to pypi.org | refused |
+| the `python` workspace straight to pypi.org | allowed |
+| the `mirror` workspace to the gate's address on the other workspace's network, or to the backend | no route |
+| hosts the mirror asked the proxy for in its first minutes | the Ubuntu archives and OSV's bucket allowed; `rhc.sonatype.com` (telemetry) refused |
+| a version planted as malicious (left-pad 1.3.0, six 1.16.0, uuid v1.6.0) | left out of the npm metadata, PyPI index and Go list; its download refused with a 403 |
+| an upload | 401 from the backend, 405 from the gate |
+
+Sonatype's documented minimum heap is 2703 MB (2.3 GB resident, measured);
+1 GB served these clients, and `WORKBENCH_MIRROR_HEAP` sets it.
+
 ## Extensions
 
 The editor's extensions run in the workbench with the same permissions as
