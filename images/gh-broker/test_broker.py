@@ -66,6 +66,9 @@ argv_cases = [
   (False, Q + ["query=mutation"]),
   (True,  ["search", "issues", "repo:ivan-pinatti-labs/x is:open deadlock"]),
   (False, ["search", "issues", "deadlock (org:someone-else)"]),
+  (True,  ["search", "issues", "deadlock (org:ivan-pinatti-labs)"]),
+  (True,  ["search", "prs", "(repo:ivan-pinatti-labs/x OR repo:ivan-pinatti-labs/y) is:open"]),
+  (False, ["search", "prs", "(repo:ivan-pinatti-labs/x OR repo:someone-else/y)"]),
   (False, ["search", "prs", "is:open repo:someone-else/x"]),
 ]
 bad = [(exp, c) for exp, c in cases if allowed(c.split()) != exp]

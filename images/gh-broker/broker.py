@@ -38,7 +38,7 @@ OWNER_FLAGS = ("--owner",)
 URL = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/", re.I)
 # The same scopes written into a search query itself (`repo:x/y`, `org:x`,
 # `user:x`), which gh passes through to GitHub unchanged.
-QUALIFIER = re.compile(r"(?:^|[\s(])-?(repo|org|user|owner):(\S+)", re.I)
+QUALIFIER = re.compile(r"(?:^|[\s(])-?(repo|org|user|owner):([^\s()]+)", re.I)
 
 
 def flag_values(argv, flags):
