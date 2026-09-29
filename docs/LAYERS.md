@@ -414,7 +414,10 @@ can take the token away. Every request is logged: `podman logs gh-broker`.
 Refused: anything outside the allowlist (including `gh auth token`, `repo
 delete`, `secret`), repositories outside the organization, `gh api` with a
 method other than GET, and GraphQL mutations. Interactive prompts are not
-available, so pass the flags a prompt would ask for.
+available, so pass the flags a prompt would ask for. The broker never reads
+a file named on the command line, since it would read it beside the token;
+the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the
+text as the body on stdin. A refusal says which rule it hit.
 
 `git push` goes over ssh through the ssh-agent container, which signs the
 login without ever handing over the key. The connection runs to

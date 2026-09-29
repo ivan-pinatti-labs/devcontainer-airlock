@@ -211,12 +211,29 @@ def merge_ok(argv):
 
 
 def allowed(argv):
+    return refusal(argv) is None
+
+
+# Why a command is refused, for the message the caller sees, or None when
+# it is allowed.
+def refusal(argv):
     if not argv:
-        return False
+        return "no command"
     if argv[0] == "api":
-        return api_ok(argv)
-    return (" ".join(argv[:2]) in COMMANDS and repos_ok(argv) and files_ok(argv)
-            and merge_ok(argv))
+        return None if api_ok(argv) else (
+            "this gh api call is not allowed: only reads, review comment replies"
+            " and the listed GraphQL mutations, on the allowed owners")
+    if " ".join(argv[:2]) not in COMMANDS:
+        return f"'gh {' '.join(argv[:2])}' is not on the allowlist"
+    if not repos_ok(argv):
+        return "the repository is not under an allowed owner"
+    if not files_ok(argv):
+        return ("a file named on the command line would be read here, beside the"
+                " token; pass the body on stdin (--body-file -), which the"
+                " workbench gh does for a --body-file path")
+    if not merge_ok(argv):
+        return "--admin merges around the merge queue"
+    return None
 
 
 def serve(conn):
@@ -227,9 +244,10 @@ def serve(conn):
         except (ValueError, KeyError, TypeError):
             conn.sendall(b'{"rc":2,"out":"","err":"gh-broker: malformed request\\n"}')
             return
-        if not allowed(argv):
+        why = refusal(argv)
+        if why is not None:
             print("REFUSE", json.dumps(argv), flush=True)
-            msg = f"gh-broker: 'gh {' '.join(argv[:2])}' is not allowed from the workbench (images/gh-broker/allowlist.json)\n"
+            msg = f"gh-broker: refused: {why} (images/gh-broker/allowlist.json)\n"
             conn.sendall(json.dumps({"rc": 126, "out": "", "err": msg}).encode())
             return
         print("RUN", json.dumps(argv), "in", req.get("cwd"), flush=True)

@@ -64,6 +64,18 @@ for env, exp in [("", 0), ("evil name", 0), ("ivan-pinatti-labs", 1)]:
     cases.append((bool(exp), env))
 bad += [(exp, " ".join(a)) for exp, a in argv_cases if allowed(a) != exp]
 cases += argv_cases
+# A refusal says why, so the caller can tell a file flag from a command
+# that is not on the allowlist.
+refusal = ns["refusal"]
+why_cases = [
+  ("pr create -t t --body-file /tmp/body.md", "stdin"),
+  ("auth token", "not on the allowlist"),
+  ("pr view 1 -R evil/x", "allowed owner"),
+  ("pr merge 25 --admin", "merge queue"),
+  ("api -X DELETE repos/ivan-pinatti-labs/x", "gh api call"),
+]
+bad += [(False, f"{c} (refusal should name {w!r})") for c, w in why_cases if w not in (refusal(c.split()) or "")]
+cases += [(False, c) for c, _ in why_cases]
 for exp, c in bad: print("WRONG", "expected", "allow" if exp else "refuse", ":", c)
 print(f"{len(cases)-len(bad)}/{len(cases)} cases as expected")
 sys.exit(1 if bad else 0)

@@ -9,8 +9,14 @@ output and exit status. See docs/LAYERS.md, "GitHub access".
 Interactive prompts are not available: pass the flags a prompt would ask for
 (--title, --body or --body-file, --head, --base).
 
+The broker never reads a file named on the command line: it would read it
+there, beside the token. So a --body-file (or -F) path is read here, in the
+workbench, and sent as the body on stdin (--body-file -). Not for gh api,
+where -F is a field.
+
 Exit status codes:
-  126  the broker refused the command (not on its allowlist)
+  1    a --body-file path could not be read
+  126  the broker refused the command (the message says why)
   127  the broker is not reachable
   any  otherwise, the exit status of gh itself
 """
@@ -19,6 +25,37 @@ import os
 import socket
 import sys
 
+
+def inline_body_file(argv):
+    """argv with a --body-file or -F path replaced by `--body-file -`, and
+    that file's text, or None when no path was given."""
+    if not argv or argv[0] == "api":
+        return argv, None
+    out, body, i = [], None, 0
+    while i < len(argv):
+        a, path = argv[i], None
+        if a in ("--body-file", "-F") and i + 1 < len(argv):
+            path, i = argv[i + 1], i + 2
+        elif a.startswith("--body-file="):
+            path, i = a.split("=", 1)[1], i + 1
+        elif a.startswith("-F") and len(a) > 2:
+            path, i = a[2:], i + 1
+        else:
+            out.append(a)
+            i += 1
+            continue
+        if path != "-":
+            try:
+                with open(path, encoding="utf-8") as f:
+                    body = f.read()
+            except OSError as e:
+                sys.stderr.write(f"gh: cannot read {path} ({e.strerror})\n")
+                sys.exit(1)
+        out += ["--body-file", "-"]
+    return out, body
+
+
+argv, body = inline_body_file(sys.argv[1:])
 path = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
 try:
     s = socket.socket(socket.AF_UNIX)
@@ -28,8 +65,11 @@ except OSError as e:
         f"gh: the gh broker is not reachable at {path} ({e.strerror}).\n"
         "gh: start the helpers on the host: host/workbench up\n")
     sys.exit(127)
-stdin = "" if sys.stdin.isatty() else sys.stdin.read()
-s.sendall((json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": stdin}) + "\n").encode())
+if body is not None:
+    stdin = body
+else:
+    stdin = "" if sys.stdin.isatty() else sys.stdin.read()
+s.sendall((json.dumps({"argv": argv, "cwd": os.getcwd(), "stdin": stdin}) + "\n").encode())
 s.shutdown(socket.SHUT_WR)
 reply = json.loads(b"".join(iter(lambda: s.recv(65536), b"")) or b'{"rc":1,"out":"","err":"gh: empty reply from broker\\n"}')
 sys.stdout.write(reply["out"])
