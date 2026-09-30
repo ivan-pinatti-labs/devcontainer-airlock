@@ -36,7 +36,8 @@
     - the paths in PROTECTED below read only, because the workbench or the
       host execute them (devcontainer.json runs initializeCommand on the host)
     - a per repository volume at /root for pre-commit environments and caches
-    - nothing from the environment except the proxy variables with --net
+    - nothing from the environment except the proxy variables with --net,
+      and the package mirror settings when the host runs one
 
   After every run in a repository, the paths in PROTECTED are compared with
   before: their files by content, their links by target, and whether each
@@ -149,8 +150,23 @@ fi
 
 if [ "${net}" = true ]; then
   for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy NODE_USE_ENV_PROXY; do
+    # With the package mirror, plain http (apt) goes to its gate instead.
+    case "${v}" in HTTP_PROXY | http_proxy) [ -n "${AIRLOCK_MIRROR:-}" ] && continue ;; esac
     [ -n "${!v:-}" ] && args+=(-e "${v}=${!v}")
   done
+  # The package mirror, when the host runs one (docs/LAYERS.md, "Package
+  # mirror"): pip, uv, npm and go install through its gate, which the
+  # workspace reaches directly (it is in NO_PROXY), and apt uses it as its
+  # http proxy. GOSUMDB stays on; the gate serves the checksum database too.
+  if [ -n "${AIRLOCK_MIRROR:-}" ]; then
+    m="${AIRLOCK_MIRROR%/}"
+    gate="${m#http://}"
+    gate="${gate%%:*}"
+    args+=(-e "PIP_INDEX_URL=${m}/pypi/simple/" -e "PIP_TRUSTED_HOST=${gate}"
+      -e "UV_DEFAULT_INDEX=${m}/pypi/simple/" -e "UV_INSECURE_HOST=${gate}"
+      -e "NPM_CONFIG_REGISTRY=${m}/npm/" -e "GOPROXY=${m}/go"
+      -e "HTTP_PROXY=${m}" -e "http_proxy=${m}")
+  fi
 else
   args+=(--network=none --http-proxy=false)
 fi

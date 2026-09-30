@@ -93,6 +93,14 @@
   workspace off for a moment. `podman run --rm
   localhost/airlock-egress-proxy egress-refresh --list` shows every set.
 
+  With WORKBENCH_MIRROR=1 a package mirror runs beside the proxy, one for
+  the host: its gate at .254 on each workspace network, which L2 and the
+  engine install and pull through, and its backend (Nexus Repository CE) on
+  a network of its own, whose only way out is the proxy. The gate leaves
+  out npm, PyPI and Go versions listed as malicious in OSV. A workspace
+  whose .devcontainer/egress-sets lists mirror (and nothing else) reaches no
+  registry but through it. docs/LAYERS.md, Package mirror.
+
   Settings, from the environment or ${XDG_CONFIG_HOME}/workbench/config
   (KEY=value lines, read and never run; the environment wins):
     WORKBENCH_GH_OWNERS   the GitHub owners (users or organizations) the gh
@@ -121,6 +129,13 @@
     WORKBENCH_TZ          the time zone of the workbenches, as podman --tz
                           takes it (America/Toronto, say). Default: local,
                           the host one; L2 stays on UTC
+    WORKBENCH_MIRROR      1 to run the package mirror (docs/LAYERS.md,
+                          Package mirror): installs and image pulls in L2 and
+                          the engine go through it. Default: off
+    WORKBENCH_MIRROR_MIN_AGE
+                          hide npm and Go versions published fewer days ago
+                          than this. Default: 0, off
+    WORKBENCH_MIRROR_HEAP the Java heap of the mirror backend, in MB. Default: 1024
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
                           Default: ghcr.io/ivan-pinatti-labs
@@ -131,12 +146,17 @@
     ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket
     ${XDG_RUNTIME_DIR}/workbench/egress       the workspaces the egress proxy
                                               serves, and their sets
+    ${XDG_RUNTIME_DIR}/workbench/mirror       the workspaces the package mirror
+                                              serves, and the registry mirror
+                                              settings of their engines
     ${XDG_RUNTIME_DIR}/workbench/<name>       the L2 engine socket
     ${XDG_RUNTIME_DIR}/devcontainer-ssh       the ssh-agent socket, known_hosts
     ${XDG_RUNTIME_DIR}/workbench/voice/<name> the microphone pipe of a voice
                                               session, only while it runs
     podman volume l2-engine-<name>            L2 images, pre-commit caches
     podman volume egress-cache                providers last good lists
+    podman volumes mirror-*                   the mirror cache, its OSV
+                                              feeds and its admin password
 
   Exit status codes:
     1  a prerequisite is missing (the message says which)
@@ -164,7 +184,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY | WORKBENCH_MIRROR | WORKBENCH_MIRROR_MIN_AGE | WORKBENCH_MIRROR_HEAP) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -248,6 +268,14 @@ L2_IMAGE="localhost/airlock-l2:${TAG}"
 ENGINE_IMAGE="localhost/airlock-l2-engine:${TAG}"
 BROKER_IMAGE="localhost/airlock-gh-broker:${TAG}"
 PROXY_IMAGE="localhost/airlock-egress-proxy:${TAG}"
+GATE_IMAGE="localhost/airlock-mirror-gate:${TAG}"
+# The mirror backend, Nexus Repository Community Edition, pinned by digest.
+# Its gate (above) is the only part clients know, so another backend is
+# another routes file and provisioning under images/mirror-gate/backends/.
+# renovate: datasource=docker depName=docker.io/sonatype/nexus3
+NEXUS_IMAGE="docker.io/sonatype/nexus3:3.96.3@sha256:a406f4e9dc149e050723a93bf57964311f6d1c88e1dcbed2e42ea373319a1772"
+MIRROR="${WORKBENCH_MIRROR:-0}"
+MIRROR_NET=workbench-net-airlock-mirror
 # The one egress proxy of the host, shared by every workspace.
 PROXY=egress-proxy
 
@@ -264,6 +292,7 @@ RUN="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
 GH_DIR="${RUN}/workbench/gh"
 # The workspaces the egress proxy serves, one file each, which it reads.
 EGRESS_DIR="${RUN}/workbench/egress"
+MIRROR_DIR="${RUN}/workbench/mirror"
 SSH_DIR="${RUN}/devcontainer-ssh"
 # Per Claude workbench, the folder a voice session's microphone pipe appears
 # in (docs/LAYERS.md, Voice).
@@ -440,9 +469,9 @@ net_name() { echo "workbench-net-$(slug "$1")"; }
 
 # Each workspace has an internal network of its own, 10.203.N.0/24 with N
 # picked when the network is first created, and its proxy at .2 on it.
-ensure_net() {
-  local net used n
-  net="$(net_name "$1")"
+ensure_net() { create_net "$(net_name "$1")"; }
+create_net() {
+  local net="$1" used n
   podman network exists "${net}" && return
   used="$(podman network ls --format '{{.Name}}' \
     | xargs -r podman network inspect --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | tr '\n' ' ')"
@@ -483,13 +512,22 @@ proxy_ip() { net_proxy_ip "$(net_name "$1")"; }
 # The proxy variables for a container on this workspace's network, into the
 # global PROXY_ENV array.
 set_proxy_env() {
-  local url
+  local url plain no="localhost,127.0.0.1" gate
   url="http://$(proxy_ip "$1"):8888"
+  plain="${url}"
+  if mirror_on; then
+    gate="$(mirror_ip "$1")"
+    no="${no},${gate}"
+    # The engine's plain http (apt, in image builds) goes to the gate, which
+    # serves the archives it mirrors and refuses every other host.
+    [ "${2:-}" = engine ] && plain="http://${gate}:8081"
+  fi
   # shellcheck disable=SC2054 # the commas are inside NO_PROXY's value
   PROXY_ENV=(
-    -e HTTPS_PROXY="${url}" -e HTTP_PROXY="${url}" -e NO_PROXY=localhost,127.0.0.1
-    -e https_proxy="${url}" -e http_proxy="${url}" -e no_proxy=localhost,127.0.0.1
+    -e HTTPS_PROXY="${url}" -e HTTP_PROXY="${plain}" -e NO_PROXY="${no}"
+    -e https_proxy="${url}" -e http_proxy="${plain}" -e no_proxy="${no}"
   )
+  if mirror_on; then PROXY_ENV+=(-e AIRLOCK_MIRROR="http://${gate}:8081"); fi
 }
 
 # The egress sets this workspace selected in .devcontainer/egress-sets, one
@@ -617,7 +655,7 @@ cmd_build() {
   for i in claude codex; do
     podman build --build-arg "BASE_IMAGE=${BASE}" --target "${i}" -t "$(wb_image "${i}")" "${HERE}/images/workbench"
   done
-  for i in l2 l2-engine gh-broker egress-proxy; do
+  for i in l2 l2-engine gh-broker egress-proxy mirror-gate; do
     podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/airlock-${i}:${TAG}" "${HERE}/images/${i}"
   done
 }
@@ -627,7 +665,7 @@ cmd_build() {
 # digest, the one to pin by, rather than this platform's manifest.
 cmd_pull() {
   local i ref
-  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy; do
+  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate; do
     ref="$(pull_published "${i}")" || die "could not pull ${REGISTRY}/airlock-${i}"
     echo "workbench: ${i} ${ref}"
   done
@@ -786,16 +824,16 @@ start_proxy() {
 # and a reload, which leaves every other workspace's tunnels open. Run on
 # every `up`, so a changed .devcontainer/egress-sets takes effect then.
 proxy_join() {
-  local ws="$1" slug net f owner sets
-  slug="$(slug "${ws}")"
-  net="$(net_name "${ws}")"
-  f="${EGRESS_DIR}/${slug}.conf"
+  local ws="$1" sets
   sets="$(egress_sets "${ws}")"
-  mkdir -p "${EGRESS_DIR}"
-  chmod 755 "${EGRESS_DIR}"
-  owner="$(sed -n 's/^workspace=//p' "${f}" 2>/dev/null || true)"
-  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
-    || die "the egress proxy already serves ${owner} as ${slug}, another folder of the same name; stop it first (host/workbench down ${owner})"
+  # `mirror` in .devcontainer/egress-sets is not a set the proxy knows: it
+  # says the workspace installs through the package mirror, and a workspace
+  # that lists it and nothing else reaches no registry directly at all.
+  case ",${sets}," in
+    *,mirror,*)
+      mirror_on || die "${ws} lists mirror in .devcontainer/egress-sets; start the package mirror with WORKBENCH_MIRROR=1"
+      sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | grep -vx mirror | paste -sd, -)" ;;
+  esac
   # Every name checked against the proxy image before anything changes, so
   # a bad one costs nothing: not an old proxy, not a registration, and never
   # a registration a restarted proxy would refuse to start with.
@@ -804,7 +842,21 @@ proxy_join() {
   # A workspace started before the proxy was shared has a proxy of its own
   # holding .2 on its network. Its workbenches find the shared one at the
   # same address, so they keep working across the swap.
-  podman rm -f -t 5 "egress-proxy-${slug}" >/dev/null 2>&1 || true
+  podman rm -f -t 5 "egress-proxy-$(slug "${ws}")" >/dev/null 2>&1 || true
+  proxy_register "$(slug "${ws}")" "${ws}" "${sets}"
+}
+
+# Register network workbench-net-$1 with the proxy for owner $2 (a workspace
+# path, or the mirror) with sets $3, connect the proxy there and reload.
+proxy_register() {
+  local slug="$1" ws="$2" sets="$3" net f owner
+  net="workbench-net-${slug}"
+  f="${EGRESS_DIR}/${slug}.conf"
+  mkdir -p "${EGRESS_DIR}"
+  chmod 755 "${EGRESS_DIR}"
+  owner="$(sed -n 's/^workspace=//p' "${f}" 2>/dev/null || true)"
+  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
+    || die "the egress proxy already serves ${owner} as ${slug}, another folder of the same name; stop it first (host/workbench down ${owner})"
   # The registration it replaces, if any, comes back when anything after
   # this fails, so a running workspace keeps its rules.
   rm -f "${f}.prev"
@@ -813,7 +865,7 @@ proxy_join() {
   chmod 644 "${f}.tmp"
   mv "${f}.tmp" "${f}"
   # In a child shell, so a start_proxy that dies comes back here to be undone.
-  if ! (start_proxy) || ! proxy_connect "${net}" "$(proxy_ip "${ws}")" \
+  if ! (start_proxy) || ! proxy_connect "${net}" "$(net_proxy_ip "${net}")" \
     || ! podman exec "${PROXY}" egress-reload >/dev/null; then
     if [ -f "${f}.prev" ]; then mv "${f}.prev" "${f}"; else rm -f "${f}"; fi
     if running "${PROXY}"; then
@@ -851,6 +903,140 @@ proxy_leave() {
   running "${PROXY}" || return 0
   podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
   podman network disconnect -f "$(net_name "${ws}")" "${PROXY}" >/dev/null 2>&1 || true
+}
+
+# The package mirror (docs/LAYERS.md, "Package mirror"), one for the host
+# like the egress proxy, and off unless WORKBENCH_MIRROR asks. Two
+# containers on a network of their own: the backend (Nexus Repository CE),
+# whose only way out is the egress proxy with the upstream registries' sets,
+# and the gate, the only part clients reach, at .254 on every workspace's
+# network. The backend is never on a workspace network.
+MIRROR_SETS=python,node,golang,docker-hub,ghcr,ubuntu,alpine,fedora
+mirror_on() {
+  case "${MIRROR}" in
+    1 | on | yes | true) return 0 ;;
+    '' | 0 | off | no | false) return 1 ;;
+    *) die "WORKBENCH_MIRROR is '${MIRROR}'; use 1 or 0" ;;
+  esac
+}
+# The gate's address on workspace $1's network, and the mirror network's
+# own addresses: the proxy at .2, the gate at .254, the backend at .10.
+# The gate takes the top of the range: the engine and the workbenches get
+# the next free addresses from the bottom (measured: .1, .3, .4), so a low
+# fixed one would collide.
+mirror_ip() { local s; s="$(net_subnet "$(net_name "$1")")"; echo "${s%.0/24}.254"; }
+mirror_net_ip() { local s; s="$(net_subnet "${MIRROR_NET}")"; echo "${s%.0/24}.$1"; }
+
+start_mirror() {
+  local nexus upstream f net nets=() heap="${WORKBENCH_MIRROR_HEAP:-1024}" fresh=""
+  create_net "${MIRROR_NET}"
+  check_sets "the package mirror" "${MIRROR_SETS}"
+  proxy_register airlock-mirror mirror "${MIRROR_SETS}"
+  nexus="$(mirror_net_ip 10)"
+  upstream="$(mirror_net_ip 2):8888"
+  if ! running mirror-nexus; then
+    podman image exists "${NEXUS_IMAGE}" || podman pull --quiet "${NEXUS_IMAGE}" >/dev/null
+    podman volume exists mirror-nexus-data || podman volume create mirror-nexus-data >/dev/null
+    podman rm -f mirror-nexus >/dev/null 2>&1 || true
+    # No --network podman: the backend's only way out is the egress proxy,
+    # where no Sonatype host is on any set, so its telemetry goes nowhere.
+    podman run -d --name mirror-nexus --network "${MIRROR_NET}:ip=${nexus}" \
+      --cap-drop=all --security-opt no-new-privileges \
+      -v mirror-nexus-data:/nexus-data \
+      -e INSTALL4J_ADD_VM_PARAMS="-Xms${heap}m -Xmx${heap}m -XX:MaxDirectMemorySize=${heap}m -Djava.util.prefs.userRoot=/nexus-data/javaprefs" \
+      "${NEXUS_IMAGE}" >/dev/null
+    fresh=1
+  fi
+  if [ -n "${fresh}" ] || ! running mirror-gate; then
+    podman volume exists mirror-admin || podman volume create mirror-admin >/dev/null
+    echo "workbench: provisioning the package mirror (the first start takes about a minute)" >&2
+    podman run --rm --name mirror-provision --network "${MIRROR_NET}" --add-host "mirror-nexus:${nexus}" \
+      --cap-drop=all --security-opt no-new-privileges \
+      -v mirror-nexus-data:/nexus-data:ro -v mirror-admin:/var/lib/mirror-admin:U \
+      -e NEXUS_URL=http://mirror-nexus:8081 -e UPSTREAM_PROXY="${upstream}" \
+      "${GATE_IMAGE}" /usr/local/lib/mirror-gate/backends/nexus/provision \
+      /usr/local/lib/mirror-gate/backends/nexus/repositories.json \
+      || die "the package mirror could not be provisioned; podman logs mirror-nexus"
+  fi
+  running mirror-gate && return
+  mkdir -p "${MIRROR_DIR}"
+  chmod 700 "${MIRROR_DIR}"
+  for f in "${MIRROR_DIR}"/*.ws; do
+    [ -f "${f}" ] || continue
+    net="workbench-net-$(basename "${f}" .ws)"
+    if podman network exists "${net}"; then
+      nets+=(--network "${net}:ip=$(net_gate_ip "${net}")")
+    else
+      rm -f "${f}"
+    fi
+  done
+  podman volume exists mirror-osv || podman volume create mirror-osv >/dev/null
+  podman rm -f mirror-gate >/dev/null 2>&1 || true
+  podman run -d --name mirror-gate --network "${MIRROR_NET}:ip=$(mirror_net_ip 254)" "${nets[@]}" \
+    --add-host "mirror-nexus:${nexus}" \
+    --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
+    -v mirror-osv:/var/lib/mirror-gate/osv:U \
+    -e HTTPS_PROXY="http://${upstream}" -e https_proxy="http://${upstream}" \
+    -e MIN_AGE_DAYS="${WORKBENCH_MIRROR_MIN_AGE:-0}" \
+    "${GATE_IMAGE}" >/dev/null
+  for _ in $(seq 1 50); do
+    podman logs mirror-gate 2>&1 | grep -q 'listening on 8081' && return
+    running mirror-gate || break
+    sleep 0.2
+  done
+  podman logs mirror-gate 2>&1 | tail -5 >&2
+  die "the package mirror's gate did not start; podman logs mirror-gate"
+}
+net_gate_ip() { local s; s="$(net_subnet "$1")"; echo "${s%.0/24}.254"; }
+
+# Put the gate on workspace $1's network, at .254, and write the registry
+# mirror settings its engine mounts.
+mirror_join() {
+  local ws="$1" slug net
+  slug="$(slug "${ws}")"
+  net="$(net_name "${ws}")"
+  mkdir -p "${MIRROR_DIR}"
+  printf '%s\n' "${ws}" > "${MIRROR_DIR}/${slug}.ws"
+  if ! podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' mirror-gate \
+    | tr ' ' '\n' | grep -qx "${net}"; then
+    podman network connect --ip "$(mirror_ip "${ws}")" "${net}" mirror-gate
+  fi
+  mirror_registries "${ws}" >/dev/null
+}
+
+# The engine's registry mirror settings for workspace $1: docker.io and
+# ghcr.io through the gate's registry ports. Prints the file's path.
+mirror_registries() {
+  local f gate
+  f="${MIRROR_DIR}/$(slug "$1").registries.conf"
+  gate="$(mirror_ip "$1")"
+  mkdir -p "${MIRROR_DIR}"
+  cat > "${f}" <<CONF
+# Written by host/workbench: pulls go through the package mirror's gate.
+[[registry]]
+prefix = "docker.io"
+location = "docker.io"
+[[registry.mirror]]
+location = "${gate}:5000"
+insecure = true
+
+[[registry]]
+prefix = "ghcr.io"
+location = "ghcr.io"
+[[registry.mirror]]
+location = "${gate}:5001"
+insecure = true
+CONF
+  chmod 644 "${f}"
+  echo "${f}"
+}
+
+mirror_leave() {
+  local slug
+  slug="$(slug "$1")"
+  rm -f "${MIRROR_DIR}/${slug}.ws" "${MIRROR_DIR}/${slug}.registries.conf"
+  running mirror-gate || return 0
+  podman network disconnect -f "$(net_name "$1")" mirror-gate >/dev/null 2>&1 || true
 }
 
 start_broker() {
@@ -914,7 +1100,10 @@ start_engine() {
   done
   mkdir -p "${dir}"
   chmod 700 "${dir}"
-  set_proxy_env "${ws}"
+  set_proxy_env "${ws}" engine
+  if mirror_on; then
+    extra+=(-v "$(mirror_registries "${ws}"):/etc/containers/registries.conf.d/50-airlock-mirror.conf:ro,Z")
+  fi
   mapfile -t gitdir < <(ws_mounts "${ws}")
   podman volume exists "${name}" || podman volume create "${name}" >/dev/null
   podman rm -f "${name}" >/dev/null 2>&1 || true
@@ -1003,6 +1192,10 @@ cmd_up() {
   esac
   start_helpers
   proxy_join "${ws}"
+  if mirror_on; then
+    start_mirror
+    mirror_join "${ws}"
+  fi
   start_engine "${ws}"
   sync_l2 "${ws}"
   for agent in ${AGENTS}; do
@@ -1233,7 +1426,7 @@ sync_l2() {
 }
 
 cmd_status() {
-  podman ps -a --filter name='^(egress-proxy.*|gh-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)$' \
+  podman ps -a --filter name='^(egress-proxy.*|mirror-.*|gh-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)$' \
     --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 }
 
@@ -1247,6 +1440,7 @@ cmd_down() {
   # egress-proxy-<name>: the workspace's own proxy, from before it was shared.
   podman rm -f -t 5 "workbench-$(slug "${ws}")" "$(engine_name "${ws}")" "egress-proxy-$(slug "${ws}")" \
     >/dev/null 2>&1 || true
+  mirror_leave "${ws}"
   proxy_leave "${ws}"
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   echo "workbench: down"
