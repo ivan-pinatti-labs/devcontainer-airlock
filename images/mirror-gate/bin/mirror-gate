@@ -146,7 +146,7 @@ class Gate(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             self.route()
-        except (http.client.HTTPException, OSError) as e:
+        except (http.client.HTTPException, OSError, ValueError) as e:
             log(f"ERROR {self.path}: {e}")
             try:
                 self.reply(502, f"mirror-gate: backend error: {e}\n".encode())
@@ -263,7 +263,10 @@ class Gate(http.server.BaseHTTPRequestHandler):
                         return
 
         headers = {"Accept": "application/json"} if want_body == "npm" else None
-        conn, resp = self.backend(target + rest, headers=headers)
+        # A HEAD the filters must look inside is asked of the backend as a
+        # GET; relay still sends the client no body.
+        method = "GET" if self.command == "HEAD" and want_body is not None else None
+        conn, resp = self.backend(target + rest, method, headers=headers)
         try:
             if want_body is None or resp.status != 200:
                 self.relay(resp, prefix, target)
