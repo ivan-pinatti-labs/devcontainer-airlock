@@ -1,7 +1,7 @@
 <!-- cspell:disable -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 910" width="1160" height="910" role="img" aria-labelledby="t d">
 <title id="t">devcontainer-airlock: what runs inside what, and how it reaches the outside</title>
-<desc id="d">The host runs podman. Two shared helpers hold the credentials: the ssh-agent (the ssh key, no network) and the gh broker (the GitHub token, straight to GitHub). Each workspace has an egress proxy on an internal network, one workbench per agent, and an L2 engine that starts L2 containers. Workbenches reach the helpers only by unix socket and the internet only through the proxy. L2 containers have no network and no credentials.</desc>
+<desc id="d">The host runs podman. Two shared helpers hold the credentials: the ssh-agent (the ssh key, no network) and the gh broker (the GitHub token, straight to GitHub). Each workspace has an internal network, one workbench per agent, and an L2 engine that starts L2 containers; one egress proxy serves every workspace, at .2 on each of their networks, allowing each only its own egress sets. Workbenches reach the helpers only by unix socket and the internet only through the proxy. L2 containers have no network and no credentials.</desc>
 <style>
   svg { --ink:#1b2420; --muted:#5a6862; --rule:#c6d0ca; --tint:#e8ece8; --panel:#ffffff; --ground:#f4f6f3;
         --net:#1d7a6c; --cred:#a5621a; --block:#b0383b; --sandbox:#6247aa; --ok:#3e6e48; }
@@ -96,10 +96,10 @@
 
 <rect class="netbox" x="672" y="258" width="180" height="116" rx="5"/>
 <text class="t" x="688" y="282">egress-proxy</text>
-<text class="s" x="688" y="302">squid, 10.203.N.2:8888</text>
-<text class="s" x="688" y="322">lets through only the</text>
-<text class="s" x="688" y="340">hosts of its egress sets</text>
-<text class="s" x="688" y="360">holds nothing</text>
+<text class="s" x="688" y="302">one for the host, at</text>
+<text class="s" x="688" y="320">10.203.N.2:8888 on each</text>
+<text class="s" x="688" y="338">workspace network; only</text>
+<text class="s" x="688" y="356">that workspace's sets</text>
 <path class="wire" d="M852 300 C890 300 890 259 928 259" marker-end="url(#an)"/>
 <path class="wire" d="M852 310 C892 310 892 325 928 325" marker-end="url(#an)"/>
 <path class="wire" d="M852 320 C892 320 892 391 928 391" marker-end="url(#an)"/>

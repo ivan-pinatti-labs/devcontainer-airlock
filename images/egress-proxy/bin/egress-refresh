@@ -20,33 +20,52 @@ none, the set keeps its static domains and drops the address check, saying so
 loudly. Availability wins there on purpose: a provider's API being down for
 an hour should not stop anyone working, and the domain list still holds.
 
+One proxy serves every workspace on the host. The host registers each
+workspace as a file in EGRESS_WORKSPACES, <name>.conf, holding its internal
+network and the sets it selected:
+
+  subnet=10.203.7.0/24
+  sets=python,node
+
+A request passes only when it comes from a registered subnet, arrived at the
+proxy's own address on it, and names a host of one of that workspace's sets.
+"workbench", "github" and "ghcr" are always included.
+
 Usage:
-  egress-refresh [--list]
+  egress-refresh [--list | --cached]
+    --list    print every set and its description
+    --cached  use the providers' last good lists when there are any, instead
+              of asking them again (what a workspace coming or going runs)
 
 Environment:
-  EGRESS_SETS   comma separated set names; "workbench", "github" and
-                "ghcr" are always included
+  EGRESS_WORKSPACES  the registered workspaces (default /etc/egress/workspaces)
   EGRESS_OUT    where squid's generated rules go (default /run/egress)
   EGRESS_CACHE  where provider data is kept between runs (default
                 /var/lib/egress)
 
 Exit status codes:
   0  rules written
-  2  an unknown set name, or a set file that cannot be read
+  2  an unknown set name, a set file that cannot be read, or a workspace
+    file that is not a name and a subnet
 """
+# cspell:words fullmatch localip
 import datetime
 import ipaddress
 import json
 import os
 import pathlib
+import re
 import sys
 import tomllib
 import urllib.request
 
 SETS_DIR = pathlib.Path("/etc/egress/sets")
+WORKSPACES = pathlib.Path(os.environ.get("EGRESS_WORKSPACES", "/etc/egress/workspaces"))
 OUT = pathlib.Path(os.environ.get("EGRESS_OUT", "/run/egress"))
 CACHE = pathlib.Path(os.environ.get("EGRESS_CACHE", "/var/lib/egress"))
 ALWAYS = ["workbench", "github", "ghcr"]
+# Where host/workbench puts the workspaces' internal networks.
+WORKSPACE_RANGE = ipaddress.ip_network("10.203.0.0/16")
 
 
 def log(msg):
@@ -93,9 +112,14 @@ def collapse(ranges):
     return out
 
 
-def provider_data(set_name, provider):
-    """Fresh data if the provider answers, else the last good copy, else nothing."""
+def provider_data(set_name, provider, cached=False):
+    """Fresh data if the provider answers, else the last good copy, else
+    nothing. With cached, the last good copy is used when there is one, so a
+    workspace coming or going does not ask every provider again."""
     cache = CACHE / f"{set_name}.json"
+    if cached and cache.exists():
+        record = json.loads(cache.read_text())
+        return record["domains"], record["ips"]
     try:
         domains, raw = PROVIDERS[provider["name"]](provider)
         ips = collapse(raw)
@@ -148,41 +172,88 @@ def load(name):
         sys.exit(2)
 
 
+def workspaces():
+    """Every workspace the host has registered: (name, subnet, set names).
+    A file that cannot be a workspace stops the run, rather than being
+    skipped, so a typo never quietly takes a workspace's network away."""
+    found = []
+    for path in sorted(WORKSPACES.glob("*.conf")) if WORKSPACES.is_dir() else []:
+        name = path.stem
+        fields = {}
+        for line in path.read_text().splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key.strip() in ("subnet", "sets"):
+                fields[key.strip()] = value.strip()
+        try:
+            subnet = ipaddress.ip_network(fields.get("subnet", ""))
+        except ValueError:
+            log(f"{path}: no valid subnet= line")
+            sys.exit(2)
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or not subnet.subnet_of(WORKSPACE_RANGE):
+            log(f"{path}: a workspace is a name and a subnet inside {WORKSPACE_RANGE}")
+            sys.exit(2)
+        wanted = [s.strip() for s in fields.get("sets", "").split(",") if s.strip()]
+        found.append((name, subnet, list(dict.fromkeys(ALWAYS + wanted))))
+    return found
+
+
+def set_rules(name, cached):
+    """squid's ACLs for one set: the domains, and the provider's ranges when
+    the set enforces them. Returns (acl lines, the ACL names a request must
+    match)."""
+    spec = load(name)
+    domains = list(spec.get("domains", []))
+    ips = []
+    provider = spec.get("provider")
+    if provider:
+        if provider.get("name") not in PROVIDERS:
+            log(f"{name}: unknown provider '{provider.get('name')}'")
+            sys.exit(2)
+        extra, ips = provider_data(name, provider, cached)
+        domains += extra
+    acl = f"set_{name.replace('-', '_')}"
+    (OUT / f"{name}.domains").write_text("\n".join(squid_domains(domains)) + "\n")
+    # -n: match the name the client asked for, never a name found by
+    # reverse DNS of an address, so a bare IP cannot pass as its PTR name.
+    lines = [f'acl {acl} dstdomain -n "{OUT / (name + ".domains")}"']
+    if provider and provider.get("enforce_ips") and ips:
+        (OUT / f"{name}.ips").write_text("\n".join(ips) + "\n")
+        lines.append(f'acl {acl}_ips dst "{OUT / (name + ".ips")}"')
+        return lines, f"{acl} {acl}_ips"
+    return lines, acl
+
+
 def main(argv):
     if argv == ["--list"]:
         for p in sorted(SETS_DIR.glob("*.toml")):
             print(f"{p.stem:12} {tomllib.loads(p.read_text()).get('description', '')}")
         return 0
-    wanted = [s.strip() for s in os.environ.get("EGRESS_SETS", "").split(",") if s.strip()]
-    names = list(dict.fromkeys(ALWAYS + wanted))
+    cached = argv == ["--cached"]
     OUT.mkdir(parents=True, exist_ok=True)
-    rules = []
+    spaces = workspaces()
+    # Each set is loaded (and its provider asked) once, however many
+    # workspaces select it.
+    names = list(dict.fromkeys(n for _, _, sets in spaces for n in sets))
+    rules, match = [], {}
     for name in names:
-        spec = load(name)
-        domains = list(spec.get("domains", []))
-        ips = []
-        provider = spec.get("provider")
-        if provider:
-            if provider.get("name") not in PROVIDERS:
-                log(f"{name}: unknown provider '{provider.get('name')}'")
-                sys.exit(2)
-            extra, ips = provider_data(name, provider)
-            domains += extra
-        acl = f"set_{name.replace('-', '_')}"
-        (OUT / f"{name}.domains").write_text("\n".join(squid_domains(domains)) + "\n")
-        # -n: match the name the client asked for, never a name found by
-        # reverse DNS of an address, so a bare IP cannot pass as its PTR name.
-        rules.append(f'acl {acl} dstdomain -n "{OUT / (name + ".domains")}"')
-        if provider and provider.get("enforce_ips") and ips:
-            (OUT / f"{name}.ips").write_text("\n".join(ips) + "\n")
-            rules.append(f'acl {acl}_ips dst "{OUT / (name + ".ips")}"')
-            rules.append(f"http_access allow localnet {acl} {acl}_ips")
-        else:
-            rules.append(f"http_access allow localnet {acl}")
+        lines, match[name] = set_rules(name, cached)
+        rules += lines
+    # A request passes for a workspace only when it comes from that
+    # workspace's subnet and arrived at the proxy's own address on that
+    # subnet: a container on one internal network has no route to another,
+    # and the second check holds even if it made one.
+    for i, (ws, subnet, sets) in enumerate(spaces):
+        rules.append(f"# {ws}: {', '.join(sets)}")
+        rules.append(f"acl ws{i} src {subnet}")
+        rules.append(f"acl ws{i}_in localip {subnet}")
+        rules += [f"http_access allow ws{i} ws{i}_in {match[s]}" for s in sets]
     tmp = OUT / "sets.conf.tmp"
     tmp.write_text("# Generated by egress-refresh; do not edit.\n" + "\n".join(rules) + "\n")
     tmp.replace(OUT / "sets.conf")
-    log(f"sets in force: {', '.join(names)}")
+    for ws, subnet, sets in spaces:
+        log(f"{ws} ({subnet}): {', '.join(sets)}")
+    if not spaces:
+        log("no workspaces registered; everything is refused")
     return 0
 
 
