@@ -342,8 +342,8 @@ files they cannot edit (root owned, read only):
   something (`rm`, `rmi`, `prune`, `kill`, `stop`, `network rm`), and
   before the rarer commands that load, push or reconfigure (`load`, `push`,
   `login`, `system service`, a global flag). A managed `ask` rule wins over
-  an `allow` rule in any other settings file, so a project cannot widen
-  this.
+  an `allow` rule in any other settings file, so a project cannot lift
+  those; it can still allow commands the managed rules do not name.
 - `/etc/codex/requirements.toml`: Codex keeps its own sandbox (measured
   working inside the workbench: read only, no network) and asks before
   acting, and the same hook refuses project code with the `l2` command line
