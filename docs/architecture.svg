@@ -1,7 +1,7 @@
 <!-- cspell:disable -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 910" width="1160" height="910" role="img" aria-labelledby="t d">
 <title id="t">devcontainer-airlock: what runs inside what, and how it reaches the outside</title>
-<desc id="d">The host runs podman. Two shared helpers hold the credentials: the ssh-agent (the ssh key, no network) and the gh broker (the GitHub token, straight to GitHub). Each workspace has an internal network, one workbench per agent, and an L2 engine that starts L2 containers; one egress proxy serves every workspace, at .2 on each of their networks, allowing each only its own egress sets. Workbenches reach the helpers only by unix socket and the internet only through the proxy. L2 containers have no network and no credentials.</desc>
+<desc id="d">The host runs podman. Two shared helpers hold the credentials: the ssh-agent (the ssh key, no network) and the gh broker (the GitHub token, straight to GitHub). Each workspace (the folder the workbench is started in: a repository, a worktree or a folder of clones, and whose name the containers carry) has an internal network, one workbench per agent, and an L2 engine that starts L2 containers; one egress proxy serves every workspace, at .2 on each of their networks, allowing each only its own egress sets. Workbenches reach the helpers only by unix socket and the internet only through the proxy. L2 containers have no network and no credentials.</desc>
 <style>
   svg { --ink:#1b2420; --muted:#5a6862; --rule:#c6d0ca; --tint:#e8ece8; --panel:#ffffff; --ground:#f4f6f3;
         --net:#1d7a6c; --cred:#a5621a; --block:#b0383b; --sandbox:#6247aa; --ok:#3e6e48; }
@@ -152,9 +152,18 @@
 <text class="s" x="348" y="742">sees the working tree, nothing else</text>
 <line class="wire" x1="604" y1="680" x2="644" y2="680"/>
 
+<!-- what a workspace is -->
+<text class="s" x="672" y="414" style="font-weight:600;fill:var(--ink)">A workspace is</text>
+<text class="s" x="672" y="434">the folder you start the</text>
+<text class="s" x="672" y="452">workbench in: a repository,</text>
+<text class="s" x="672" y="470">one of its worktrees, or a</text>
+<text class="s" x="672" y="488">folder of clones side by side.</text>
+<text class="s" x="672" y="512">&lt;workspace&gt; in a container</text>
+<text class="s" x="672" y="530">name is made from that folder's.</text>
+
 <!-- other workbenches -->
 <rect class="box" x="56" y="772" width="266" height="44" rx="5"/>
-<text class="m" x="70" y="791">workbench-codex-&lt;ws&gt;</text>
+<text class="m" x="70" y="791">workbench-codex-&lt;workspace&gt;</text>
 <text class="s" x="70" y="808" style="font-size:11.5px">the same wiring, Codex and its login</text>
 <rect class="box" x="338" y="772" width="266" height="44" rx="5"/>
 <text class="m" x="352" y="791">workbench-claude-&lt;account&gt;-…</text>
