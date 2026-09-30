@@ -1,8 +1,9 @@
-# The egress proxy: the only way out to the network for a workspace's
-# workbench and L2 engine.
+# The egress proxy: the only way out to the network for the workbenches and
+# L2 engines of every workspace on the host. It joins each workspace's
+# internal network, and host/workbench registers the workspace with it.
 #
-# It allows the domains of the egress sets the workspace selected
-# (.devcontainer/egress-sets, docs/LAYERS.md "Network"), and for sets whose
+# For each workspace it allows the domains of the egress sets that workspace
+# selected (.devcontainer/egress-sets, docs/LAYERS.md "Network"), and for sets whose
 # provider publishes address ranges (GitHub, AWS) it also requires that an
 # allowed name resolve inside them. Those lists are fetched when the proxy
 # starts and every six hours, so they do not go stale.
@@ -24,7 +25,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 COPY squid.conf /etc/squid/squid.conf
 COPY sets/ /etc/egress/sets/
-COPY bin/egress-refresh bin/egress-proxy /usr/local/bin/
+COPY bin/egress-refresh bin/egress-reload bin/egress-proxy /usr/local/bin/
 RUN install -d -o 1000 -g 1000 /var/lib/egress /run/egress /run/squid
 USER 1000:1000
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \

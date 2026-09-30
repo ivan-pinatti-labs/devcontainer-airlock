@@ -15,8 +15,9 @@ Reading the picture:
 - **Boxes inside boxes** are containers started by the one around them, or
   grouped by what they are shared with: the host starts everything, the
   helpers serve every workspace, and each workspace (the folder you start
-  the workbench in, [below](#what-a-workspace-is)) has its own proxy,
-  workbenches and engine.
+  the workbench in, [below](#what-a-workspace-is)) has its own network,
+  workbenches and engine. The egress proxy is drawn where a workspace meets
+  it, but there is one for the host, on every workspace's network.
 - **Amber** marks what holds a credential and the unix sockets that lead to
   it. A dashed amber line is optional: the microphone pipes of a voice
   session.
@@ -32,7 +33,7 @@ Reading the picture:
 | host | one | podman, the VS Code window, PipeWire (the microphone, for voice) | the ssh key file, the GitHub token (a podman secret), your own logins | all of it, which is why nothing else runs here |
 | ssh-agent | one per host | `ssh-agent`, read only, no capabilities | the ssh key, in memory for eight hours after `make unlock` | none |
 | gh-broker | one per host | `gh`, for the commands in its allowlist | the GitHub token | straight to GitHub |
-| egress-proxy | one per workspace | squid | nothing | the internal network, and out for the hosts of its egress sets |
+| egress-proxy | one per host | squid | nothing | every workspace's internal network, at `.2` on each, and out for the hosts of each workspace's egress sets |
 | workbench | one per agent and login, per workspace | the agent, the VS Code server and extensions, git, a `gh` client of the broker | that agent's own login | the internal network only |
 | L2 engine | one per workspace | rootless podman | nothing | the internal network only |
 | L2 run | one per command, thrown away | hooks, tests, package installs, throwaway binaries | nothing | none (the proxy with `l2 --net`) |
@@ -41,7 +42,8 @@ Reading the picture:
 
 A workspace is the folder you start the workbench in (`make claude`,
 `host/workbench up`), and everything in the picture's "one per workspace"
-box exists once for it. That folder is one of three things:
+box exists once for it, except the egress proxy drawn there, which is one for
+the host. That folder is one of three things:
 
 | The folder | Example | What is mounted |
 | --- | --- | --- |
@@ -63,8 +65,9 @@ which folder holds the name.
 
 ## How they talk to each other
 
-The egress proxy is the one piece listening on a network port: 8888, on the
-workspace's internal network, for outbound traffic. Everything else local is
+The egress proxy is the one piece listening on a network port: 8888, on
+each workspace's internal network, for outbound traffic. It tells the
+workspaces apart by the network a request comes from. Everything else local is
 a unix socket in a folder the host creates and mounts only where it belongs,
 and SELinux lets these containers connect only to a socket held by one in
 their own domain and category. Voice is not a socket either: two named
