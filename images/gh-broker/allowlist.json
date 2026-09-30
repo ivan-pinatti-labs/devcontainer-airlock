@@ -1,5 +1,5 @@
 {
-  "comment": "gh commands the broker runs for the workbench. A command is its first two words. `api` is read only (GET, no fields) except for the writes named under api: replying to a review comment and the listed GraphQL mutations. Owners limit -R/--repo, URLs and api paths; they come from the host (GH_BROKER_OWNERS, set from WORKBENCH_GH_OWNERS), or from owners here. `pr merge --admin` is refused: merges go through the merge queue. Widening this file is a reviewed change.",
+  "comment": "gh commands the broker runs for the workbench. A command is its first two words. `api` is read only (GET, no fields) except for the writes named under api: replying to a review comment and the listed GraphQL mutations. Owners limit -R/--repo, --owner, URLs, search qualifiers (repo:, org:, user:) and api paths; they come from the host (GH_BROKER_OWNERS, set from WORKBENCH_GH_OWNERS), or from owners here. `pr merge --admin` is refused: merges go through the merge queue. Widening this file is a reviewed change.",
   "owners": [],
   "commands": [
     "issue list",
