@@ -94,7 +94,7 @@
   localhost/airlock-egress-proxy egress-refresh --list` shows every set.
 
   With WORKBENCH_MIRROR=1 a package mirror runs beside the proxy, one for
-  the host: its gate at .3 on each workspace network, which L2 and the
+  the host: its gate at .254 on each workspace network, which L2 and the
   engine install and pull through, and its backend (Nexus Repository CE) on
   a network of its own, whose only way out is the proxy. The gate leaves
   out npm, PyPI and Go versions listed as malicious in OSV. A workspace
@@ -909,7 +909,7 @@ proxy_leave() {
 # like the egress proxy, and off unless WORKBENCH_MIRROR asks. Two
 # containers on a network of their own: the backend (Nexus Repository CE),
 # whose only way out is the egress proxy with the upstream registries' sets,
-# and the gate, the only part clients reach, at .3 on every workspace's
+# and the gate, the only part clients reach, at .254 on every workspace's
 # network. The backend is never on a workspace network.
 MIRROR_SETS=python,node,golang,docker-hub,ghcr,ubuntu,alpine,fedora
 mirror_on() {
@@ -920,8 +920,11 @@ mirror_on() {
   esac
 }
 # The gate's address on workspace $1's network, and the mirror network's
-# own addresses: the proxy at .2, the gate at .3, the backend at .10.
-mirror_ip() { local s; s="$(net_subnet "$(net_name "$1")")"; echo "${s%.0/24}.3"; }
+# own addresses: the proxy at .2, the gate at .254, the backend at .10.
+# The gate takes the top of the range: the engine and the workbenches get
+# the next free addresses from the bottom (measured: .1, .3, .4), so a low
+# fixed one would collide.
+mirror_ip() { local s; s="$(net_subnet "$(net_name "$1")")"; echo "${s%.0/24}.254"; }
 mirror_net_ip() { local s; s="$(net_subnet "${MIRROR_NET}")"; echo "${s%.0/24}.$1"; }
 
 start_mirror() {
@@ -969,7 +972,7 @@ start_mirror() {
   done
   podman volume exists mirror-osv || podman volume create mirror-osv >/dev/null
   podman rm -f mirror-gate >/dev/null 2>&1 || true
-  podman run -d --name mirror-gate --network "${MIRROR_NET}:ip=$(mirror_net_ip 3)" "${nets[@]}" \
+  podman run -d --name mirror-gate --network "${MIRROR_NET}:ip=$(mirror_net_ip 254)" "${nets[@]}" \
     --add-host "mirror-nexus:${nexus}" \
     --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
     -v mirror-osv:/var/lib/mirror-gate/osv:U \
@@ -984,9 +987,9 @@ start_mirror() {
   podman logs mirror-gate 2>&1 | tail -5 >&2
   die "the package mirror's gate did not start; podman logs mirror-gate"
 }
-net_gate_ip() { local s; s="$(net_subnet "$1")"; echo "${s%.0/24}.3"; }
+net_gate_ip() { local s; s="$(net_subnet "$1")"; echo "${s%.0/24}.254"; }
 
-# Put the gate on workspace $1's network, at .3, and write the registry
+# Put the gate on workspace $1's network, at .254, and write the registry
 # mirror settings its engine mounts.
 mirror_join() {
   local ws="$1" slug net

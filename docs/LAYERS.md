@@ -548,13 +548,13 @@ image pulls in L2 and the engine then go through it, and a workspace that
 runs code nobody has reviewed can be given the mirror and nothing else.
 
 ```text
-L2 run, engine  ──>  gate (.3 on every workspace network)  ──>  backend  ──>  egress proxy  ──>  registries
+L2 run, engine  ──>  gate (.254 on every workspace network)  ──>  backend  ──>  egress proxy  ──>  registries
                      fixed paths, OSV filter                     Nexus CE      the upstream sets only
 ```
 
 | Piece | Runs | Network |
 | --- | --- | --- |
-| `mirror-gate` | the only part clients reach: fixed paths per ecosystem, registry mirror ports, the malicious package filter | `.3` on each workspace network, and the mirror network |
+| `mirror-gate` | the only part clients reach: fixed paths per ecosystem, registry mirror ports, the malicious package filter | `.254` on each workspace network, and the mirror network |
 | `mirror-nexus` | Nexus Repository Community Edition, the first backend: proxy repositories only | the mirror network only, never a workspace network |
 | provisioning | a one shot run of the gate image each time the backend starts | the mirror network |
 
@@ -654,6 +654,13 @@ the mirror beside a shared egress proxy, Nexus Repository CE 3.96.3 with a
 | hosts the mirror asked the proxy for in its first minutes | the Ubuntu archives and OSV's bucket allowed; `rhc.sonatype.com` (telemetry) refused |
 | a version planted as malicious (left-pad 1.3.0, six 1.16.0, uuid v1.6.0) | left out of the npm metadata, PyPI index and Go list; its download refused with a 403 |
 | an upload | 401 from the backend, 405 from the gate |
+
+On the host itself (Fedora, SELinux enforcing, rootless podman), with a
+group workspace already running: `up` with the mirror took 47 s, and npm,
+pip, go, docker.io, ghcr.io, apt, apk and yum (Fedora 43 and 44) all
+answered through the gate; the proxy log shows the backend asking for
+`rhc.sonatype.com` once, refused. It also found that a low fixed address
+for the gate collides with the workbenches, so the gate takes `.254`.
 
 Sonatype's documented minimum heap is 2703 MB (2.3 GB resident, measured);
 1 GB served these clients, and `WORKBENCH_MIRROR_HEAP` sets it.

@@ -32,6 +32,7 @@ import http.server
 import json
 import os
 import pathlib
+import signal
 import sys
 import threading
 import tomllib
@@ -284,6 +285,9 @@ def serve(port, registry=None):
 
 
 def main():
+    # As a container's first process, SIGTERM would be ignored and every stop
+    # would wait for the kill.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     threading.Thread(target=osvdb.refresh_forever,
                       args=(int(os.environ.get("OSV_REFRESH_SECONDS", "21600")),), daemon=True).start()
     for r in CONF.get("registry", []):
