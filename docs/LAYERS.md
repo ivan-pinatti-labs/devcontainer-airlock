@@ -332,6 +332,19 @@ files they cannot edit (root owned, read only):
   `git *` at all (measured with Claude Code 2.1.283). Whatever stays inside
   cannot reach the sockets and fails. Excluded commands still go through
   the permission prompts.
+- In the same file, `podman` (a client of the engine) runs without asking
+  when it only reads (`ps`, `images`, `inspect`, `logs` and the like) or
+  adds something harmless (`pull`, `network create`, `volume create`), and
+  so do `run`, `exec`, `build`, `start` and `cp`. Those last ones are a way
+  around `l2`'s protections: a container started by hand gets whatever it
+  mounts read write, `.git/config` included, which `l2` keeps read only.
+  That is accepted, since what protects the credentials is that the engine
+  holds none. It always asks before anything that removes or stops
+  something (`rm`, `rmi`, `prune`, `kill`, `stop`, `network rm`), and
+  before the rarer commands that load, push or reconfigure (`load`, `push`,
+  `login`, `system service`, a global flag). A managed `ask` rule wins over
+  an `allow` rule in any other settings file, so a project cannot lift
+  those; it can still allow commands the managed rules do not name.
 - `/etc/codex/requirements.toml`: Codex keeps its own sandbox (measured
   working inside the workbench: read only, no network) and asks before
   acting, and the same hook refuses project code with the `l2` command line
