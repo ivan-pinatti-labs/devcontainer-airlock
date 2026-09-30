@@ -159,7 +159,7 @@
 <text class="s" x="672" y="470">one of its worktrees, or a</text>
 <text class="s" x="672" y="488">folder of clones side by side.</text>
 <text class="s" x="672" y="512">&lt;workspace&gt; in a container</text>
-<text class="s" x="672" y="530">name is that folder's name.</text>
+<text class="s" x="672" y="530">name is made from that folder's.</text>
 
 <!-- other workbenches -->
 <rect class="box" x="56" y="772" width="266" height="44" rx="5"/>

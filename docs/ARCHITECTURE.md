@@ -47,21 +47,26 @@ the host. That folder is one of three things:
 
 | The folder | Example | What is mounted |
 | --- | --- | --- |
-| a repository's main clone | `~/src/app` | the clone, with all its worktrees |
+| a repository's main clone | `~/src/app` | the clone, with the worktrees inside it (`.claude/worktrees`); a worktree kept elsewhere is not mounted |
 | one worktree of a repository | `~/src/app/.claude/worktrees/fix-login` | that worktree, and the clone's git directory |
 | a folder holding several clones side by side | `~/src` | each clone on its own, never the folder as a whole ([LAYERS.md](LAYERS.md), "Several repositories at once") |
 
-Run from inside a repository, the default is its main clone, or the
-worktree you are in when the repository is marked worktree only. Run from a
-folder that is not in a checkout but holds clones, it is that folder.
+Run from inside a repository, the default is its main clone. A repository
+marked worktree only (its main clone holds data other containers use) is
+different: run from one of its worktrees, the default is that worktree, and
+run from its main clone, or with the main clone named, the start is refused
+and says to use a worktree. Run from a folder that is not in a checkout but
+holds clones, it is that folder.
 
 The containers are named after the folder: `<workspace>` in
 `workbench-claude-<workspace>`, `l2-engine-<workspace>` and the others is
-the folder's own name (`app`, `src`), or `<clone>-<worktree>` for a worktree
+the folder's name (`app`, `src`), or `<clone>-<worktree>` for a worktree
 under a clone's `.claude/worktrees` (`app-fix-login`), so two repositories'
-worktrees of the same name never share containers. Two different folders
-with the same name cannot both be running; the second is refused and told
-which folder holds the name.
+worktrees of the same name never share containers. Any character other than
+a letter, a digit, `_`, `.` or `-` becomes `_` in that name. Each container
+records the folder it belongs to in a label, and a second folder whose name
+maps to a running one's is refused and told which folder holds the name. A
+container without that label (one made by hand, say) is not checked.
 
 ## How they talk to each other
 
