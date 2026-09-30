@@ -252,8 +252,15 @@ class Gate(http.server.BaseHTTPRequestHandler):
                     return
                 if kind == "list":
                     want_body = "go"
-                elif kind == "latest" or (MIN_AGE and version):
+                elif kind in ("latest", "info"):
                     want_body = "go-info"
+                elif MIN_AGE and version:
+                    # A .mod or .zip carries no date: its version's .info
+                    # does, so it is asked first.
+                    info = self.fetch_json(target + rest.split("?")[0].rsplit(".", 1)[0] + ".info") or {}
+                    if filters.too_young(info.get("Time"), MIN_AGE, now):
+                        self.refuse(f"{module}@{version}", f"published less than {MIN_AGE:g} days ago")
+                        return
 
         headers = {"Accept": "application/json"} if want_body == "npm" else None
         conn, resp = self.backend(target + rest, headers=headers)
