@@ -796,30 +796,52 @@ proxy_join() {
   owner="$(sed -n 's/^workspace=//p' "${f}" 2>/dev/null || true)"
   [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
     || die "the egress proxy already serves ${owner} as ${slug}, another folder of the same name; stop it first (host/workbench down ${owner})"
+  # Every name checked against the proxy image before anything changes, so
+  # a bad one costs nothing: not an old proxy, not a registration, and never
+  # a registration a restarted proxy would refuse to start with.
+  check_sets "${ws}" "${sets}"
   ensure_net "${ws}"
   # A workspace started before the proxy was shared has a proxy of its own
   # holding .2 on its network. Its workbenches find the shared one at the
   # same address, so they keep working across the swap.
   podman rm -f -t 5 "egress-proxy-${slug}" >/dev/null 2>&1 || true
-  # The registration it replaces, if any, comes back when the new one is
-  # refused, so a bad set name never costs a running workspace its rules.
+  # The registration it replaces, if any, comes back when anything after
+  # this fails, so a running workspace keeps its rules.
   rm -f "${f}.prev"
   if [ -f "${f}" ]; then cp -p "${f}" "${f}.prev"; fi
   printf 'workspace=%s\nsubnet=%s\nsets=%s\n' "${ws}" "$(net_subnet "${net}")" "${sets}" > "${f}.tmp"
   chmod 644 "${f}.tmp"
   mv "${f}.tmp" "${f}"
-  start_proxy
-  if ! podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "${PROXY}" \
-    | tr ' ' '\n' | grep -qx "${net}"; then
-    podman network connect --ip "$(proxy_ip "${ws}")" "${net}" "${PROXY}"
-  fi
-  if ! podman exec "${PROXY}" egress-reload >/dev/null; then
+  # In a child shell, so a start_proxy that dies comes back here to be undone.
+  if ! (start_proxy) || ! proxy_connect "${net}" "$(proxy_ip "${ws}")" \
+    || ! podman exec "${PROXY}" egress-reload >/dev/null; then
     if [ -f "${f}.prev" ]; then mv "${f}.prev" "${f}"; else rm -f "${f}"; fi
-    podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
-    podman logs --tail 5 "${PROXY}" >&2
-    die "the egress proxy refused the sets of ${ws} (${sets}); it keeps the ones it had, and so do the other workspaces"
+    if running "${PROXY}"; then
+      podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
+      podman logs --tail 5 "${PROXY}" >&2
+    fi
+    die "the egress proxy could not take ${ws} (sets: ${sets}); its previous rules, if any, are back, and the other workspaces keep theirs"
   fi
   rm -f "${f}.prev"
+}
+
+# The proxy on network $1 at address $2, unless it is there already.
+proxy_connect() {
+  podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "${PROXY}" \
+    | tr ' ' '\n' | grep -qx "$1" && return 0
+  podman network connect --ip "$2" "$1" "${PROXY}"
+}
+
+# Die unless every name in $2 (comma separated) is an egress set the proxy
+# image knows. For workspace $1, in the message.
+check_sets() {
+  local known name
+  known="$(podman run --rm --network none "${PROXY_IMAGE}" egress-refresh --list | awk '{print $1}')" \
+    || die "could not list the egress sets in ${PROXY_IMAGE}"
+  for name in ${2//,/ }; do
+    grep -qx "${name}" <<<"${known}" \
+      || die "${1} asks for egress set '${name}', which the proxy does not know; known sets: $(paste -sd' ' <<<"${known}")"
+  done
 }
 
 # Take a workspace off the proxy: its rules first, then the network.
