@@ -253,6 +253,21 @@ from the repository's L2 image.
   hook environments.
 - An `l2` round trip costs about 90 milliseconds.
 
+Every engine on the host reads the L2 images from one shared store, the
+`l2-store` volume, mounted read only and listed in the engine's
+`storage.conf` as an additional image store. `host/workbench up` copies the
+host's L2 images into it when they change, so an engine keeps no copy of
+its own: measured 2026-10-01, an engine reached its socket in 0.16 seconds
+with 124 KB of disk, an L2 run from the store took 0.16 seconds, and
+filling the store with the 996 MB L2 image took 5.5 seconds, once for every
+engine. Images an engine builds or pulls stay in its own store, but an
+image built on the L2 image keeps its lower layers in the shared one. So a
+replaced L2 image is never pruned automatically: the engine volumes, which
+outlive their engines, may hold containers and images that still need its
+layers. To reclaim the space, with every workspace down, remove the
+`l2-store` volume together with the `l2-engine-*` volumes; the next `up`
+fills the store again and repository L2 images are rebuilt on first use.
+
 ### pre-commit
 
 `l2-pre-commit` is pre-commit run in L2, and what the git hooks

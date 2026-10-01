@@ -4,6 +4,7 @@
   "ignorePaths": [".secrets.baseline"],
   "words": [
     "abspath",
+    "additionalimagestores",
     "acpi",
     "actionlint",
     "alpinelinux",
