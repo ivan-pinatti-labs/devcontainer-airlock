@@ -746,5 +746,26 @@ the editor itself; VS Code has no sandbox for them. What limits them here:
   agent extensions need. That is accepted: the worst case is someone using
   that subscription, and it can be revoked.
 
+### SonarQube for IDE
+
+`SonarSource.sonarlint-vscode` is in every workbench, with its telemetry off.
+Its analysis runs in a JVM of its own, which ignores `HTTPS_PROXY` and which
+VS Code's proxy settings never reach (measured 2026-10-01: with neither, it
+failed with `UnknownHostException: sonarcloud.io`, as workbenches have no
+DNS). So `workbench-init` writes the workspace's egress proxy into
+`sonarlint.ls.vmargs` as JVM options when the workbench starts.
+
+Without connected mode it analyzes with the rules it bundles, and needs no
+egress set. For connected mode a repository adds the `sonarqube-cloud` egress set to its
+`.devcontainer/egress-sets`: `sonarcloud.io` and `api.sonarcloud.io` (the
+connection), `scanner.sonarcloud.io` (the server's analyzers, which bound
+mode uses instead of the bundled ones: without it the project is left with
+no Python rules at all), `events-api.sonarcloud.io` (a WebSocket for server
+events) and `binaries.sonarsource.com` (the C#, C and C++ analyzers it
+downloads). The set covers the EU region; a US region organization would
+need `sonarqube.us` hosts in a set of their own. Opening a `git worktree`
+logs a JGit "repository not found" error, harmless, since JGit cannot read
+linked worktrees; a session's independent clone does not.
+
 Keep the extensions on the host's own VS Code to the Dev Containers extension:
 anything installed there runs on the host.
