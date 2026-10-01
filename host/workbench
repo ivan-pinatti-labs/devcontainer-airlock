@@ -937,7 +937,7 @@ proxy_join() {
   case ",${sets}," in
     *,mirror,*)
       mirror_on || die "${ws} lists mirror in .devcontainer/egress-sets; the package mirror is off (WORKBENCH_MIRROR=${MIRROR})"
-      sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | grep -vx mirror | paste -sd, -)" ;;
+      sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | { grep -vx mirror || true; } | paste -sd, -)" ;;
   esac
   # Every name checked against the proxy image before anything changes, so
   # a bad one costs nothing: not an old proxy, not a registration, and never
