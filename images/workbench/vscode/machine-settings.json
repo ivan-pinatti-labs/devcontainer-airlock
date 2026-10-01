@@ -4,5 +4,6 @@
   "extensions.verifySignature": true,
   "extensions.ignoreRecommendations": true,
   "http.proxySupport": "override",
-  "telemetry.telemetryLevel": "off"
+  "telemetry.telemetryLevel": "off",
+  "sonarlint.disableTelemetry": true
 }
