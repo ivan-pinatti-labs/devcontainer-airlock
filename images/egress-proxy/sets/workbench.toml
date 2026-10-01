@@ -1,6 +1,7 @@
-description = "The workbench itself: the coding agents' APIs, the VS Code server and its extensions, and the certificate checks those downloads make. Always on."
+description = "The workbench itself: the coding agents' APIs and Claude Code's Remote Control bridge, the VS Code server and its extensions, and the certificate checks those downloads make. Always on."
 domains = [
   "api.anthropic.com", "statsig.anthropic.com", "claude.ai", "platform.claude.com",
+  "bridge.claudeusercontent.com",
   "api.openai.com", "auth.openai.com", "chatgpt.com",
   "update.code.visualstudio.com", "vscode.download.prss.microsoft.com", "main.vscode-cdn.net",
   "marketplace.visualstudio.com", "*.gallerycdn.vsassets.io", "*.gallery.vsassets.io",

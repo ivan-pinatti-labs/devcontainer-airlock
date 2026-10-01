@@ -407,11 +407,13 @@ Voice works in a remote control session too, with the host's microphone,
 so from the computer rather than from the paired device. `make claude`
 starts a remote control session unless `REMOTE=0`, so the session shows
 up on your other devices. `DO_NOT_TRACK` stays set: Claude Code 2.1.283
-starts Remote Control with it (measured 2026-10-01). Registering the
-session can still be refused by the account: a 403 that says to check the
-organization's permissions comes from Anthropic's API, not from the egress
-proxy, and means Remote Control is not enabled for that account's
-organization.
+starts Remote Control with it (measured 2026-10-01). Remote Control reaches
+`bridge.claudeusercontent.com` as well as `api.anthropic.com`, so the
+`workbench` egress set lists both. Without the bridge Claude Code reports
+"Registration: Access denied (403). Check your organization permissions",
+which reads like an account setting but is the egress proxy refusing the
+connection (measured: the same login and version connected from a
+container with direct network access).
 
 ## GitHub access
 
