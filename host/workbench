@@ -333,7 +333,9 @@ running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = tru
 # forever. The holder lives only as long as this script (it checks every
 # second), and the kernel releases the lock when it exits or is killed, so
 # no crash can leave it held and no stale lock needs reclaiming.
-LOCK_FILE="${RUN}/workbench/lock"
+# Not workbench/lock: containers started under the old lock still hold a
+# flock on that file, and would keep this one waiting until they stop.
+LOCK_FILE="${RUN}/workbench/state.lock"
 lock_state() {
   local line="" fd wfd owner="${BASHPID}"
   [ -z "${LOCK_PID:-}" ] || return 0
