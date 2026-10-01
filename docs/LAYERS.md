@@ -90,8 +90,8 @@ Each day, from the repository you are working on:
 
 ```shell
 make unlock              # type the key's passphrase; lasts 8 hours
-make claude              # Claude Code, in its workbench, in the folder you are in, with voice
-make claude-remote       # the same with remote control, to pair a device
+make claude              # Claude Code, in its workbench, in the folder you are in,
+                         # with voice and remote control (REMOTE=0: without)
 make claude-plain        # neither voice nor remote control
 make codex               # Codex, the same way (no voice)
 make claude-shell        # or codex-shell: a plain terminal in that workbench
@@ -403,11 +403,13 @@ anything able to read the other pipe hears it, for at most ten minutes at a
 time. The audio goes to Anthropic's speech service like the rest of the
 agent's traffic, through the egress proxy.
 
-Voice works in a remote control session too (`make claude-remote`), with
-the host's microphone, so from the computer rather than from the paired
-device. Remote Control itself needs `DO_NOT_TRACK` cleared: Claude Code
-2.1.283 refuses to start it without feature flags, which `DO_NOT_TRACK`
-turns off. `host/workbench remote` clears it for that one session.
+Voice works in a remote control session too, with the host's microphone,
+so from the computer rather than from the paired device. `make claude`
+starts a remote control session unless `REMOTE=0`, so the session shows
+up on your other devices. Remote Control itself needs `DO_NOT_TRACK`
+cleared: Claude Code 2.1.283 refuses to start it without feature flags,
+which `DO_NOT_TRACK` turns off. `host/workbench remote` clears it for that
+one session, and `REMOTE=0` keeps it set.
 
 ## GitHub access
 
