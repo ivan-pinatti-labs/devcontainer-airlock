@@ -123,7 +123,7 @@ coverage:
 			pip install --quiet --disable-pip-version-check --root-user-action=ignore \
 				--require-hashes --only-binary=:all: -r tests/requirements.txt; \
 			status=0; coverage run -m pytest tests -q -p no:cacheprovider || status=1; \
-			coverage xml -q -o /out/coverage.xml; \
+			coverage xml -q -o /out/coverage.xml || status=1; \
 			coverage report || status=1; \
 			python3 scripts/kcov_to_sonar.py /tmp/w /out/coverage.xml /tmp/python.xml \
 				$(PYTHON_SOURCES) || status=1; \
