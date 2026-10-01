@@ -275,3 +275,20 @@ def test_main_on_a_provisioned_backend_changes_nothing_extra(
     methods = {(m, p) for m, p, _ in nexus.calls}
     assert ("POST", "/service/rest/v1/system/eula") not in methods
     assert not any(m in ("POST", "DELETE") and "repositories" in p for m, p in methods)
+
+
+def test_main_tells_an_http_error_in_one_line(prov, monkeypatch, tmp_path, capsys):
+    def refused():
+        raise urllib.error.HTTPError(
+            "http://nexus/service/rest/v1/status/writable",
+            503,
+            "no",
+            {},
+            io.BytesIO(b"starting " + b"x" * 400),
+        )
+
+    monkeypatch.setattr(prov, "wait_up", refused)
+    assert prov.main([wanted(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert "503 from http://nexus/service/rest/v1/status/writable: starting x" in err
+    assert "x" * 300 not in err

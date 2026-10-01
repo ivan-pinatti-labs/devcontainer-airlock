@@ -27,6 +27,9 @@ fail_under = 100
 show_missing = true
 skip_covered = true
 # The one line a test cannot reach without running the file as a program.
-# Everything it calls is main(), which the tests drive directly.
+# Everything it calls is main(), which the tests drive directly. coverage.py
+# excludes the whole block under it, so that block holds one call into
+# main() and nothing else; tests/test_main_guards.py holds every Python
+# source to that.
 exclude_also =
     if __name__ == .__main__.:

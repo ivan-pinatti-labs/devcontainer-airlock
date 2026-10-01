@@ -110,6 +110,15 @@ def extdirect(password, action, method, data):
 
 
 def main(argv):
+    """provision(), with an HTTP error from Nexus told in one line, exit 1."""
+    try:
+        return provision(argv)
+    except urllib.error.HTTPError as e:
+        log(f"{e.code} from {e.url}: {e.read().decode()[:300]}")
+        return 1
+
+
+def provision(argv):
     if len(argv) != 1:
         print(__doc__, file=sys.stderr)
         return 1
@@ -158,8 +167,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except urllib.error.HTTPError as e:
-        log(f"{e.code} from {e.url}: {e.read().decode()[:300]}")
-        sys.exit(1)
+    sys.exit(main(sys.argv[1:]))
