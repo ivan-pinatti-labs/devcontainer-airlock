@@ -9,8 +9,10 @@
                                     them as the local ones
     host/workbench init [DIR]       set up a repository for the workbench: its
                                     egress sets, an L2 image, the make targets
-    host/workbench up [WORKSPACE]   start the helpers, the L2 engine and the
-                                    workbenches, one per agent
+    host/workbench up [WORKSPACE]   start the workbenches, one per agent, and
+                                    the L2 engine, and the shared services
+                                    (helpers, egress proxy, package mirror)
+                                    that are not running yet
     host/workbench unlock           add the ssh key to the agent for 8 hours
     host/workbench claude [WORKSPACE]
     host/workbench codex [WORKSPACE]
@@ -32,8 +34,10 @@
     host/workbench status           what is running
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
                                     engine and network) and take it off the
-                                    egress proxy; the shared helpers keep
-                                    running for other workspaces
+                                    egress proxy. When no other workspace is
+                                    running, the shared services stop too
+                                    (their caches stay), which drops the
+                                    unlocked ssh key
     host/workbench helpers          start only the helpers (proxy, broker,
                                     ssh-agent); what the login unit runs
     host/workbench helpers-down     stop the shared helpers, which drops the
@@ -93,7 +97,7 @@
   workspace off for a moment. `podman run --rm
   localhost/airlock-egress-proxy egress-refresh --list` shows every set.
 
-  With WORKBENCH_MIRROR=1 a package mirror runs beside the proxy, one for
+  Unless WORKBENCH_MIRROR=0, a package mirror runs beside the proxy, one for
   the host: its gate at .254 on each workspace network, which L2 and the
   engine install and pull through, and its backend (Nexus Repository CE) on
   a network of its own, whose only way out is the proxy. The gate leaves
@@ -129,9 +133,9 @@
     WORKBENCH_TZ          the time zone of the workbenches, as podman --tz
                           takes it (America/Toronto, say). Default: local,
                           the host one; L2 stays on UTC
-    WORKBENCH_MIRROR      1 to run the package mirror (docs/LAYERS.md,
-                          Package mirror): installs and image pulls in L2 and
-                          the engine go through it. Default: off
+    WORKBENCH_MIRROR      0 to run without the package mirror (docs/LAYERS.md,
+                          Package mirror), through which installs and image
+                          pulls in L2 and the engine go. Default: 1, on
     WORKBENCH_MIRROR_MIN_AGE
                           hide npm and Go versions published fewer days ago
                           than this. Default: 0, off
@@ -274,7 +278,7 @@ GATE_IMAGE="localhost/airlock-mirror-gate:${TAG}"
 # another routes file and provisioning under images/mirror-gate/backends/.
 # renovate: datasource=docker depName=docker.io/sonatype/nexus3
 NEXUS_IMAGE="docker.io/sonatype/nexus3:3.96.3@sha256:a406f4e9dc149e050723a93bf57964311f6d1c88e1dcbed2e42ea373319a1772"
-MIRROR="${WORKBENCH_MIRROR:-0}"
+MIRROR="${WORKBENCH_MIRROR:-1}"
 MIRROR_NET=workbench-net-airlock-mirror
 # The one egress proxy of the host, shared by every workspace.
 PROXY=egress-proxy
@@ -311,6 +315,16 @@ MAIN="$(dirname "$(git -C "${HERE}" rev-parse --path-format=absolute --git-commo
 ROOT="${WORKBENCH_ROOT:-$(dirname "${MAIN}")}"
 
 running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+
+# `up` and `down` one at a time, so a `down` that finds no workspace left
+# cannot stop the shared services under an `up` that is starting one.
+# Released before anything long lived (podman exec) inherits it.
+lock_state() {
+  mkdir -p "${RUN}/workbench"
+  exec 9>"${RUN}/workbench/lock"
+  flock 9
+}
+unlock_state() { exec 9>&-; }
 
 # Two workspaces with the same folder name would map to the same container
 # names. Each container carries its workspace in a label; refuse to reuse one
@@ -831,7 +845,7 @@ proxy_join() {
   # that lists it and nothing else reaches no registry directly at all.
   case ",${sets}," in
     *,mirror,*)
-      mirror_on || die "${ws} lists mirror in .devcontainer/egress-sets; start the package mirror with WORKBENCH_MIRROR=1"
+      mirror_on || die "${ws} lists mirror in .devcontainer/egress-sets; the package mirror is off (WORKBENCH_MIRROR=${MIRROR})"
       sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | grep -vx mirror | paste -sd, -)" ;;
   esac
   # Every name checked against the proxy image before anything changes, so
@@ -906,7 +920,7 @@ proxy_leave() {
 }
 
 # The package mirror (docs/LAYERS.md, "Package mirror"), one for the host
-# like the egress proxy, and off unless WORKBENCH_MIRROR asks. Two
+# like the egress proxy, and on unless WORKBENCH_MIRROR=0. Two
 # containers on a network of their own: the backend (Nexus Repository CE),
 # whose only way out is the egress proxy with the upstream registries' sets,
 # and the gate, the only part clients reach, at .254 on every workspace's
@@ -1190,6 +1204,7 @@ cmd_up() {
     "${ROOT}"/*) ;;
     *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
   esac
+  lock_state
   start_helpers
   proxy_join "${ws}"
   if mirror_on; then
@@ -1202,6 +1217,7 @@ cmd_up() {
     start_workbench "${ws}" "${agent}"
     echo "workbench: ${agent}: host/workbench ${agent}, or attach VS Code to $(wb_name "${ws}" "${agent}")"
   done
+  unlock_state
   echo "workbench: up for ${ws} (L2 engine $(engine_name "${ws}"))"
 }
 
@@ -1433,6 +1449,7 @@ cmd_status() {
 cmd_down() {
   local ws
   ws="$(workspace "${1:-}")"
+  lock_state
   # Every workbench of the workspace, whatever agent or account, and
   # workbench-<name>, the single workbench from before the split.
   podman ps -a --filter label=workbench.workspace="${ws}" --format '{{.Names}}' \
@@ -1444,6 +1461,19 @@ cmd_down() {
   proxy_leave "${ws}"
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   echo "workbench: down"
+  if [ -z "$(podman ps -a --format '{{.Names}}' | grep -E '^(workbench|l2-engine)-' || true)" ]; then
+    stop_shared
+    echo "workbench: no workspace left, so the shared services stopped too; the next up starts them"
+  fi
+}
+
+# Every shared service: the package mirror, the egress proxy, the gh broker
+# and the ssh-agent. Their volumes (the proxy's cache, the mirror's cache,
+# admin password and malicious package lists) stay, so the next start is warm.
+stop_shared() {
+  podman rm -f -t 5 mirror-gate mirror-nexus "${PROXY}" gh-broker devcontainer-ssh-agent >/dev/null 2>&1 || true
+  rm -f "${EGRESS_DIR}/airlock-mirror.conf"
+  podman network rm "${MIRROR_NET}" >/dev/null 2>&1 || true
 }
 
 case "${1:-}" in

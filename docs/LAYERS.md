@@ -467,6 +467,15 @@ rebuilding its image, or `helpers-down`) cuts every workspace off for the
 few seconds it takes. It starts again with every registered workspace's
 network, so nothing needs to be brought up again.
 
+The shared services (the egress proxy, the package mirror, the gh broker
+and the ssh-agent) follow the workspaces. The `up` that finds one of them
+not running starts it, and the `down` that leaves no workbench or L2 engine
+on the host stops them all, so nothing runs that nothing uses. Their
+volumes stay, so the next start is warm. Stopping the ssh-agent drops the
+unlocked key, so `host/workbench unlock` again after that. `up` and `down`
+take a lock, so a `down` cannot stop the services under an `up` starting
+another workspace.
+
 ### Egress sets
 
 What a proxy allows is built from **egress sets**, one per service, in
@@ -557,8 +566,8 @@ to build Go against the network, as building the L2 image itself does.
 
 ## Package mirror
 
-An optional read through mirror of the public registries, one for the host
-like the egress proxy, turned on with `WORKBENCH_MIRROR=1`. Installs and
+A read through mirror of the public registries, one for the host like the
+egress proxy, on by default (`WORKBENCH_MIRROR=0` turns it off). Installs and
 image pulls in L2 and the engine then go through it, and a workspace that
 runs code nobody has reviewed can be given the mirror and nothing else.
 

@@ -33,8 +33,8 @@ workbench-help:
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
 		'  unlock                      Unlock the ssh key for git push, for 8 hours.' \
-		'  workbench-up                Start this repository workbenches, L2 engine and proxy.' \
-		'  workbench-down              Stop them; the shared helpers keep running.' \
+		'  workbench-up                Start this repository workbenches and L2 engine, and the shared services.' \
+		'  workbench-down              Stop them; the shared services too when nothing else uses them.' \
 		'  workbench-status            What is running.' \
 		'  workbench-build             Build every image locally.' \
 		'  workbench-pull              Or pull the published images instead.'
