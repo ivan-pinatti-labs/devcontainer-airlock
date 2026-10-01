@@ -1,6 +1,6 @@
 # Sessions: design
 
-Status: proposal, for review. Nothing here is built yet.
+Status: agreed 2026-09-30 (section 6). Nothing here is built yet.
 
 Any number of agent sessions at once (several `claude`, several
 `claude-personal`, `codex`, in any mix), each isolated from the others, all
@@ -50,7 +50,7 @@ What stays shared on purpose: all sessions run in the same SELinux domain
 and category, because they must connect to the broker, agent and engine
 sockets. Between sessions the boundary is the namespaces, not SELinux.
 
-## 2. Writing only to its own worktree
+## 2. Writing only to its own folder
 
 A session never mounts a clone read write.
 
@@ -62,50 +62,86 @@ A session never mounts a clone read write.
 - When the work is agreed, the session runs `airlock-worktree <repo>
   [<branch>]` (new, in the workbench image). It makes an **independent
   clone** into its folder: `git clone --no-hardlinks` from the read only
-  main clone, `origin` set to the main clone's remote, fetch, a branch from
-  `origin/main`, `l2-hooks-install`.
+  main clone (no network), `origin` set to the main clone's remote, fetch, a
+  branch from `origin/main`, `l2-hooks-install`. The branch is named after
+  the work and can be chosen at any time; the folder keeps the session's
+  name.
 
-So `.git` is not shared at all. Each session has its own objects, refs,
-config and hooks; none can touch another's, and none can write the main
-clone's `.git`. The cost is a few megabytes and tens of milliseconds per
-repository, measured above.
+Why a clone and not `git worktree`: every worktree writes into the main
+clone's `.git` (new objects, every branch, `config`, `hooks`), so a session
+would need it read write. With it, a session can move or delete another
+session's branches, and can set `core.hooksPath`, `core.fsmonitor` or a
+hook that then runs in every other session and on the host whenever git
+runs there. Git cannot make only a worktree's part of `.git` writable. A
+clone has its own objects, refs, config and hooks, and none of the main
+clone's.
 
-The trade: these are clones, not `git worktree`s. The main clone's `git
-worktree list` does not show them, and the host removes them (section 4).
-The path convention stays `<repo>/.claude/worktrees/<name>`.
+Not `--reference` either: borrowed objects can be pruned from the main clone
+(after a force push and a `gc`), which would break the session's clone. A
+full clone costs 4 to 11 MB and 40 to 60 ms, measured above.
 
-A repository marked worktree only (its main clone holds data) mounts its
-`.git` read only, to clone from, and never the clone itself, as today.
+The main clone's `git worktree list` does not show these clones; `make
+sessions` does. A repository marked worktree only (its main clone holds
+data) mounts its `.git` read only, to clone from, and never the clone
+itself, as today.
 
 ## 3. What is shared, and how
 
 | Thing | Per session or shared | How |
 | --- | --- | --- |
-| transcripts, history, memory | shared, both accounts | the resolved `projects/` folder (both accounts' project folders already point at one target) mounted into every session. The agent always starts in the workspace root (`~/wo/public`), so every session writes under the same project key, whatever worktree it works in |
+| transcripts, history, memory | shared, both accounts | the resolved `projects/` folder (both accounts' project folders already point at one target) mounted into every session. The agent always starts in the workspace root (`~/wo/public`), so every session writes under the same project key, whatever folder it works in |
 | login | shared per account | only the credentials file is shared (one file, so a token refresh by one session does not break the others) |
 | the rest of `~/.claude`, `~/.codex` | per session | a private copy seeded from the account's, so one session cannot change another's settings, agents or skills while it runs |
-| L2 engine | per session | own socket, own containers; images from one read only store the host fills (`additionalimagestores`, measured above) |
+| L2 engine | per session | own socket, own containers, own writable image store; below it, one read only store the host fills (`additionalimagestores`, measured above) |
 | egress proxy | shared (#54) | one registration per session network, the union of the egress sets of the repositories in scope; `mirror` works as today |
 | package mirror (#56) | shared | the gate joins each session network at `.254` |
-| gh broker, ssh-agent | shared | sockets, as today |
+| gh broker, ssh-agent | shared, through the profile | sockets, as today |
 | voice | per session | already per session: its own pipes |
+
+**Profile.** A session runs under a profile: the GitHub identity (the
+broker, its token and its owners), the git author, the egress defaults.
+There is one, `default`, holding today's settings. The session record names
+its profile, so a second one (work and personal, say, each with a broker of
+its own) is configuration later, not a redesign.
+
+**Repository L2 images.** The host builds each repository's
+`.devcontainer/l2/Dockerfile` into the shared store when it changes, so a
+new session starts without a build. A session can still change the
+Dockerfile and build: the result goes into its own engine's writable store,
+on top of the shared layers, and no other session sees it until the change
+merges and the host rebuilds.
 
 ## 4. Lifecycle
 
 - **Start**: `make claude`, `make claude-personal`, `make codex` start a new
-  session named `S` (default: a short generated name) over the folder you
-  are in: a repository gives a session scoped to it; `~/wo/public` gives an
-  unscoped one over every clone. `REPO=<name>` scopes a group session at
-  start.
+  session with a random name (`brave-otter`) over the folder you are in: a
+  repository gives a session scoped to it; `~/wo/public` gives an unscoped
+  one over every clone. `REPO=<name>` scopes a group session at start.
+  Names never change, so nothing restarts to rename.
 - **Attach**: `make attach-<session>` (tab completes) starts it again if it
   stopped and resumes the agent's conversation (`claude --resume`).
-- **List**: `make sessions`: name, agent and account, running or stopped,
-  its worktrees, their branches and PR state.
-- **Stop**: when the agent exits the container stops; the folder, branch and
-  transcript stay. `make stop-<session>` stops it from outside.
-- **Clean up**: `make prune` removes stopped sessions whose branches' pull
-  requests merged: the clone folders, the network, the engine volume.
-  `make prune-<session>` for one.
+- **List**: `make sessions`: name, agent and account, profile, running or
+  stopped, its clones, their branches and PR state.
+- **Stop**: when the agent exits the container stops. `make stop-<session>`
+  stops it from outside. The last session to stop stops the shared services
+  (#59).
+- **Clean up**: `make prune` removes stopped sessions whose pull requests
+  merged and whose clones hold nothing else: no uncommitted change, no
+  commit that is not pushed. Anything else is listed and kept. `make
+  prune-<session>` for one, with the same checks.
+
+**Crashes.** Everything a session owns that matters is on the host's disk:
+
+| Crash | Kept | Lost |
+| --- | --- | --- |
+| the agent | everything | nothing; attach resumes the conversation |
+| the container | clones and uncommitted files, transcript, engine volume | running processes |
+| the computer | the same | running processes |
+
+So session records live in `~/.local/share/workbench/sessions/`, not in
+`$XDG_RUNTIME_DIR`, which is emptied at boot. After a reboot `attach`
+recreates the network and the container from the record. As with a
+worktree today, a commit not pushed exists only on this disk.
 
 ## 5. Next to today's model
 
@@ -116,40 +152,30 @@ container. `host/workbench` gains `session start|attach|list|stop|prune`,
 and `host/workbench.mk` the targets above. `make claude-shell` and
 `codex-shell` become a shell in a session.
 
-## 6. Open questions
+## 6. Decisions (2026-09-30)
 
-1. **The worktree's name is the session's name**, fixed when the session
-   starts, since the writable folder is mounted then. Recommendation: name
-   sessions after the work when known (`make claude S=fix-login`); an
-   unscoped one gets a generated name, and `make rename-<session> S=<new>`
-   restarts it under the new name and resumes the conversation (about 1 s).
-2. **Clones instead of `git worktree`**. Recommendation: yes; it is what
-   keeps `.git` apart. The organization's AGENTS.md section "Parallel work
-   uses worktrees" then changes in every repository (fan out after this).
-3. **Shared memory is a channel between sessions.** A session can write
-   memory, or instructions in the shared project folder, that another
-   session will read. That is the sharing you asked for, so isolation holds
+1. **Names**: random, fixed for the session's life; no rename.
+2. **Clones**, full and independent (`--no-hardlinks`), not `git worktree`
+   and not `--reference`. The organization's AGENTS.md section "Parallel
+   work uses worktrees" changes in every repository after this lands.
+3. **Shared memory is a channel between sessions**: accepted. Isolation holds
    for files, processes and containers, not for what sessions tell each
-   other. Recommendation: accept, and say so in docs/LAYERS.md.
-4. **One GitHub identity.** Every session can act on every pull request
-   through the broker. Recommendation: accept for now; later the broker can
-   be narrowed per session to the repositories in scope.
-5. **Repository L2 images** (`.devcontainer/l2/Dockerfile`) would be built
-   in each session's engine the first time. Recommendation: the host builds
-   them into the shared store when their Dockerfile changes, so a session
-   never builds one.
-6. **Settings changed inside a session** (`/config`) would stay in that
-   session. Recommendation: accept; the account's own settings are edited
-   in its login folder on the host.
+   other; docs/LAYERS.md says so.
+4. **One profile**, `default`, with the structure for more.
+5. **Repository L2 images**: prebuilt by the host into the shared store,
+   and buildable in each session's own engine.
+6. **Settings changed inside a session** (`/config`) stay in that session,
+   for now.
 
-## Plan, once approved
+## Plan
 
 One pull request each, in this order:
 
 1. Shared read only L2 image store for engines, and the host filling it.
 2. Sessions in `host/workbench` and the make targets: per session
    container, network and engine; read only clones; per session folders;
-   `airlock-worktree`; attach, list, stop, prune.
-3. Per session agent configuration with shared credentials and history.
+   `airlock-worktree`; persistent records; attach, list, stop, prune.
+3. Per session agent configuration with shared credentials and history,
+   under the `default` profile.
 4. docs/ARCHITECTURE.md and docs/LAYERS.md, then the AGENTS.md change in
    every repository.
