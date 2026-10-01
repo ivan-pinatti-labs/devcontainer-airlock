@@ -1464,12 +1464,11 @@ engine_shares_store() {
 fill_l2_store() {
   local image mine theirs
   ensure_l2_store
-  # An image replaced here stays while any engine runs: its containers may
-  # be using its layers, and a prune run here cannot see them. With no
-  # engine running, nothing uses them.
-  if ! podman ps --format '{{.Names}}' | grep -q '^l2-engine-'; then
-    l2_store image prune --force >/dev/null 2>&1 || true
-  fi
+  # An image replaced here is never pruned automatically: the engines' own
+  # stores, which outlive the engines in their volumes, hold containers and
+  # images built on it whose lower layers live here, and a prune run on this
+  # store alone cannot see them. Reclaiming the space means removing this
+  # volume together with the engine volumes (docs/LAYERS.md, "L2").
   for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
     mine="$(podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" || continue
     theirs="$(l2_store image inspect --format '{{.Id}}' "${image}" 2>/dev/null || true)"
