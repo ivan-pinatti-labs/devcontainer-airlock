@@ -1,0 +1,36 @@
+#!/bin/bash
+# Claude Code, behind the workbench's relay (airlock-relay, next to this):
+# some of its requests go to the proxy in absolute form, which the egress
+# proxy refuses, and the relay sends those through a CONNECT tunnel instead.
+# docs/LAYERS.md, "Remote Control". The relay is started by the first
+# session that needs it and serves every session after.
+set -u
+
+real=/opt/agent-clis/node_modules/.bin/claude
+egress="${HTTPS_PROXY:-${https_proxy:-}}"
+port="${AIRLOCK_RELAY_PORT:-8889}"
+
+listening() { (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; }
+
+# Not when there is no egress proxy, and not twice: a session started from
+# inside another already has the relay as its proxy.
+if [ -n "${egress}" ] && [ -z "${AIRLOCK_EGRESS_PROXY:-}" ]; then
+  if ! listening; then
+    AIRLOCK_RELAY_UPSTREAM="${egress}" AIRLOCK_RELAY_PORT="${port}" \
+      setsid /usr/local/libexec/workbench/airlock-relay </dev/null >/dev/null 2>&1 &
+    for _ in $(seq 1 50); do
+      listening && break
+      sleep 0.05
+    done
+  fi
+  if listening; then
+    # The egress proxy stays known, for l2 --net, whose containers cannot
+    # reach this workbench's localhost.
+    export AIRLOCK_EGRESS_PROXY="${egress}"
+    export HTTPS_PROXY="http://127.0.0.1:${port}" https_proxy="http://127.0.0.1:${port}"
+  else
+    echo "claude: the relay did not start; Remote Control will not register" >&2
+  fi
+fi
+
+exec "${real}" "$@"

@@ -165,10 +165,9 @@ RUN set -eu; \
     "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"; \
   npm audit signatures; \
   npm rebuild @anthropic-ai/claude-code; \
-  ln -s /opt/agent-clis/node_modules/.bin/claude /usr/local/bin/claude; \
   rm -rf /tmp/npm-cache; \
   mkdir -p /root/version-check; \
-  HOME=/root/version-check claude --version; \
+  HOME=/root/version-check /opt/agent-clis/node_modules/.bin/claude --version; \
   rm -rf /root/version-check
 # SoX, which Claude Code's voice mode records with (`rec`), and a rec of our
 # own in front of it that reads a voice session's microphone pipe. There is
@@ -179,7 +178,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends sox \
   && rm -rf /var/lib/apt/lists/*
 COPY bin/rec /usr/local/bin/rec
-RUN bash -n /usr/local/bin/rec
+# Claude Code itself runs behind a relay of ours on localhost, which sends the
+# requests it hands the proxy in absolute form through a CONNECT tunnel
+# instead. docs/LAYERS.md, "Remote Control".
+COPY bin/claude /usr/local/bin/claude
+COPY bin/airlock-relay /usr/local/libexec/workbench/airlock-relay
+RUN bash -n /usr/local/bin/claude && bash -n /usr/local/bin/rec \
+  && node --check /usr/local/libexec/workbench/airlock-relay
 # The policies Claude Code cannot edit.
 COPY claude/managed-settings.json claude/CLAUDE.md /etc/claude-code/
 COPY --from=extensions /opt/vscode-extensions-claude /opt/vscode-extensions
