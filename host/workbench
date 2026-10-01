@@ -1482,7 +1482,7 @@ cmd_load_l2() {
 # without a copy of its own, about a gigabyte and several seconds each.
 # Images an engine builds or pulls go to its own store, where a tag wins over
 # the same tag here.
-L2_STORE=l2-store
+L2_STORE="l2-store"
 L2_STORE_PATH=/var/lib/airlock/l2-store
 
 # podman "$@" on the shared store, in a throwaway container of the engine
@@ -1625,18 +1625,17 @@ session_new_name() {
   die "no free session name; host/workbench session prune"
 }
 
-# Read session $1's record into S_AGENT, S_WS, S_PROFILE, S_ID: KEY=value
+# Read session $1's record into S_AGENT, S_WS and S_ID: KEY=value
 # lines, read and never run, like the settings file.
 session_read() {
   local f key value
   f="$(session_dir "$1")/session"
   [ -f "${f}" ] || die "no session $1 (host/workbench session list)"
-  S_AGENT="" S_WS="" S_PROFILE="" S_ID=""
+  S_AGENT="" S_WS="" S_ID=""
   while IFS='=' read -r key value; do
     case "${key}" in
       agent) S_AGENT="${value}" ;;
       workspace) S_WS="${value}" ;;
-      profile) S_PROFILE="${value}" ;;
       claude_id) S_ID="${value}" ;;
     esac
   done < "${f}"
