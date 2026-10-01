@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// A relay on localhost in front of the egress proxy, for Claude Code only
+// (bin/claude starts it). docs/LAYERS.md, "Remote Control".
+//
+// Claude Code sends most HTTPS through a proxy as a CONNECT tunnel, but some
+// requests (Remote Control's registration, as of 2.1.283) go to the proxy in
+// absolute form instead: `POST https://api.anthropic.com/... HTTP/1.1`, the
+// TLS left to the proxy. The egress proxy refuses that, by design: it would
+// have to open TLS itself and so see the request, login token included. This
+// relay turns such a request into a CONNECT tunnel through the egress proxy
+// and opens the TLS here, in the workbench, which already holds the token.
+// Everything else, CONNECT included, passes through to the egress proxy
+// untouched, so its sets still decide every destination.
+'use strict';
+
+const net = require('net');
+const tls = require('tls');
+
+const port = Number(process.env.AIRLOCK_RELAY_PORT || 8889);
+const upstream = new URL(process.env.AIRLOCK_RELAY_UPSTREAM || '');
+const upHost = upstream.hostname;
+const upPort = Number(upstream.port || 80);
+const MAX_HEAD = 64 * 1024;
+// Hop by hop headers that end at the proxy, never sent to the origin.
+const DROP = new Set(['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive']);
+
+function fail(client, status, text) {
+  if (!client.destroyed) {
+    client.end(`HTTP/1.1 ${status} ${text}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
+  }
+}
+
+// Bytes as they came, to the egress proxy, and back.
+function passThrough(client, head) {
+  const up = net.connect(upPort, upHost, () => {
+    up.write(head);
+    client.pipe(up).pipe(client);
+  });
+  up.on('error', () => fail(client, 502, 'Bad Gateway'));
+  client.on('error', () => up.destroy());
+}
+
+// An absolute form https request: a CONNECT tunnel to its origin through the
+// egress proxy, TLS opened here, and the request sent on it in origin form.
+function tunnel(client, method, target, version, headerLines, rest) {
+  let url;
+  try {
+    url = new URL(target);
+  } catch {
+    return fail(client, 400, 'Bad Request');
+  }
+  const host = url.hostname;
+  const hostPort = Number(url.port || 443);
+  const up = net.connect(upPort, upHost, () => {
+    up.write(`CONNECT ${host}:${hostPort} HTTP/1.1\r\nHost: ${host}:${hostPort}\r\n\r\n`);
+  });
+  let answer = Buffer.alloc(0);
+  // The egress proxy closing before its answer to CONNECT is complete.
+  const onEnd = () => fail(client, 502, 'Bad Gateway');
+  const onData = (chunk) => {
+    answer = Buffer.concat([answer, chunk]);
+    const end = answer.indexOf('\r\n\r\n');
+    if (end < 0) {
+      if (answer.length > MAX_HEAD) { up.destroy(); fail(client, 502, 'Bad Gateway'); }
+      return;
+    }
+    up.removeListener('data', onData);
+    up.removeListener('end', onEnd);
+    const status = answer.subarray(0, answer.indexOf('\r\n')).toString().split(' ')[1];
+    if (status !== '200') {
+      // The egress proxy's refusal, as it gave it.
+      client.end(answer);
+      up.destroy();
+      return;
+    }
+    const secure = tls.connect({ socket: up, servername: host }, () => {
+      const kept = headerLines.filter((l) => !DROP.has(l.split(':')[0].trim().toLowerCase()));
+      const path = `${url.pathname}${url.search}`;
+      secure.write(`${method} ${path} ${version}\r\n${kept.join('\r\n')}\r\nConnection: close\r\n\r\n`);
+      if (rest.length) secure.write(rest);
+      client.pipe(secure).pipe(client);
+    });
+    secure.on('error', () => { client.destroy(); });
+  };
+  up.on('data', onData);
+  up.on('end', onEnd);
+  up.on('error', () => fail(client, 502, 'Bad Gateway'));
+  client.on('error', () => up.destroy());
+}
+
+const server = net.createServer((client) => {
+  let buf = Buffer.alloc(0);
+  const onData = (chunk) => {
+    buf = Buffer.concat([buf, chunk]);
+    const end = buf.indexOf('\r\n\r\n');
+    if (end < 0) {
+      if (buf.length > MAX_HEAD) fail(client, 431, 'Request Header Fields Too Large');
+      return;
+    }
+    client.removeListener('data', onData);
+    // Paused until a pipe takes over, so nothing arriving meanwhile is lost.
+    client.pause();
+    const lines = buf.subarray(0, end).toString('latin1').split('\r\n');
+    const [method, target, version] = lines[0].split(' ');
+    if (method !== 'CONNECT' && target && target.startsWith('https://')) {
+      tunnel(client, method, target, version, lines.slice(1), buf.subarray(end + 4));
+    } else {
+      passThrough(client, buf);
+    }
+  };
+  client.on('data', onData);
+  client.on('error', () => {});
+});
+
+if (!upHost) {
+  process.stderr.write('airlock-relay: AIRLOCK_RELAY_UPSTREAM is not set\n');
+  process.exit(2);
+}
+server.listen(port, '127.0.0.1');

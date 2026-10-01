@@ -355,6 +355,30 @@ determined agent (`sh -c` inside a script, for instance); what actually
 protects the credentials is that the workbench does not hold the GitHub
 token or the ssh key, and that L2 holds nothing at all.
 
+### Remote Control
+
+Claude Code sends most of its HTTPS through the egress proxy as CONNECT
+tunnels, but Remote Control (2.1.283) sends its requests to the proxy in
+absolute form, from the registration (`POST
+https://api.anthropic.com/v1/environments/bridge`) to the polling for work,
+leaving the TLS to the proxy. The egress proxy refuses that: opening the
+TLS itself would let it read the request, login token included. Claude Code
+reports the refusal as "Registration: Access denied (403). Check your
+organization permissions", which reads like an account setting and is not
+one.
+
+So `claude` in the workbench is a wrapper (`images/workbench/bin/claude`)
+that runs Claude Code behind a relay of ours on `127.0.0.1:8889`
+(`airlock-relay`), started by the first session and shared by the rest.
+The relay turns an absolute form `https://` request into a CONNECT tunnel
+through the egress proxy and opens the TLS itself, in the workbench, which
+already holds the login. Everything else, CONNECT included, passes through
+untouched, so the egress sets still decide every destination (measured: a
+host in no set is refused through the relay as it is without it).
+`AIRLOCK_EGRESS_PROXY` keeps the egress proxy's address, and `l2 --net`
+passes that one on, since an L2 container cannot reach the workbench's
+localhost.
+
 ## Voice
 
 Claude Code's voice mode records the microphone with SoX (`rec`), while
@@ -407,11 +431,9 @@ Voice works in a remote control session too, with the host's microphone,
 so from the computer rather than from the paired device. `make claude`
 starts a remote control session unless `REMOTE=0`, so the session shows
 up on your other devices. `DO_NOT_TRACK` stays set: Claude Code 2.1.283
-starts Remote Control with it (measured 2026-10-01). Registering the
-session can still be refused by the account: a 403 that says to check the
-organization's permissions comes from Anthropic's API, not from the egress
-proxy, and means Remote Control is not enabled for that account's
-organization.
+starts Remote Control with it (measured 2026-10-01). It reaches only
+`api.anthropic.com`, most of it in a form the egress proxy refuses, which
+is why Claude Code runs behind a relay here ("Remote Control", above).
 
 ## GitHub access
 
