@@ -1745,6 +1745,9 @@ session_run() {
     [ -z "${remote}" ] || cmd+=(--remote-control)
   fi
   echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS})"
+  # Its terminal closing (a hangup) stops the session too, as the agent
+  # exiting does, rather than leaving its containers running with no agent.
+  trap 'session_down "${S_WS}"; exit 129' HUP
   (
     if [ "${bin}" = claude ] && voice_on; then
       voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
@@ -1795,8 +1798,13 @@ cmd_session_attach() {
   [ -n "${SESSION:-}" ] || die "which session? host/workbench session attach NAME (host/workbench session list)"
   session_read "${SESSION}"
   if running "$(wb_name "${S_WS}" "${S_AGENT}")"; then
-    # Already running elsewhere: a second terminal on it, nothing restarted.
-    exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "$(wb_name "${S_WS}" "${S_AGENT}")" bash
+    # Its agent still running in another terminal: a shell beside it.
+    if podman exec "$(wb_name "${S_WS}" "${S_AGENT}")" pgrep -f "agent-clis/.*$(agent_of "${S_AGENT}")" >/dev/null 2>&1; then
+      exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "$(wb_name "${S_WS}" "${S_AGENT}")" bash
+    fi
+    # Running with no agent (its terminal went away): the agent again.
+    session_run resume "${remote}"
+    return
   fi
   session_up "${S_WS}" "${S_AGENT}"
   session_run resume "${remote}"
