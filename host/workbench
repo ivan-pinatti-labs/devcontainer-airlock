@@ -327,13 +327,35 @@ running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = tru
 
 # `up` and `down` one at a time, so a `down` that finds no workspace left
 # cannot stop the shared services under an `up` that is starting one.
-# Released before anything long lived (podman exec) inherits it.
+# A directory, made atomically, holding the owner's pid. Not a flock on an
+# open descriptor: every container started while it was held inherited the
+# descriptor, and podman's conmon kept it, and so the lock, open for as long
+# as the container ran. A lock whose owner is gone is taken over.
+LOCK_DIR="${RUN}/workbench/lock.d"
 lock_state() {
+  local owner
   mkdir -p "${RUN}/workbench"
-  exec 9>"${RUN}/workbench/lock"
-  flock 9
+  for _ in $(seq 1 1200); do
+    if mkdir "${LOCK_DIR}" 2>/dev/null; then
+      echo "$$" > "${LOCK_DIR}/pid"
+      LOCKED=1
+      trap unlock_state EXIT
+      return 0
+    fi
+    owner="$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)"
+    if [ -n "${owner}" ] && ! kill -0 "${owner}" 2>/dev/null; then
+      rm -rf "${LOCK_DIR}"
+      continue
+    fi
+    sleep 0.1
+  done
+  die "another host/workbench (pid ${owner:-unknown}) has held ${LOCK_DIR} for two minutes; if none is running, remove it"
 }
-unlock_state() { exec 9>&-; }
+unlock_state() {
+  [ -n "${LOCKED:-}" ] || return 0
+  rm -rf "${LOCK_DIR}"
+  LOCKED=""
+}
 
 # Two workspaces with the same folder name would map to the same container
 # names. Each container carries its workspace in a label; refuse to reuse one
