@@ -565,6 +565,33 @@ set keeps its static domains without the address check, and says so loudly.
 That last case favours availability on purpose: a provider's API being down
 should not stop anyone working while the domain list still holds.
 
+### The proxy's own DNS
+
+Workspaces have no DNS at all: they name a host to the proxy, and the proxy
+resolves it. The proxy resolves only through its own resolver, on its
+loopback, which no workspace can reach. unbound caches and DNSSEC validates,
+and sends every query encrypted to Cloudflare's security resolvers,
+`1.1.1.2` and `1.0.0.2`, which also refuse known malware domains.
+`WORKBENCH_DNS` picks how: `doh` (the default), DNS over HTTPS on port 443
+through dnscrypt-proxy, or `dot`, DNS over TLS on port 853 from unbound
+itself, one process fewer where the network allows it. It takes effect at
+the proxy's next start (`host/workbench restart-proxy`). The certificate is checked against
+`security.cloudflare-dns.com`, so nothing on the way can read or change a
+query or an answer, and nothing in the container asks podman's or the
+host's resolver. Answers that point into private ranges are dropped.
+
+Measured 2026-10-01: names resolve (`api.github.com`, `pypi.org`), a domain
+with a broken DNSSEC chain (`dnssec-failed.org`) does not, Cloudflare's
+malware test domain resolves to `0.0.0.0`, and the container's only
+connections out were to `1.1.1.2:443`. DNS over TLS is not the default because
+port 853 is blocked on many networks, as it was by the firewall of the host
+this was measured on; DNS over HTTPS on 443 is not. With `dot` there and
+853 blocked, the proxy starts, says no name resolves, and every request
+fails until the setting is back to `doh`.
+Port 53 on loopback is opened to the proxy's unprivileged account with
+`net.ipv4.ip_unprivileged_port_start`, inside the container's own network
+namespace only.
+
 ### The proxy
 
 squid, tuned to decide and forward only (no cache, small lookup tables): 13
