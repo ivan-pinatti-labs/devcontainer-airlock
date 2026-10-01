@@ -355,6 +355,29 @@ determined agent (`sh -c` inside a script, for instance); what actually
 protects the credentials is that the workbench does not hold the GitHub
 token or the ssh key, and that L2 holds nothing at all.
 
+### Remote Control
+
+Claude Code sends most of its HTTPS through the egress proxy as CONNECT
+tunnels, but Remote Control's registration (2.1.283) goes to the proxy in
+absolute form, `POST https://api.anthropic.com/v1/environments/bridge`,
+leaving the TLS to the proxy. The egress proxy refuses that: opening the
+TLS itself would let it read the request, login token included. Claude Code
+reports the refusal as "Registration: Access denied (403). Check your
+organization permissions", which reads like an account setting and is not
+one.
+
+So `claude` in the workbench is a wrapper (`images/workbench/bin/claude`)
+that runs Claude Code behind a relay of ours on `127.0.0.1:8889`
+(`airlock-relay`), started by the first session and shared by the rest.
+The relay turns an absolute form `https://` request into a CONNECT tunnel
+through the egress proxy and opens the TLS itself, in the workbench, which
+already holds the login. Everything else, CONNECT included, passes through
+untouched, so the egress sets still decide every destination (measured: a
+host in no set is refused through the relay as it is without it).
+`AIRLOCK_EGRESS_PROXY` keeps the egress proxy's address, and `l2 --net`
+passes that one on, since an L2 container cannot reach the workbench's
+localhost.
+
 ## Voice
 
 Claude Code's voice mode records the microphone with SoX (`rec`), while

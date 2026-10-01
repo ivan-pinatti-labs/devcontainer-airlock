@@ -152,6 +152,16 @@ if [ "${net}" = true ]; then
   for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy NODE_USE_ENV_PROXY; do
     # With the package mirror, plain http (apt) goes to its gate instead.
     case "${v}" in HTTP_PROXY | http_proxy) [ -n "${AIRLOCK_MIRROR:-}" ] && continue ;; esac
+    # Under Claude Code, HTTPS_PROXY is the workbench's own relay on
+    # localhost, which an L2 container cannot reach; the egress proxy it
+    # stands in front of is in AIRLOCK_EGRESS_PROXY (bin/claude).
+    case "${v}" in
+      HTTPS_PROXY | https_proxy)
+        if [ -n "${AIRLOCK_EGRESS_PROXY:-}" ]; then
+          args+=(-e "${v}=${AIRLOCK_EGRESS_PROXY}")
+          continue
+        fi ;;
+    esac
     [ -n "${!v:-}" ] && args+=(-e "${v}=${!v}")
   done
   # The package mirror, when the host runs one (docs/LAYERS.md, "Package
