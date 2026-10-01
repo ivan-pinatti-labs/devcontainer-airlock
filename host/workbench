@@ -1447,7 +1447,7 @@ cmd_status() {
 }
 
 cmd_down() {
-  local ws
+  local ws names
   ws="$(workspace "${1:-}")"
   lock_state
   # Every workbench of the workspace, whatever agent or account, and
@@ -1461,7 +1461,12 @@ cmd_down() {
   proxy_leave "${ws}"
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   echo "workbench: down"
-  if [ -z "$(podman ps -a --format '{{.Names}}' | grep -E '^(workbench|l2-engine)-' || true)" ]; then
+  # A failed listing is not an empty one: stop nothing on a guess.
+  if ! names="$(podman ps -a --format '{{.Names}}')"; then
+    echo "workbench: could not list the containers left, so the shared services keep running" >&2
+    return 1
+  fi
+  if ! grep -qE '^(workbench|l2-engine)-' <<<"${names}"; then
     stop_shared
     echo "workbench: no workspace left, so the shared services stopped too; the next up starts them"
   fi
