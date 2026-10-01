@@ -861,7 +861,11 @@ start_proxy() {
     -v egress-cache:/var/lib/egress:U \
     -v "${EGRESS_DIR}:/etc/egress/workspaces:ro,Z" \
     "${PROXY_IMAGE}" >/dev/null
-  for _ in $(seq 1 100); do
+  # Up to two minutes, by the clock: the proxy waits up to 15 seconds for its
+  # resolver, then fetches the providers' ranges (30 seconds each at worst)
+  # before squid starts. It returns as soon as squid accepts.
+  local deadline=$((SECONDS + 120))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
     podman logs "${PROXY}" 2>&1 | grep -q 'Accepting HTTP' && return
     running "${PROXY}" || break
     sleep 0.3
