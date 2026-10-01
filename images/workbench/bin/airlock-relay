@@ -55,6 +55,8 @@ function tunnel(client, method, target, version, headerLines, rest) {
     up.write(`CONNECT ${host}:${hostPort} HTTP/1.1\r\nHost: ${host}:${hostPort}\r\n\r\n`);
   });
   let answer = Buffer.alloc(0);
+  // The egress proxy closing before its answer to CONNECT is complete.
+  const onEnd = () => fail(client, 502, 'Bad Gateway');
   const onData = (chunk) => {
     answer = Buffer.concat([answer, chunk]);
     const end = answer.indexOf('\r\n\r\n');
@@ -63,6 +65,7 @@ function tunnel(client, method, target, version, headerLines, rest) {
       return;
     }
     up.removeListener('data', onData);
+    up.removeListener('end', onEnd);
     const status = answer.subarray(0, answer.indexOf('\r\n')).toString().split(' ')[1];
     if (status !== '200') {
       // The egress proxy's refusal, as it gave it.
@@ -80,6 +83,7 @@ function tunnel(client, method, target, version, headerLines, rest) {
     secure.on('error', () => { client.destroy(); });
   };
   up.on('data', onData);
+  up.on('end', onEnd);
   up.on('error', () => fail(client, 502, 'Bad Gateway'));
   client.on('error', () => up.destroy());
 }
