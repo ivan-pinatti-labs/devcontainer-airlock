@@ -316,13 +316,43 @@ running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = tru
 
 # `up` and `down` one at a time, so a `down` that finds no workspace left
 # cannot stop the shared services under an `up` that is starting one.
-# Released before anything long lived (podman exec) inherits it.
+# The flock is held by a small process of its own, never by this shell: a
+# descriptor open here is inherited by every container started meanwhile
+# (podman's conmon keeps it for the container's life), which held the lock
+# forever. The holder lives only as long as this script (it checks every
+# second), and the kernel releases the lock when it exits or is killed, so
+# no crash can leave it held and no stale lock needs reclaiming.
+# Not workbench/lock: containers started under the old lock still hold a
+# flock on that file, and would keep this one waiting until they stop.
+LOCK_FILE="${RUN}/workbench/state.lock"
 lock_state() {
+  local line="" fd wfd owner="${BASHPID}"
+  [ -z "${LOCK_PID:-}" ] || return 0
   mkdir -p "${RUN}/workbench"
-  exec 9>"${RUN}/workbench/lock"
-  flock 9
+  # One process holding the lock on its own descriptor; its sleeps get
+  # none, so killing it releases the lock at once.
+  coproc LOCK_HOLDER {
+    exec sh -c 'exec 9>"$2"; flock -w 120 9 || exit 1; echo locked
+      while kill -0 "$1" 2>/dev/null; do sleep 1 9>&-; done' sh "${owner}" "${LOCK_FILE}"
+  }
+  LOCK_PID="${LOCK_HOLDER_PID}"
+  fd="${LOCK_HOLDER[0]}"
+  wfd="${LOCK_HOLDER[1]}"
+  read -r -u "${fd}" line || true
+  # The pipe only carried that one word; closed so no child inherits it.
+  exec {fd}<&- {wfd}>&-
+  if [ "${line}" != locked ]; then
+    LOCK_PID=""
+    die "another host/workbench has held ${LOCK_FILE} for two minutes (fuser -v ${LOCK_FILE} shows which)"
+  fi
+  trap unlock_state EXIT
 }
-unlock_state() { exec 9>&-; }
+unlock_state() {
+  [ -n "${LOCK_PID:-}" ] || return 0
+  kill "${LOCK_PID}" 2>/dev/null || true
+  wait "${LOCK_PID}" 2>/dev/null || true
+  LOCK_PID=""
+}
 
 # Two workspaces with the same folder name would map to the same container
 # names. Each container carries its workspace in a label; refuse to reuse one
@@ -1430,7 +1460,7 @@ cmd_load_l2() {
 # without a copy of its own, about a gigabyte and several seconds each.
 # Images an engine builds or pulls go to its own store, where a tag wins over
 # the same tag here.
-L2_STORE=l2-store
+L2_STORE="l2-store"
 L2_STORE_PATH=/var/lib/airlock/l2-store
 
 # podman "$@" on the shared store, in a throwaway container of the engine
