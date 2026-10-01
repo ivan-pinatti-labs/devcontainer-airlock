@@ -534,6 +534,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
 | `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages, trivy's database, sigstore's trust root | |
 | `aws` | AWS service APIs | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
+| `sonarqube-cloud` | SonarQube for IDE in connected mode: SonarQube Cloud (EU region), its scanner and events hosts, SonarSource's analyzer downloads | |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it
