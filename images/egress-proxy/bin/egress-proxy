@@ -6,10 +6,22 @@
   reloading squid in place.
 '
 set -eu
+# The resolvers first: egress-refresh and squid resolve through unbound,
+# which forwards over DNS over HTTPS through dnscrypt-proxy (unbound.conf,
+# dnscrypt-proxy.toml). Ready once a name resolves.
+dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml &
+dnscrypt_pid=$!
+unbound -d -c /etc/unbound/unbound.conf &
+unbound_pid=$!
+for _ in $(seq 1 50); do
+  getent hosts api.github.com >/dev/null 2>&1 && break
+  kill -0 "${unbound_pid}" 2>/dev/null || { echo "egress-proxy: unbound exited" >&2; exit 1; }
+  sleep 0.2
+done
 egress-refresh
 squid -N -f /etc/squid/squid.conf &
 squid_pid=$!
-trap 'kill "${squid_pid}" 2>/dev/null; wait "${squid_pid}"; exit 0' TERM INT
+trap 'kill "${squid_pid}" "${unbound_pid}" "${dnscrypt_pid}" 2>/dev/null; wait "${squid_pid}"; exit 0' TERM INT
 while kill -0 "${squid_pid}" 2>/dev/null; do
   sleep "${EGRESS_REFRESH_SECONDS:-21600}" &
   wait $! || true

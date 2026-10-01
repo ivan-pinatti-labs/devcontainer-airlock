@@ -844,10 +844,14 @@ start_proxy() {
     fi
   done
   podman rm -f "${PROXY}" >/dev/null 2>&1 || true
+  # Its own resolver on loopback (images/egress-proxy/unbound.conf), which
+  # forwards over TLS; port 53 is opened to its unprivileged account inside
+  # the container's own network namespace only.
   podman volume exists egress-cache || podman volume create egress-cache >/dev/null
   podman run -d --name "${PROXY}" \
     --network podman "${nets[@]}" \
     --cap-drop=all --security-opt no-new-privileges --read-only \
+    --dns 127.0.0.1 --sysctl net.ipv4.ip_unprivileged_port_start=53 \
     --tmpfs /run/egress:U --tmpfs /run/squid:U --tmpfs /tmp \
     -v egress-cache:/var/lib/egress:U \
     -v "${EGRESS_DIR}:/etc/egress/workspaces:ro,Z" \

@@ -20,13 +20,16 @@ USER 0:0
 # layer it was created in.
 # hadolint ignore=DL3008
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends squid \
+  && apt-get install -y --no-install-recommends squid unbound dns-root-data dnscrypt-proxy \
   && rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem \
   && rm -rf /var/lib/apt/lists/*
 COPY squid.conf /etc/squid/squid.conf
+COPY unbound.conf /etc/unbound/unbound.conf
+COPY dnscrypt-proxy.toml /etc/dnscrypt-proxy/dnscrypt-proxy.toml
 COPY sets/ /etc/egress/sets/
 COPY bin/egress-refresh bin/egress-reload bin/egress-proxy /usr/local/bin/
-RUN install -d -o 1000 -g 1000 /var/lib/egress /run/egress /run/squid
+RUN install -d -o 1000 -g 1000 /var/lib/egress /run/egress /run/squid \
+  && unbound-checkconf /etc/unbound/unbound.conf
 USER 1000:1000
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="Egress proxy for the ivan-pinatti-labs workbench: modular allowlists per service, with provider address ranges refreshed automatically." \
