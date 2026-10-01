@@ -50,7 +50,9 @@ RUN install -m 0644 /tmp/containers/containers.conf /tmp/containers/storage.conf
   && install -d -o 1000 -g 1000 /home/dev/.config /home/dev/.config/containers \
     /home/dev/.local /home/dev/.local/share /home/dev/.local/share/containers \
   && install -m 0644 -o 1000 -g 1000 /tmp/containers/user-containers.conf /home/dev/.config/containers/containers.conf \
+  && install -m 0644 -o 1000 -g 1000 /tmp/containers/storage.conf /home/dev/.config/containers/storage.conf \
   && install -d -o 1000 -g 1000 /run/l2-engine /var/tmp/l2-scratch \
+  && install -d -o 1000 -g 1000 /var/lib/airlock/l2-store/storage \
   && rm -rf /tmp/containers
 
 USER 1000:1000

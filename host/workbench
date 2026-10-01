@@ -27,8 +27,8 @@
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
     host/workbench load-l2 [WORKSPACE]
-                                    copy the local L2 images into the L2 engine
-                                    now (up does it when they differ)
+                                    copy the local L2 images into the shared L2
+                                    store now (up does it when they differ)
     host/workbench status           what is running
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
                                     engine and network) and take it off the
@@ -1106,6 +1106,7 @@ start_engine() {
   fi
   mapfile -t gitdir < <(ws_mounts "${ws}")
   podman volume exists "${name}" || podman volume create "${name}" >/dev/null
+  ensure_l2_store
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label workbench.engine="${ws}" \
@@ -1115,6 +1116,7 @@ start_engine() {
     "${gitdir[@]}" \
     -v "${dir}:/run/l2-engine:Z" \
     -v "${name}:/home/dev/.local/share/containers" \
+    -v "${L2_STORE}:${L2_STORE_PATH}:ro" \
     "${ENGINE_IMAGE}" >/dev/null
   for _ in $(seq 1 50); do
     [ -S "${dir}/podman.sock" ] && return
@@ -1196,6 +1198,7 @@ cmd_up() {
     start_mirror
     mirror_join "${ws}"
   fi
+  fill_l2_store
   start_engine "${ws}"
   sync_l2 "${ws}"
   for agent in ${AGENTS}; do
@@ -1400,23 +1403,86 @@ cmd_remote() {
 }
 
 cmd_load_l2() {
-  local ws name image
+  local ws name
   ws="$(workspace "${1:-}")"
   name="$(engine_name "${ws}")"
   running "${name}" || die "no L2 engine running for ${ws}; host/workbench up first"
+  fill_l2_store
+  sync_l2 "${ws}"
+}
+
+# The L2 images every engine shares: one podman image store, on a volume this
+# script fills from the host's images and every engine mounts read only (its
+# storage.conf lists it as an additional image store). An engine then starts
+# without a copy of its own, about a gigabyte and several seconds each.
+# Images an engine builds or pulls go to its own store, where a tag wins over
+# the same tag here.
+L2_STORE=l2-store
+L2_STORE_PATH=/var/lib/airlock/l2-store
+
+# podman "$@" on the shared store, in a throwaway container of the engine
+# image, under the same user mapping and label as the engines, so what it
+# writes is what they read.
+l2_store() {
+  podman run --rm -i --network none \
+    --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" --device /dev/fuse \
+    -v "${L2_STORE}:/home/dev/.local/share/containers" \
+    --entrypoint podman "${ENGINE_IMAGE}" "$@"
+}
+
+# The store's volume, laid out (lock files included) before any engine
+# mounts it: an engine cannot create them on its read only mount.
+ensure_l2_store() {
+  podman volume exists "${L2_STORE}" && return
+  podman volume create "${L2_STORE}" >/dev/null
+  l2_store images >/dev/null
+}
+
+# Whether engine $1 mounts the shared store; one started by an older
+# host/workbench does not, and gets its own copy, as before.
+engine_shares_store() {
+  podman inspect --format '{{range .Mounts}}{{.Name}} {{end}}' "$1" 2>/dev/null \
+    | tr ' ' '\n' | grep -qx "${L2_STORE}"
+}
+
+# Put the host's L2 images in the shared store when they are missing there or
+# older, so a rebuilt L2 image reaches every workspace on its next `up`
+# without anyone remembering load-l2.
+fill_l2_store() {
+  local image mine theirs
+  ensure_l2_store
+  # An image replaced here stays while any engine runs: its containers may
+  # be using its layers, and a prune run here cannot see them. With no
+  # engine running, nothing uses them.
+  if ! podman ps --format '{{.Names}}' | grep -q '^l2-engine-'; then
+    l2_store image prune --force >/dev/null 2>&1 || true
+  fi
   for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
-    podman save "${image}" | podman exec -i "${name}" podman load
+    mine="$(podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" || continue
+    theirs="$(l2_store image inspect --format '{{.Id}}' "${image}" 2>/dev/null || true)"
+    if [ "${mine}" != "${theirs}" ]; then
+      echo "workbench: copying ${image} into the shared L2 store"
+      podman save "${image}" | l2_store load --quiet >/dev/null
+    fi
   done
 }
 
-# Copy the L2 images into the engine when they are missing there or older
-# than the host's, so a rebuilt L2 image reaches every workspace on its next
-# `up` without anyone remembering load-l2.
+# Workspace $1's engine and the L2 images: an engine that shares the store
+# drops any copy of its own that would hide the shared image behind the same
+# tag (from before it shared one); an older engine gets its own copy.
 sync_l2() {
-  local name image mine theirs
+  local name image mine theirs id
   name="$(engine_name "$1")"
   for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
     mine="$(podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" || continue
+    if engine_shares_store "${name}"; then
+      id="$(podman exec "${name}" podman images --format '{{.ReadOnly}} {{.ID}} {{.Repository}}:{{.Tag}}' \
+        | awk -v want="${image}" '$1 == "false" && $3 == want {print $2}')"
+      if [ -n "${id}" ]; then
+        podman exec "${name}" podman untag "${id}" "${image}" >/dev/null
+      fi
+      continue
+    fi
     theirs="$(podman exec "${name}" podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null || true)"
     if [ "${mine}" != "${theirs}" ]; then
       echo "workbench: copying ${image} into the L2 engine"
