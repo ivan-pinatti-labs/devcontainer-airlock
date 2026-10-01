@@ -1,6 +1,7 @@
 # Sessions: design
 
-Status: agreed 2026-09-30 (section 6). Nothing here is built yet.
+Status: agreed 2026-09-30 (section 6). Step 1 of the plan is #64, step 2 is
+the pull request that brought this file in.
 
 Any number of agent sessions at once (several `claude`, several
 `claude-personal`, `codex`, in any mix), each isolated from the others, all
