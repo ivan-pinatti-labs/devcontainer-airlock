@@ -7,21 +7,49 @@
 '
 set -eu
 # The resolvers first: egress-refresh and squid resolve through unbound,
-# which forwards over DNS over HTTPS through dnscrypt-proxy (unbound.conf,
-# dnscrypt-proxy.toml). Ready once a name resolves.
-dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml &
-dnscrypt_pid=$!
+# which forwards encrypted, by EGRESS_DNS: doh (default) through
+# dnscrypt-proxy, or dot from unbound itself (unbound.conf). Ready once a
+# name resolves.
+dnscrypt_pid=""
+unbound_pid=""
+squid_pid=""
+# Set before anything starts, so a stop during a slow start (no resolver
+# answering yet) ends at once.
+# shellcheck disable=SC2086 # an empty process id drops out
+trap 'kill ${squid_pid} ${unbound_pid} ${dnscrypt_pid} 2>/dev/null; exit 0' TERM INT
+case "${EGRESS_DNS:-doh}" in
+  doh)
+    printf '%s\n' 'forward-zone:' '  name: "."' '  forward-addr: 127.0.0.1@5300' > /run/egress/forward.conf
+    dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml &
+    dnscrypt_pid=$!
+    ;;
+  dot)
+    printf '%s\n' 'forward-zone:' '  name: "."' '  forward-tls-upstream: yes' \
+      '  forward-addr: 1.1.1.2@853#security.cloudflare-dns.com' \
+      '  forward-addr: 1.0.0.2@853#security.cloudflare-dns.com' > /run/egress/forward.conf
+    ;;
+  *)
+    echo "egress-proxy: EGRESS_DNS is '${EGRESS_DNS}'; use doh or dot" >&2
+    exit 2
+    ;;
+esac
 unbound -d -c /etc/unbound/unbound.conf &
 unbound_pid=$!
-for _ in $(seq 1 50); do
-  getent hosts api.github.com >/dev/null 2>&1 && break
+# At most 15 seconds, each lookup capped, since one that gets no answer
+# blocks for the resolver's own timeout.
+resolved=""
+deadline=$(($(date +%s) + 15))
+while [ "$(date +%s)" -lt "${deadline}" ]; do
+  if timeout 2 getent hosts api.github.com >/dev/null 2>&1; then resolved=1; break; fi
   kill -0 "${unbound_pid}" 2>/dev/null || { echo "egress-proxy: unbound exited" >&2; exit 1; }
   sleep 0.2
 done
-egress-refresh
+[ -n "${resolved}" ] || echo "egress-proxy: no name resolves over ${EGRESS_DNS:-doh} yet; with dot, check that port 853 is open (docs/LAYERS.md, \"The proxy's own DNS\")" >&2
+# In the background and waited on, so a stop is handled while it runs.
+egress-refresh &
+wait $!
 squid -N -f /etc/squid/squid.conf &
 squid_pid=$!
-trap 'kill "${squid_pid}" "${unbound_pid}" "${dnscrypt_pid}" 2>/dev/null; wait "${squid_pid}"; exit 0' TERM INT
 while kill -0 "${squid_pid}" 2>/dev/null; do
   sleep "${EGRESS_REFRESH_SECONDS:-21600}" &
   wait $! || true

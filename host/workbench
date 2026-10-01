@@ -138,6 +138,10 @@
                           hide npm and Go versions published fewer days ago
                           than this. Default: 0, off
     WORKBENCH_MIRROR_HEAP the Java heap of the mirror backend, in MB. Default: 1024
+    WORKBENCH_DNS         how the egress proxy resolves names, encrypted
+                          either way: doh (DNS over HTTPS, port 443) or dot
+                          (DNS over TLS, port 853, which many networks
+                          block). Default: doh
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
                           Default: ghcr.io/ivan-pinatti-labs
@@ -186,7 +190,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
       '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY | WORKBENCH_MIRROR | WORKBENCH_MIRROR_MIN_AGE | WORKBENCH_MIRROR_HEAP) ;;
+      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY | WORKBENCH_MIRROR | WORKBENCH_MIRROR_MIN_AGE | WORKBENCH_MIRROR_HEAP | WORKBENCH_DNS) ;;
       *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -852,6 +856,7 @@ start_proxy() {
     --network podman "${nets[@]}" \
     --cap-drop=all --security-opt no-new-privileges --read-only \
     --dns 127.0.0.1 --sysctl net.ipv4.ip_unprivileged_port_start=53 \
+    -e EGRESS_DNS="${WORKBENCH_DNS:-doh}" \
     --tmpfs /run/egress:U --tmpfs /run/squid:U --tmpfs /tmp \
     -v egress-cache:/var/lib/egress:U \
     -v "${EGRESS_DIR}:/etc/egress/workspaces:ro,Z" \

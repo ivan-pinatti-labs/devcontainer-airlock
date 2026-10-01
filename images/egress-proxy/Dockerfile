@@ -29,7 +29,9 @@ COPY dnscrypt-proxy.toml /etc/dnscrypt-proxy/dnscrypt-proxy.toml
 COPY sets/ /etc/egress/sets/
 COPY bin/egress-refresh bin/egress-reload bin/egress-proxy /usr/local/bin/
 RUN install -d -o 1000 -g 1000 /var/lib/egress /run/egress /run/squid \
-  && unbound-checkconf /etc/unbound/unbound.conf
+  && printf '%s\n' 'forward-zone:' '  name: "."' '  forward-addr: 127.0.0.1@5300' > /run/egress/forward.conf \
+  && unbound-checkconf /etc/unbound/unbound.conf \
+  && rm /run/egress/forward.conf
 USER 1000:1000
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="Egress proxy for the ivan-pinatti-labs workbench: modular allowlists per service, with provider address ranges refreshed automatically." \
