@@ -316,34 +316,40 @@ running() { [ "$(podman inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = tru
 
 # `up` and `down` one at a time, so a `down` that finds no workspace left
 # cannot stop the shared services under an `up` that is starting one.
-# A directory, made atomically, holding the owner's pid. Not a flock on an
-# open descriptor: every container started while it was held inherited the
-# descriptor, and podman's conmon kept it, and so the lock, open for as long
-# as the container ran. A lock whose owner is gone is taken over.
-LOCK_DIR="${RUN}/workbench/lock.d"
+# The flock is held by a small process of its own, never by this shell: a
+# descriptor open here is inherited by every container started meanwhile
+# (podman's conmon keeps it for the container's life), which held the lock
+# forever. The holder lives only as long as this script (it checks every
+# second), and the kernel releases the lock when it exits or is killed, so
+# no crash can leave it held and no stale lock needs reclaiming.
+LOCK_FILE="${RUN}/workbench/lock"
 lock_state() {
-  local owner
+  local line="" fd wfd owner="${BASHPID}"
+  [ -z "${LOCK_PID:-}" ] || return 0
   mkdir -p "${RUN}/workbench"
-  for _ in $(seq 1 1200); do
-    if mkdir "${LOCK_DIR}" 2>/dev/null; then
-      echo "$$" > "${LOCK_DIR}/pid"
-      LOCKED=1
-      trap unlock_state EXIT
-      return 0
-    fi
-    owner="$(cat "${LOCK_DIR}/pid" 2>/dev/null || true)"
-    if [ -n "${owner}" ] && ! kill -0 "${owner}" 2>/dev/null; then
-      rm -rf "${LOCK_DIR}"
-      continue
-    fi
-    sleep 0.1
-  done
-  die "another host/workbench (pid ${owner:-unknown}) has held ${LOCK_DIR} for two minutes; if none is running, remove it"
+  # One process holding the lock on its own descriptor; its sleeps get
+  # none, so killing it releases the lock at once.
+  coproc LOCK_HOLDER {
+    exec sh -c 'exec 9>"$2"; flock -w 120 9 || exit 1; echo locked
+      while kill -0 "$1" 2>/dev/null; do sleep 1 9>&-; done' sh "${owner}" "${LOCK_FILE}"
+  }
+  LOCK_PID="${LOCK_HOLDER_PID}"
+  fd="${LOCK_HOLDER[0]}"
+  wfd="${LOCK_HOLDER[1]}"
+  read -r -u "${fd}" line || true
+  # The pipe only carried that one word; closed so no child inherits it.
+  exec {fd}<&- {wfd}>&-
+  if [ "${line}" != locked ]; then
+    LOCK_PID=""
+    die "another host/workbench has held ${LOCK_FILE} for two minutes (fuser -v ${LOCK_FILE} shows which)"
+  fi
+  trap unlock_state EXIT
 }
 unlock_state() {
-  [ -n "${LOCKED:-}" ] || return 0
-  rm -rf "${LOCK_DIR}"
-  LOCKED=""
+  [ -n "${LOCK_PID:-}" ] || return 0
+  kill "${LOCK_PID}" 2>/dev/null || true
+  wait "${LOCK_PID}" 2>/dev/null || true
+  LOCK_PID=""
 }
 
 # Two workspaces with the same folder name would map to the same container
