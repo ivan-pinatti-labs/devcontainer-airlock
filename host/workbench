@@ -949,8 +949,12 @@ proxy_register() {
   chmod 644 "${f}.tmp"
   mv "${f}.tmp" "${f}"
   # In a child shell, so a start_proxy that dies comes back here to be undone.
+  # The reload's own report (squid parsing its configuration) is shown only
+  # when it fails; otherwise it would fill the terminal on every start.
+  local out=""
   if ! (start_proxy) || ! proxy_connect "${net}" "$(net_proxy_ip "${net}")" \
-    || ! podman exec "${PROXY}" egress-reload >/dev/null; then
+    || ! out="$(podman exec "${PROXY}" egress-reload 2>&1)"; then
+    [ -z "${out}" ] || printf '%s\n' "${out}" >&2
     if [ -f "${f}.prev" ]; then mv "${f}.prev" "${f}"; else rm -f "${f}"; fi
     if running "${PROXY}"; then
       podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
@@ -1722,7 +1726,14 @@ session_run() {
   if [ "${bin}" = claude ]; then
     # Its own conversation id, so attach resumes this session's and not the
     # latest of the shared history.
-    if [ "${how}" = new ]; then cmd+=(--session-id "${S_ID}"); else cmd+=(--resume "${S_ID}"); fi
+    # Resumed only when its transcript exists: a first run that ended before
+    # any message (at the trust prompt, say) has none, and --resume refuses.
+    if [ "${how}" = resume ] && podman exec "${name}" sh -c \
+      "ls /home/dev/.claude/projects/*/${S_ID}.jsonl" >/dev/null 2>&1; then
+      cmd+=(--resume "${S_ID}")
+    else
+      cmd+=(--session-id "${S_ID}")
+    fi
     [ -z "${remote}" ] || cmd+=(--remote-control)
   fi
   echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS})"
