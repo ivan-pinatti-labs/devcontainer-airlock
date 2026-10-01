@@ -10,10 +10,10 @@
 #
 # host/workbench on its own starts Claude Code with neither voice nor remote
 # control. These targets are the daily ones: `claude` has voice (push to
-# talk, the microphone routed only while space is held), `claude-remote` has
-# voice and remote control (which needs DO_NOT_TRACK cleared, for that
-# session only), and `claude-plain` has neither. `make claude VOICE=0` turns
-# voice off for one run. Codex has no voice mode.
+# talk, the microphone routed only while space is held) and remote control,
+# and `claude-plain` has neither. `make claude VOICE=0` turns voice off for one
+# run, `REMOTE=0` remote control. `claude-remote` stays for old habits.
+# Codex has no voice mode.
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
@@ -21,20 +21,21 @@
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 VOICE ?= 1
+REMOTE ?= 1
 
 # A repository's own `help` target lists these by depending on this one.
 workbench-help:
 	@printf '%s\n' \
 		'Workbench:' \
-		'  claude                      Claude Code in its workbench, here, with voice (hold space).' \
-		'  claude-remote               The same with remote control, to pair a device (DO_NOT_TRACK off).' \
+		'  claude                      Claude Code in its workbench, here, with voice (hold space) and remote control (REMOTE=0: without).' \
+		'  claude-remote               The same as claude, whatever REMOTE says.' \
 		'  claude-plain                Claude Code with neither voice nor remote control.' \
 		'  codex                       Run Codex in its workbench, here (starts it if needed).' \
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
 		'  unlock                      Unlock the ssh key for git push, for 8 hours.' \
-		'  workbench-up                Start this repository workbenches, L2 engine and proxy.' \
-		'  workbench-down              Stop them; the shared helpers keep running.' \
+		'  workbench-up                Start this repository workbenches and L2 engine, and the shared services.' \
+		'  workbench-down              Stop them; the shared services too when nothing else uses them.' \
 		'  workbench-status            What is running.' \
 		'  workbench-build             Build every image locally.' \
 		'  workbench-pull              Or pull the published images instead.'
@@ -46,7 +47,7 @@ WORKBENCH_ACCOUNTS := $(shell $(WORKBENCH) accounts 2>/dev/null)
 define workbench_account
 .PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-plain
 claude-$(1):
-	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) claude-$(1)
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) $$(if $$(filter 1,$$(REMOTE)),remote )claude-$(1)
 codex-$(1):
 	@$$(WORKBENCH) codex-$(1)
 claude-$(1)-shell:
@@ -61,7 +62,7 @@ endef
 $(foreach a,$(WORKBENCH_ACCOUNTS),$(eval $(call workbench_account,$(a))))
 
 claude:
-	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) claude
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) $(if $(filter 1,$(REMOTE)),remote )claude
 
 claude-remote:
 	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) remote claude

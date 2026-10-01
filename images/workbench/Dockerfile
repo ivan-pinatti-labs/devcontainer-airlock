@@ -139,8 +139,7 @@ COPY bin/finish-image /usr/local/libexec/workbench/finish-image
 # the L2 engine.
 # DO_NOT_TRACK is the general opt out convention (consoledonottrack.com):
 # unset, npm, Next.js and other tools in here would phone home by default.
-# `host/workbench remote` clears it for that one run, since Claude Code's
-# remote control needs it unset to pair with a device.
+# Claude Code 2.1.283 starts remote control with it set.
 ENV NODE_USE_ENV_PROXY=1 \
     DO_NOT_TRACK=1 \
     GH_BROKER_SOCK=/run/gh-broker/gh.sock \

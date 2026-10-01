@@ -36,8 +36,8 @@ Reading the picture:
 | egress-proxy | one per host | squid | nothing | every workspace's internal network, at `.2` on each, and out for the hosts of each workspace's egress sets |
 | workbench | one per agent and login, per workspace | the agent, the VS Code server and extensions, git, a `gh` client of the broker | that agent's own login | the internal network only |
 | L2 engine | one per workspace | rootless podman | nothing | the internal network only |
-| mirror gate | one per host, optional | the package mirror's front: fixed paths, registry mirror ports, the OSV malicious package filter | nothing | `.254` on every workspace network, and the mirror network |
-| mirror backend | one per host, optional | Nexus Repository CE, proxy repositories only | cached packages | the mirror network only; out through the egress proxy |
+| mirror gate | one per host, on by default | the package mirror's front: fixed paths, registry mirror ports, the OSV malicious package filter | nothing | `.254` on every workspace network, and the mirror network |
+| mirror backend | one per host, on by default | Nexus Repository CE, proxy repositories only | cached packages | the mirror network only; out through the egress proxy |
 | L2 run | one per command, thrown away | hooks, tests, package installs, throwaway binaries | nothing | none (the proxy with `l2 --net`) |
 
 ## What a workspace is
