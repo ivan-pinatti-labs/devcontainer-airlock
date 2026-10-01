@@ -10,9 +10,8 @@
 #
 # host/workbench on its own starts Claude Code with neither voice nor remote
 # control. These targets are the daily ones: `claude` has voice (push to
-# talk, the microphone routed only while space is held) and remote control
-# (which needs DO_NOT_TRACK cleared, for that session only), and
-# `claude-plain` has neither. `make claude VOICE=0` turns voice off for one
+# talk, the microphone routed only while space is held) and remote control,
+# and `claude-plain` has neither. `make claude VOICE=0` turns voice off for one
 # run, `REMOTE=0` remote control. `claude-remote` stays for old habits.
 # Codex has no voice mode.
 #

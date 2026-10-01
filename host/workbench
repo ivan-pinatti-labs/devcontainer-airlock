@@ -23,9 +23,7 @@
                                     (WORKBENCH_ACCOUNTS below)
     host/workbench remote claude[-<account>] [WORKSPACE]
                                     claude --remote-control there, to pair
-                                    with a device; DO_NOT_TRACK cleared for
-                                    this run only, as Remote Control needs
-                                    feature flags, which it turns off
+                                    with a device
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
     host/workbench load-l2 [WORKSPACE]
@@ -1393,9 +1391,8 @@ voice_listen() {
 
 # claude --remote-control, for the agent and account named (or the default
 # claude), pairing with a device over Anthropic's relay, with voice when
-# WORKBENCH_VOICE asks. DO_NOT_TRACK is cleared for this one exec: Remote
-# Control refuses to start without feature flags, which DO_NOT_TRACK turns
-# off (Claude Code 2.1.283), and the workbench sets it for everything else.
+# WORKBENCH_VOICE asks. DO_NOT_TRACK stays set: Claude Code 2.1.283 starts
+# Remote Control with it (measured 2026-10-01), as its documentation says.
 cmd_remote() {
   local agent="${1:-claude}" ws name cwd bin
   valid_agent "${agent}" || { echo "workbench: which agent? host/workbench remote claude[-<account>] [WORKSPACE]" >&2; exit 2; }
@@ -1410,9 +1407,9 @@ cmd_remote() {
   cwd="${PWD}"
   case "${cwd}/" in "${ws}"/*) ;; *) cwd="${ws}" ;; esac
   if voice_on; then
-    voice_session "${name}" -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
+    voice_session "${name}" -w "${cwd}" "${name}" claude --remote-control
   fi
-  exec podman exec -it -e TERM -e COLORTERM -e DO_NOT_TRACK= -w "${cwd}" "${name}" claude --remote-control
+  exec podman exec -it -e TERM -e COLORTERM -w "${cwd}" "${name}" claude --remote-control
 }
 
 cmd_load_l2() {
