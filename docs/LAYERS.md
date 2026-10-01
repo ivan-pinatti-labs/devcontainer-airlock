@@ -90,11 +90,14 @@ Each day, from the repository you are working on:
 
 ```shell
 make unlock              # type the key's passphrase; lasts 8 hours
-make claude              # Claude Code, in its workbench, in the folder you are in,
+make claude              # a new Claude Code session over the folder you are in,
                          # with voice and remote control (REMOTE=0: without)
 make claude-plain        # neither voice nor remote control
-make codex               # Codex, the same way (no voice)
-make claude-shell        # or codex-shell: a plain terminal in that workbench
+make codex               # a new Codex session (no voice)
+make sessions            # every session, running or stopped, and its branches
+make attach-<session>    # resume one; stop-, shell-, prune- the same way
+make prune               # remove stopped sessions holding nothing of their own
+make claude-shell        # or codex-shell: a terminal in the workspace workbench
 ```
 
 `make` alone lists the targets, and Tab completes them. They come from
@@ -165,6 +168,23 @@ claude-personal=~/.claude-personal`): the host's history for the workspace
 path and the paths under it (transcripts and memory, nothing else) is
 mounted into the matching workbench, so `claude --resume` there lists the
 sessions started on the host, and the other way round.
+
+### Sessions
+
+`make claude` and `make codex` each start a session (docs/SESSIONS.md):
+one agent run with a workbench, an internal network and an L2 engine of its
+own, named at random (`brave-otter`). Sessions run side by side, in any mix
+of agents and accounts, and cannot reach each other's processes, files or
+containers. A session reads the workspace's clones read only and writes
+only in its own folder in each repository, `<repo>/.claude/worktrees/<name>`.
+`airlock-worktree <repo> [<branch>]`, run in the session, clones the
+repository there, independent of the main clone. Transcripts, history and
+memory stay shared: every session starts in the workspace's root, so it
+writes under the same project. The session stops when its agent exits, and
+its record, folders and engine stay, so `make attach-<name>` brings it back
+with the same conversation, after a reboot too. `make prune` removes the
+stopped ones whose clones hold no uncommitted change and no commit missing
+from every remote.
 
 ### Several repositories at once
 

@@ -26,6 +26,17 @@
                                     with a device
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
+    host/workbench session start claude|codex[-<account>] [--remote] [WORKSPACE]
+                                    a new session (docs/SESSIONS.md): its
+                                    own workbench, network and L2 engine,
+                                    the clones read only, its own folder in
+                                    each; it stops when the agent exits
+    host/workbench session attach|shell|stop|prune NAME
+    host/workbench session list|prune
+                                    resume one (the same conversation), a
+                                    shell in a running one, stop one; list
+                                    them; remove stopped ones holding
+                                    nothing that is only there
     host/workbench load-l2 [WORKSPACE]
                                     copy the local L2 images into the shared L2
                                     store now (up does it when they differ)
@@ -389,8 +400,9 @@ group_state() {
 ws_mounts() {
   local ws="$1" r f n=0
   if ! is_group "${ws}"; then
-    printf '%s\n' -v "${ws}:${ws}:Z"
+    printf '%s\n' -v "${ws}:${ws}:$(rw_opts)"
     git_dir_mount "${ws}"
+    session_folder "${ws}"
     return 0
   fi
   # The folder itself is backed by a directory kept with the workbench's
@@ -399,25 +411,31 @@ ws_mounts() {
   # it guards (.gitconfig, .npmrc, .bashrc and more) before binding over it,
   # and the real folder cannot be mounted without relabelling everything in
   # it. What is created at the root lives there, not in the folder.
-  f="$(group_state "${ws}")/root"
+  f="$(state_dir "${ws}")/root"
   mkdir -p "${f}"
   printf '%s\n' -v "${f}:${ws}:Z"
   while read -r r; do
     if is_worktree_only "${r}"; then
-      mkdir -p "${r}/.claude/worktrees"
-      printf '%s\n' -v "${r}/.git:${r}/.git:Z" -v "${r}/.claude/worktrees:${r}/.claude/worktrees:Z"
+      printf '%s\n' -v "${r}/.git:${r}/.git:$(rw_opts)"
+      if [ -n "${SESSION:-}" ]; then
+        session_folder "${r}"
+      else
+        mkdir -p "${r}/.claude/worktrees"
+        printf '%s\n' -v "${r}/.claude/worktrees:${r}/.claude/worktrees:Z"
+      fi
       # Its folder in the container is only the parent of those two mounts,
       # owned by root, and git refuses a repository it does not own unless
       # told it is safe. Said for exactly these repositories, no others.
       printf '%s\n' -e "GIT_CONFIG_KEY_${n}=safe.directory" -e "GIT_CONFIG_VALUE_${n}=${r}"
       n=$((n + 1))
     else
-      printf '%s\n' -v "${r}:${r}:Z"
+      printf '%s\n' -v "${r}:${r}:$(rw_opts)"
+      session_folder "${r}"
     fi
   done < <(group_repos "${ws}")
   if [ "${n}" -gt 0 ]; then printf '%s\n' -e "GIT_CONFIG_COUNT=${n}"; fi
   for f in CLAUDE.md AGENTS.md CLAUDE.local.md .claude; do
-    if [ -e "${ws}/${f}" ]; then printf '%s\n' -v "${ws}/${f}:${ws}/${f}:Z"; fi
+    if [ -e "${ws}/${f}" ]; then printf '%s\n' -v "${ws}/${f}:${ws}/${f}:$(rw_opts)"; fi
   done
   # Claude Code's command sandbox guards <workdir>/.mcp.json by binding over
   # it, so the file has to exist, and the group folder itself is not a mount
@@ -429,7 +447,7 @@ ws_mounts() {
   if [ -e "${ws}/.mcp.json" ]; then
     printf '%s\n' -v "${ws}/.mcp.json:${ws}/.mcp.json:ro,Z"
   else
-    f="$(group_state "${ws}")/.mcp.json"
+    f="$(state_dir "${ws}")/.mcp.json"
     mkdir -p "$(dirname "${f}")"
     [ -f "${f}" ] || printf '{"mcpServers":{}}\n' > "${f}"
     printf '%s\n' -v "${f}:${ws}/.mcp.json:ro,Z"
@@ -473,11 +491,43 @@ slug() {
   esac
   printf '%s\n' "${name}" | tr -c 'A-Za-z0-9_.\n-' _
 }
+# What a workspace's containers, network and registrations are named after:
+# the workspace's folder, or, while a session is handled (SESSION set, see
+# "Sessions" below), the session, so each session's are its own.
+unit() {
+  if [ -n "${SESSION:-}" ]; then echo "s-${SESSION}"; else slug "$1"; fi
+}
+# How a workspace's clones are mounted: read write, or read only in a
+# session, which writes only in folders of its own (session_folder).
+rw_opts() {
+  if [ -n "${SESSION:-}" ]; then echo "ro,Z"; else echo "Z"; fi
+}
+# The session's own folder in repository $1, <repo>/.claude/worktrees/<name>,
+# made if missing and mounted read write at its own path. Nothing outside a
+# session.
+session_folder() {
+  local f
+  [ -n "${SESSION:-}" ] || return 0
+  f="$1/.claude/worktrees/${SESSION}"
+  mkdir -p "${f}"
+  printf '%s\n' -v "${f}:${f}:Z"
+}
+session_dir() { echo "${DATA}/sessions/$1"; }
+# The label that says which workspace a workbench belongs to; a session's
+# has its own, so `down` for the workspace leaves running sessions alone.
+ws_label() {
+  if [ -n "${SESSION:-}" ]; then echo workbench.session.workspace; else echo workbench.workspace; fi
+}
+# Where a workspace's own state is kept (the writable folder behind a group
+# root, its .mcp.json): with the group, or with the session.
+state_dir() {
+  if [ -n "${SESSION:-}" ]; then session_dir "${SESSION}"; else group_state "$1"; fi
+}
 # The workbench of agent $2 for workspace $1.
-wb_name() { echo "workbench-$2-$(slug "$1")"; }
-engine_name() { echo "l2-engine-$(slug "$1")"; }
-engine_dir() { echo "${RUN}/workbench/$(slug "$1")"; }
-net_name() { echo "workbench-net-$(slug "$1")"; }
+wb_name() { echo "workbench-$2-$(unit "$1")"; }
+engine_name() { echo "l2-engine-$(unit "$1")"; }
+engine_dir() { echo "${RUN}/workbench/$(unit "$1")"; }
+net_name() { echo "workbench-net-$(unit "$1")"; }
 
 # Each workspace has an internal network of its own, 10.203.N.0/24 with N
 # picked when the network is first created, and its proxy at .2 on it.
@@ -506,7 +556,7 @@ git_dir_mount() {
   common="$(git -C "${ws}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
   case "${common}/" in
     "${ws}"/*) ;;
-    *) printf '%s\n' "-v" "${common}:${common}:Z" ;;
+    *) printf '%s\n' "-v" "${common}:${common}:$(rw_opts)" ;;
   esac
 }
 
@@ -855,7 +905,7 @@ proxy_join() {
   # holding .2 on its network. Its workbenches find the shared one at the
   # same address, so they keep working across the swap.
   podman rm -f -t 5 "egress-proxy-$(slug "${ws}")" >/dev/null 2>&1 || true
-  proxy_register "$(slug "${ws}")" "${ws}" "${sets}"
+  proxy_register "$(unit "${ws}")" "${ws}" "${sets}"
 }
 
 # Register network workbench-net-$1 with the proxy for owner $2 (a workspace
@@ -911,7 +961,7 @@ check_sets() {
 # Take a workspace off the proxy: its rules first, then the network.
 proxy_leave() {
   local ws="$1"
-  rm -f "${EGRESS_DIR}/$(slug "${ws}").conf"
+  rm -f "${EGRESS_DIR}/$(unit "${ws}").conf"
   running "${PROXY}" || return 0
   podman exec "${PROXY}" egress-reload >/dev/null 2>&1 || true
   podman network disconnect -f "$(net_name "${ws}")" "${PROXY}" >/dev/null 2>&1 || true
@@ -1005,7 +1055,7 @@ net_gate_ip() { local s; s="$(net_subnet "$1")"; echo "${s%.0/24}.254"; }
 # mirror settings its engine mounts.
 mirror_join() {
   local ws="$1" slug net
-  slug="$(slug "${ws}")"
+  slug="$(unit "${ws}")"
   net="$(net_name "${ws}")"
   mkdir -p "${MIRROR_DIR}"
   printf '%s\n' "${ws}" > "${MIRROR_DIR}/${slug}.ws"
@@ -1020,7 +1070,7 @@ mirror_join() {
 # ghcr.io through the gate's registry ports. Prints the file's path.
 mirror_registries() {
   local f gate
-  f="${MIRROR_DIR}/$(slug "$1").registries.conf"
+  f="${MIRROR_DIR}/$(unit "$1").registries.conf"
   gate="$(mirror_ip "$1")"
   mkdir -p "${MIRROR_DIR}"
   cat > "${f}" <<CONF
@@ -1045,7 +1095,7 @@ CONF
 
 mirror_leave() {
   local slug
-  slug="$(slug "$1")"
+  slug="$(unit "$1")"
   rm -f "${MIRROR_DIR}/${slug}.ws" "${MIRROR_DIR}/${slug}.registries.conf"
   running mirror-gate || return 0
   podman network disconnect -f "$(net_name "$1")" mirror-gate >/dev/null 2>&1 || true
@@ -1162,7 +1212,7 @@ voice_opts() {
 start_workbench() {
   local ws="$1" agent="$2" name gitdir=() history=() hist voice=()
   name="$(wb_name "${ws}" "${agent}")"
-  check_owner "${name}" workbench.workspace "${ws}"
+  check_owner "${name}" "$(ws_label)" "${ws}"
   running "${name}" && return
   mkdir -p "${DATA}/${agent}"
   set_proxy_env "${ws}"
@@ -1175,7 +1225,8 @@ start_workbench() {
   if [ -n "${hist}" ]; then mapfile -t voice <<<"${hist}"; fi
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
-    --label workbench.workspace="${ws}" --label workbench.agent="${agent}" \
+    --label "$(ws_label)=${ws}" --label workbench.agent="${agent}" \
+    --label workbench.session="${SESSION:-}" \
     --tz="${WORKBENCH_TZ:-local}" \
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
     --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
@@ -1185,6 +1236,7 @@ start_workbench() {
     -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
     "${gitdir[@]}" \
     -v "${DATA}/${agent}:/home/dev/.$(agent_of "${agent}"):Z" "${history[@]}" \
+    -e AIRLOCK_SESSION="${SESSION:-}" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
@@ -1510,7 +1562,7 @@ cmd_status() {
 }
 
 cmd_down() {
-  local ws names
+  local ws
   ws="$(workspace "${1:-}")"
   lock_state
   # Every workbench of the workspace, whatever agent or account, and
@@ -1524,6 +1576,13 @@ cmd_down() {
   proxy_leave "${ws}"
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   echo "workbench: down"
+  stop_shared_if_idle
+}
+
+# The shared services, when no workbench or L2 engine is left on the host,
+# workspace or session.
+stop_shared_if_idle() {
+  local names
   # A failed listing is not an empty one: stop nothing on a guess.
   if ! names="$(podman ps -a --format '{{.Names}}')"; then
     echo "workbench: could not list the containers left, so the shared services keep running" >&2
@@ -1531,7 +1590,7 @@ cmd_down() {
   fi
   if ! grep -qE '^(workbench|l2-engine)-' <<<"${names}"; then
     stop_shared
-    echo "workbench: no workspace left, so the shared services stopped too; the next up starts them"
+    echo "workbench: nothing else running, so the shared services stopped too; the next start brings them back"
   fi
 }
 
@@ -1542,6 +1601,278 @@ stop_shared() {
   podman rm -f -t 5 mirror-gate mirror-nexus "${PROXY}" gh-broker devcontainer-ssh-agent >/dev/null 2>&1 || true
   rm -f "${EGRESS_DIR}/airlock-mirror.conf"
   podman network rm "${MIRROR_NET}" >/dev/null 2>&1 || true
+}
+
+# Sessions (docs/SESSIONS.md). A session is one agent run with a workbench,
+# an internal network and an L2 engine of its own, named after it (unit).
+# It reads the workspace's clones read only and writes only in its own
+# folder in each repository, <repo>/.claude/worktrees/<name>, where
+# airlock-worktree clones the repository when the work starts. Its record
+# lives with the workbench's data, so it survives a reboot; `attach` brings
+# the containers back from it and resumes the conversation.
+SESSIONS="${DATA}/sessions"
+SESSION_WORDS_A="amber brave calm clever dusty eager fancy gentle happy jolly keen lively lucky merry mighty noble plucky quick quiet rapid shiny silent sleepy snowy sturdy sunny swift tidy witty zesty"
+SESSION_WORDS_B="badger beaver bison crane falcon ferret finch gecko heron ibis koala lemur lynx marten moose newt otter panda puffin quail raven robin seal stoat swan tapir toucan walrus wombat yak"
+
+session_new_name() {
+  local a b name
+  read -ra a <<<"${SESSION_WORDS_A}"
+  read -ra b <<<"${SESSION_WORDS_B}"
+  for _ in $(seq 1 50); do
+    name="${a[RANDOM % ${#a[@]}]}-${b[RANDOM % ${#b[@]}]}"
+    [ -e "$(session_dir "${name}")" ] || { echo "${name}"; return; }
+  done
+  die "no free session name; host/workbench session prune"
+}
+
+# Read session $1's record into S_AGENT, S_WS, S_PROFILE, S_ID: KEY=value
+# lines, read and never run, like the settings file.
+session_read() {
+  local f key value
+  f="$(session_dir "$1")/session"
+  [ -f "${f}" ] || die "no session $1 (host/workbench session list)"
+  S_AGENT="" S_WS="" S_PROFILE="" S_ID=""
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      agent) S_AGENT="${value}" ;;
+      workspace) S_WS="${value}" ;;
+      profile) S_PROFILE="${value}" ;;
+      claude_id) S_ID="${value}" ;;
+    esac
+  done < "${f}"
+}
+
+session_names() {
+  local f
+  for f in "${SESSIONS}"/*/session; do
+    [ -f "${f}" ] && basename "$(dirname "${f}")"
+  done
+  return 0
+}
+
+# The repositories a session's workspace holds: the clones of a group, or
+# the one repository.
+session_repos() {
+  if is_group "$1"; then group_repos "$1"; else echo "$1"; fi
+}
+
+# Bring session SESSION's containers up for workspace $1, agent $2: the
+# shared services that are not running, its network and registrations, its
+# engine and its workbench.
+session_up() {
+  local ws="$1" agent="$2"
+  profiles "${ws}" >/dev/null || exit 1
+  egress_sets "${ws}" >/dev/null || exit 1
+  lock_state
+  start_helpers
+  proxy_join "${ws}"
+  if mirror_on; then
+    start_mirror
+    mirror_join "${ws}"
+  fi
+  fill_l2_store
+  start_engine "${ws}"
+  sync_l2 "${ws}"
+  start_workbench "${ws}" "${agent}"
+  unlock_state
+}
+
+# Take session SESSION's containers down; its record, folders and engine
+# volume stay for attach and prune.
+session_down() {
+  local ws="$1"
+  lock_state
+  podman ps -a --filter label=workbench.session="${SESSION}" --format '{{.Names}}' \
+    | xargs -r podman rm -f -t 5 >/dev/null 2>&1 || true
+  podman rm -f -t 5 "$(engine_name "${ws}")" >/dev/null 2>&1 || true
+  mirror_leave "${ws}"
+  proxy_leave "${ws}"
+  podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
+  stop_shared_if_idle || true
+  unlock_state
+}
+
+# Run the session's agent, attached to this terminal, and take the session
+# down when it exits. $1: new or resume; $2: remote or empty.
+session_run() {
+  local how="$1" remote="$2" name bin cmd=() rc=0
+  name="$(wb_name "${S_WS}" "${S_AGENT}")"
+  bin="$(agent_of "${S_AGENT}")"
+  cmd=("${bin}")
+  if [ "${bin}" = claude ]; then
+    # Its own conversation id, so attach resumes this session's and not the
+    # latest of the shared history.
+    if [ "${how}" = new ]; then cmd+=(--session-id "${S_ID}"); else cmd+=(--resume "${S_ID}"); fi
+    [ -z "${remote}" ] || cmd+=(--remote-control)
+  fi
+  echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS})"
+  (
+    if [ "${bin}" = claude ] && voice_on; then
+      voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
+    fi
+    exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
+  ) || rc=$?
+  session_down "${S_WS}"
+  echo "workbench: session ${SESSION} stopped; make attach-${SESSION} resumes it"
+  return "${rc}"
+}
+
+cmd_session_start() {
+  local agent="" remote="" ws="" a d
+  for a in "$@"; do
+    case "${a}" in
+      --remote) remote=1 ;;
+      -*) die "session start: unknown option ${a}" ;;
+      *) if [ -z "${agent}" ]; then agent="${a}"; else ws="${a}"; fi ;;
+    esac
+  done
+  valid_agent "${agent:-none}" || die "which agent? host/workbench session start claude|codex[-<account>] [--remote] [WORKSPACE]"
+  [ -z "${remote}" ] || [ "$(agent_of "${agent}")" = claude ] || die "only Claude Code has a remote control mode"
+  ws="$(workspace "${ws}")"
+  case "${ws}/" in
+    "${ROOT}"/*) ;;
+    *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
+  esac
+  SESSION="$(session_new_name)"
+  d="$(session_dir "${SESSION}")"
+  mkdir -p "${d}"
+  chmod 700 "${d}"
+  printf 'agent=%s\nworkspace=%s\nprofile=default\nclaude_id=%s\ncreated=%s\n' \
+    "${agent}" "${ws}" "$(cat /proc/sys/kernel/random/uuid)" "$(date -u +%FT%TZ)" > "${d}/session"
+  session_read "${SESSION}"
+  session_up "${S_WS}" "${S_AGENT}"
+  session_run new "${remote}"
+}
+
+cmd_session_attach() {
+  local remote="" a
+  for a in "$@"; do
+    case "${a}" in
+      --remote) remote=1 ;;
+      -*) die "session attach: unknown option ${a}" ;;
+      *) SESSION="${a}" ;;
+    esac
+  done
+  [ -n "${SESSION:-}" ] || die "which session? host/workbench session attach NAME (host/workbench session list)"
+  session_read "${SESSION}"
+  if running "$(wb_name "${S_WS}" "${S_AGENT}")"; then
+    # Already running elsewhere: a second terminal on it, nothing restarted.
+    exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "$(wb_name "${S_WS}" "${S_AGENT}")" bash
+  fi
+  session_up "${S_WS}" "${S_AGENT}"
+  session_run resume "${remote}"
+}
+
+cmd_session_shell() {
+  SESSION="${1:-}"
+  [ -n "${SESSION}" ] || die "which session? host/workbench session shell NAME"
+  session_read "${SESSION}"
+  running "$(wb_name "${S_WS}" "${S_AGENT}")" || die "session ${SESSION} is not running; make attach-${SESSION}"
+  exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "$(wb_name "${S_WS}" "${S_AGENT}")" bash
+}
+
+cmd_session_stop() {
+  SESSION="${1:-}"
+  [ -n "${SESSION}" ] || die "which session? host/workbench session stop NAME"
+  session_read "${SESSION}"
+  session_down "${S_WS}"
+  echo "workbench: session ${SESSION} stopped"
+}
+
+# One line per clone a session made: repository, branch, and what is not
+# pushed or committed yet.
+session_clones() {
+  local r f
+  while read -r r; do
+    f="${r}/.claude/worktrees/$1"
+    [ -e "${f}/.git" ] || continue
+    printf '%s\t%s\t%s\n' "$(basename "${r}")" "$(git -C "${f}" branch --show-current 2>/dev/null)" "$(clone_state "${f}")"
+  done < <(session_repos "$2")
+}
+
+# Why clone $1 must be kept, empty when nothing in it is only here.
+clone_state() {
+  local f="$1" why=""
+  [ -z "$(git -C "${f}" status --porcelain 2>/dev/null)" ] || why="uncommitted changes"
+  if [ -n "$(git -C "${f}" log --branches --not --remotes --oneline 2>/dev/null | head -1)" ]; then
+    why="${why:+${why}, }commits not pushed"
+  fi
+  echo "${why}"
+}
+
+cmd_session_list() {
+  local n state line
+  printf '%-18s %-18s %-8s %s\n' SESSION AGENT STATE WORKSPACE
+  while read -r n; do
+    [ -n "${n}" ] || continue
+    session_read "${n}"
+    SESSION="${n}"
+    state=stopped
+    running "$(wb_name "${S_WS}" "${S_AGENT}")" && state=running
+    printf '%-18s %-18s %-8s %s\n' "${n}" "${S_AGENT}" "${state}" "${S_WS}"
+    while IFS=$'\t' read -r repo branch why; do
+      line="    ${repo}: ${branch:-no branch}"
+      [ -z "${why}" ] || line="${line} (${why})"
+      echo "${line}"
+    done < <(session_clones "${n}" "${S_WS}")
+  done < <(session_names)
+  unset SESSION
+}
+
+# Remove stopped sessions whose clones hold nothing that exists only here:
+# no uncommitted change, no commit that is on no remote. A clone whose
+# branch merged by squash has commits on no remote once the branch is
+# deleted; those are kept and listed, for the owner to remove.
+cmd_session_prune() {
+  local only="${1:-}" n kept r f why ok
+  while read -r n; do
+    [ -n "${n}" ] || continue
+    [ -z "${only}" ] || [ "${n}" = "${only}" ] || continue
+    session_read "${n}"
+    SESSION="${n}"
+    if running "$(wb_name "${S_WS}" "${S_AGENT}")"; then
+      [ -z "${only}" ] || echo "workbench: ${n} is running; stop it first (make stop-${n})"
+      continue
+    fi
+    ok=1
+    while read -r r; do
+      f="${r}/.claude/worktrees/${n}"
+      [ -e "${f}/.git" ] || continue
+      why="$(clone_state "${f}")"
+      if [ -n "${why}" ]; then
+        echo "workbench: keeping ${n}: $(basename "${r}") has ${why} (${f})"
+        ok=""
+      fi
+    done < <(session_repos "${S_WS}")
+    [ -n "${ok}" ] || continue
+    while read -r r; do
+      f="${r}/.claude/worktrees/${n}"
+      # Files an L2 container made belong to ids of the user namespace;
+      # removed from inside it.
+      [ ! -e "${f}" ] || podman unshare rm -rf "${f}"
+    done < <(session_repos "${S_WS}")
+    podman volume rm "$(engine_name "${S_WS}")" >/dev/null 2>&1 || true
+    rm -rf "$(session_dir "${n}")"
+    echo "workbench: removed session ${n}"
+    kept=1
+  done < <(session_names)
+  unset SESSION
+  [ -n "${kept:-}" ] || [ -n "${only}" ] || echo "workbench: nothing to prune"
+}
+
+cmd_session() {
+  local sub="${1:-}"
+  shift || true
+  case "${sub}" in
+    start) cmd_session_start "$@" ;;
+    attach) cmd_session_attach "$@" ;;
+    shell) cmd_session_shell "$@" ;;
+    stop) cmd_session_stop "$@" ;;
+    list | ls) cmd_session_list ;;
+    names) session_names ;;
+    prune) cmd_session_prune "$@" ;;
+    *) die "host/workbench session start|attach|shell|stop|list|prune" ;;
+  esac
 }
 
 case "${1:-}" in
@@ -1557,6 +1888,7 @@ case "${1:-}" in
   load-l2) cmd_load_l2 "${2:-}" ;;
   status) cmd_status ;;
   down) cmd_down "${2:-}" ;;
+  session) shift; cmd_session "$@" ;;
   helpers) cmd_helpers ;;
   helpers-down) cmd_helpers_down ;;
   restart-broker) cmd_restart_broker ;;
