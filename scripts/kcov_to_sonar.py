@@ -13,10 +13,14 @@ nobody tested would otherwise read as nothing to cover. coverage.py's XML
 report is Cobertura too, and has the same gap for a Python script without an
 extension, so `make coverage` runs this over it as well, for the check alone.
 
-Usage: kcov_to_sonar.py <root> <cobertura.xml> <output.xml> <script> [<script> ...]
+Usage: kcov_to_sonar.py <root> <cobertura.xml>[,<cobertura.xml>...] <output.xml> <script> [<script> ...]
 
 <root> is where the repository was when the report was made. Each script is
-a path relative to it, the path SonarQube knows the file by.
+a path relative to it, the path SonarQube knows the file by. Several reports,
+comma separated, are read as one: kcov's merged report leaves out a file
+that was gone by the time it merged (a template a test rendered into its
+scratch directory), so `make coverage` hands over each test's own report
+as well.
 """
 
 from __future__ import annotations
@@ -25,10 +29,29 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import PurePosixPath
 
-USAGE = "Usage: kcov_to_sonar.py <root> <cobertura.xml> <output.xml> <script> [<script> ...]"
+USAGE = (
+    "Usage: kcov_to_sonar.py <root> <cobertura.xml>[,<cobertura.xml>...]"
+    " <output.xml> <script> [<script> ...]"
+)
 
 
-def read_cobertura(path: str, root: str) -> dict[str, dict[int, bool]]:
+# A test that renders a template writes the result under a directory of this
+# name, at the template's own path below it (the Makefile's SHELL_SCRIPTS
+# notes say why); its lines are the template's.
+RENDERED = "kcov-rendered"
+
+
+def rendered_template(name: PurePosixPath) -> PurePosixPath:
+    """The template a rendered file was made from: its path below the last
+    kcov-rendered directory in it."""
+    parts = name.parts
+    last = len(parts) - 1 - parts[::-1].index(RENDERED)
+    return PurePosixPath(*parts[last + 1 :])
+
+
+def read_cobertura(
+    path: str, root: str, files: dict[str, dict[int, bool]] | None = None
+) -> dict[str, dict[int, bool]]:
     """Map each file in a Cobertura report to {line number: covered}.
 
     kcov names a file either absolutely or relative to one of the report's
@@ -36,7 +59,10 @@ def read_cobertura(path: str, root: str) -> dict[str, dict[int, bool]]:
     it relative to a source of ".", which is `root`. Either way the
     name kept here is the file's path relative to `root`, which is the path
     SonarQube resolves; a file outside `root` keeps its absolute path, so it
-    can never be mistaken for one of the repository's own.
+    can never be mistaken for one of the repository's own. A file rendered
+    from a template is named as the template, and its lines are counted
+    together with any the template itself has. Given `files`, a map from an
+    earlier report, it adds to that one.
     """
     # S314: the report is kcov's or coverage.py's own output from the same
     # `make coverage` run, inside the same container, never a file from
@@ -49,12 +75,14 @@ def read_cobertura(path: str, root: str) -> dict[str, dict[int, bool]]:
         base / s.text.strip() for s in report.iter("source") if (s.text or "").strip()
     ]
     sources = sources or [PurePosixPath("/")]
-    files: dict[str, dict[int, bool]] = {}
+    files = {} if files is None else files
     for cls in report.iter("class"):
         name = PurePosixPath(cls.get("filename", ""))
         if not name.is_absolute():
             name = sources[0] / name
-        if name.is_relative_to(base):
+        if RENDERED in name.parts:
+            name = rendered_template(name)
+        elif name.is_relative_to(base):
             name = name.relative_to(base)
         lines = files.setdefault(str(name), {})
         for line in cls.iter("line"):
@@ -98,8 +126,10 @@ def main(argv: list[str]) -> int:
     if len(argv) < 4:
         print(USAGE, file=sys.stderr)
         return 2
-    root, report, output, *scripts = argv
-    files = read_cobertura(report, root)
+    root, reports, output, *scripts = argv
+    files: dict[str, dict[int, bool]] = {}
+    for report in reports.split(","):
+        read_cobertura(report, root, files)
     to_generic(files).write(output, encoding="utf-8", xml_declaration=True)
     problems = shortfalls(files, scripts)
     for problem in problems:

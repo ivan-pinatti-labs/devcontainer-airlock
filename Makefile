@@ -73,14 +73,36 @@ PYTHON_SOURCES := \
 	images/workbench/bin/route-to-l2 \
 	scripts/extension-pins.py \
 	scripts/kcov_to_sonar.py
-# The shell scripts held at 100% so far. Each has tests/<name>.test.sh, which
-# runs it. Not every shell script here is listed yet: one that is not has no
-# coverage gate at all, and SonarQube counts it as uncovered.
+# The shell scripts held at 100% so far. Each has tests/<name>.test.sh (its
+# file name less any .sh), which runs it. Not every shell script here is
+# listed yet: one that is not has no coverage gate at all, and SonarQube
+# counts it as uncovered.
+#
+# A script the image installs only after filling in a template (git-hook) is
+# tested in the form it is installed in: its test renders it into a
+# directory named kcov-rendered, at the template's own path below that, and
+# runs it from there. kcov is told to keep any file under kcov-rendered, and
+# scripts/kcov_to_sonar.py counts its lines for the template. That reads
+# every test's own report besides kcov's merged one, which leaves out a file
+# that was gone (with the test's scratch directory) by the time it merged. Rendering only
+# fills in placeholders within a line, so line N of one is line N of the
+# other, which the test checks.
 SHELL_SCRIPTS := \
 	images/egress-proxy/bin/egress-proxy \
 	images/egress-proxy/bin/egress-reload \
+	images/l2-engine/containers/crun-without-masked-paths \
 	images/l2/bin/actionlint \
-	images/l2/engine-bin/podman
+	images/l2/bin/docker \
+	images/l2/engine-bin/podman \
+	images/workbench/bin/claude \
+	images/workbench/bin/finish-image \
+	images/workbench/bin/l2 \
+	images/workbench/bin/l2-hooks-install \
+	images/workbench/bin/l2-pre-commit \
+	images/workbench/bin/rec \
+	images/workbench/bin/workbench-init \
+	images/workbench/share/git-hook \
+	scripts/build-images.sh
 JS_SOURCES := images/workbench/bin/airlock-relay
 
 comma := ,
@@ -109,11 +131,12 @@ coverage:
 	$(_sources) | $(PODMAN) run --rm --interactive $(_sealed) \
 		-v "$$out/shell:/out:rw,Z" "$(KCOV_IMAGE)" sh -c '$(_unpack); \
 			status=0; \
-			for t in $(foreach s,$(SHELL_SCRIPTS),tests/$(notdir $(s)).test.sh); do \
-				kcov --include-path=$(subst $(space),$(comma),$(addprefix /tmp/w/,$(SHELL_SCRIPTS))) \
+			for t in $(foreach s,$(SHELL_SCRIPTS),tests/$(basename $(notdir $(s))).test.sh); do \
+				kcov --include-pattern=$(subst $(space),$(comma),$(addprefix /tmp/w/,$(SHELL_SCRIPTS)) /kcov-rendered/) \
 					/out/kcov "$$t" || status=1; \
 			done; \
-			python3 scripts/kcov_to_sonar.py /tmp/w /out/kcov/kcov-merged/cobertura.xml \
+			reports="$$(printf "%s," /out/kcov/*/cobertura.xml)"; \
+			python3 scripts/kcov_to_sonar.py /tmp/w "$${reports%,}" \
 				/out/shell.xml $(SHELL_SCRIPTS) || status=1; \
 			exit $$status' || sh=$$?; \
 	$(_sources) | $(PODMAN) run --rm --interactive $(_sealed) \

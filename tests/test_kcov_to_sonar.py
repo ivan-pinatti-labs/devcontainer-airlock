@@ -96,6 +96,36 @@ def test_read_cobertura_reads_coverage_py_relative_names(tmp_path):
     assert sorted(files) == ["rotate-logs.sh", "tests/rotate-logs.test.sh"]
 
 
+def test_read_cobertura_counts_a_rendered_file_for_its_template(tmp_path):
+    """A test renders a template under kcov-rendered, at the template's own
+    path; its lines count for the template, with any the template has."""
+    rendered = REPORT.replace("<source>/srv/repo/</source>", "<source>/</source>")
+    rendered = rendered.replace(
+        'filename="tests/rotate-logs.test.sh"',
+        'filename="tmp/tmp.x/kcov-rendered/a/kcov-rendered/rotate-logs.sh"',
+    )
+    rendered = rendered.replace(
+        'filename="rotate-logs.sh"', 'filename="/srv/repo/rotate-logs.sh"'
+    )
+    rendered = rendered.replace(
+        '<line number="1" hits="1"/>', '<line number="4" hits="1"/>'
+    )
+    files = kcov_to_sonar.read_cobertura(
+        str(write_report(tmp_path, rendered)), "/srv/repo"
+    )
+    assert files == {"rotate-logs.sh": {3: True, 4: True, 7: True}}
+
+
+def test_main_reads_several_reports_as_one(tmp_path, capsys):
+    first = write_report(tmp_path)
+    second = tmp_path / "second.xml"
+    second.write_text(REPORT.replace('number="4" hits="0"', 'number="4" hits="1"'))
+    out = tmp_path / "shell.xml"
+    argv = ["/srv/repo", f"{first},{second}", str(out), "rotate-logs.sh"]
+    assert kcov_to_sonar.main(argv) == 0
+    assert "Coverage 100%" in capsys.readouterr().out
+
+
 def test_to_generic_writes_sonar_format(tmp_path):
     out = tmp_path / "shell.xml"
     kcov_to_sonar.to_generic({"b.sh": {2: True}, "a.sh": {9: False, 1: True}}).write(

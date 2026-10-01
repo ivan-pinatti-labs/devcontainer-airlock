@@ -1,27 +1,27 @@
 #!/bin/sh
-: '
-  The OCI runtime podman calls, in place of crun, for every container started
-  inside a development container built from this image.
-
-  It removes linux.maskedPaths from the container spec and then hands off to
-  /usr/bin/crun with its arguments unchanged. Masking a directory means
-  mounting a tmpfs over it, and container_engine_t, the confined SELinux
-  domain development containers run in, refuses that mount, so without this
-  every nested container failed to start ("crun: mount tmpfs to proc/acpi:
-  Permission denied"). No podman option avoids it: /sys/kernel stays masked
-  even with --security-opt unmask=ALL, and /sys/devices/virtual/powercap is
-  listed in the spec twice, so unmasking it removes only one copy.
-
-  Nothing is exposed that the development container cannot already see. The
-  host still masks the development container itself, and a nested container
-  sees the same /proc and /sys that it does (measured 2026-09-15: /proc/acpi
-  and /sys/firmware empty in both, /sys/kernel identical in both).
-  readonlyPaths are left in place; that domain allows them.
-
-  Exit status codes:
-    1    the container spec could not be rewritten
-    any  otherwise, the exit status of /usr/bin/crun itself
-'
+# The OCI runtime podman calls, in place of crun, for every container started
+# inside a development container built from this image.
+#
+# It removes linux.maskedPaths from the container spec and then hands off to
+# /usr/bin/crun with its arguments unchanged. Masking a directory means
+# mounting a tmpfs over it, and container_engine_t, the confined SELinux
+# domain development containers run in, refuses that mount, so without this
+# every nested container failed to start ("crun: mount tmpfs to proc/acpi:
+# Permission denied"). No podman option avoids it: /sys/kernel stays masked
+# even with --security-opt unmask=ALL, and /sys/devices/virtual/powercap is
+# listed in the spec twice, so unmasking it removes only one copy.
+#
+# Nothing is exposed that the development container cannot already see. The
+# host still masks the development container itself, and a nested container
+# sees the same /proc and /sys that it does (measured 2026-09-15: /proc/acpi
+# and /sys/firmware empty in both, /sys/kernel identical in both).
+# readonlyPaths are left in place; that domain allows them.
+#
+# Exit status codes:
+#   1    the container spec could not be rewritten
+#   any  otherwise, the exit status of /usr/bin/crun itself
+#
+# REAL_CRUN stands in for /usr/bin/crun, for the tests.
 
 set -o errexit
 set -o nounset
@@ -47,4 +47,4 @@ if [ -n "${bundle}" ] && [ -f "${bundle}/config.json" ]; then
   mv "${bundle}/config.json.unmasked" "${bundle}/config.json"
 fi
 
-exec /usr/bin/crun "$@"
+exec "${REAL_CRUN:-/usr/bin/crun}" "$@"

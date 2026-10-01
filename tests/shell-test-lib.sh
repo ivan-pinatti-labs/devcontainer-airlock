@@ -35,13 +35,15 @@ stub() {
 }
 
 # run SCRIPT [ARGS...]: runs it, recording its exit status, standard output
-# and standard error for check.
+# and standard error for check. SCRIPT is relative to the repository root,
+# or absolute.
 run() {
   local script="${1}"
   shift
+  [[ "${script}" == /* ]] || script="${__repo}/${script}"
   : >"${STUB_LOG}"
   __status=0
-  bash "${__repo}/${script}" "$@" >"${__scratch}/out" 2>"${__scratch}/err" || __status=$?
+  bash "${script}" "$@" >"${__scratch}/out" 2>"${__scratch}/err" || __status=$?
 }
 
 # check NAME STATUS STREAM TEXT: the last run exited STATUS and TEXT is in
@@ -67,6 +69,18 @@ refute() {
     __failures=$((__failures + 1))
   else
     echo "ok ${1}"
+  fi
+}
+
+# assert NAME COMMAND [ARGS...]: COMMAND succeeds.
+assert() {
+  local name="${1}"
+  shift
+  if "$@"; then
+    echo "ok ${name}"
+  else
+    echo "FAIL ${name}" >&2
+    __failures=$((__failures + 1))
   fi
 }
 

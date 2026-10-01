@@ -6,7 +6,8 @@
 # session that needs it and serves every session after.
 set -u
 
-real=/opt/agent-clis/node_modules/.bin/claude
+# AIRLOCK_CLAUDE_BIN stands in for the real one, for the tests.
+real="${AIRLOCK_CLAUDE_BIN:-/opt/agent-clis/node_modules/.bin/claude}"
 egress="${HTTPS_PROXY:-${https_proxy:-}}"
 port="${AIRLOCK_RELAY_PORT:-8889}"
 

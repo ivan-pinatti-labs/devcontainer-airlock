@@ -1,22 +1,20 @@
 #!/bin/bash
-: '
-  `docker` inside L2.
-
-  pre-commit hooks of `language: docker_image` (hadolint-docker,
-  actionlint-docker) and a few local hooks call `docker run <image> ...`. A
-  container cannot start another container from inside L2 on its own, so
-  for the images listed in L2_BAKED_IMAGES this runs the binary that image
-  would have run, which the L2 Dockerfile copied out of that same official
-  image. A baked image at a different version fails with a message saying so.
-
-  In an `l2 --engine` run (CONTAINER_HOST is set) everything else is handed
-  to the L2 engine through podman-remote, so a hook or a test that builds and
-  starts containers of its own can. Without the engine it fails, saying why.
-
-  Exit status codes:
-    125  not something this can answer without the engine
-    any  otherwise, the exit status of the tool or of podman-remote
-'
+# `docker` inside L2.
+#
+# pre-commit hooks of `language: docker_image` (hadolint-docker,
+# actionlint-docker) and a few local hooks call `docker run <image> ...`. A
+# container cannot start another container from inside L2 on its own, so
+# for the images listed in L2_BAKED_IMAGES this runs the binary that image
+# would have run, which the L2 Dockerfile copied out of that same official
+# image. A baked image at a different version fails with a message saying so.
+#
+# In an `l2 --engine` run (CONTAINER_HOST is set) everything else is handed
+# to the L2 engine through podman-remote, so a hook or a test that builds and
+# starts containers of its own can. Without the engine it fails, saying why.
+#
+# Exit status codes:
+#   125  not something this can answer without the engine
+#   any  otherwise, the exit status of the tool or of podman-remote
 
 set -o errexit
 set -o nounset

@@ -1,54 +1,52 @@
 #!/bin/bash
-: '
-  Run a command in L2: a throwaway container with no network, no credentials
-  and only the working tree mounted. docs/LAYERS.md explains the layers.
-
-  Usage:
-    l2 [--net] [--ro] [--engine] [--protected-rw] [--env NAME=VALUE] [--image IMAGE] [--] COMMAND [ARGS...]
-
-  Options:
-    --net     give the container network access, through the egress proxy
-              only (installs: pip, npm, pre-commit install-hooks)
-    --ro      mount the working tree read only
-    --engine  for test suites that build and start containers themselves:
-              give this run the L2 engine socket (`docker` and `podman` in
-              it talk to the engine) and a scratch directory, TMPDIR, that
-              the containers it starts can mount at the same path. Those
-              containers are L2 as well; the engine holds no credentials
-    --protected-rw
-              leave PROTECTED writable too. Only for the git hooks, which
-              compare those paths before and after and refuse a commit a
-              hook changed them in (formatters open files for writing even
-              when they change nothing)
-    --env     pass one environment variable in (repeatable); nothing else
-              from the workbench environment is passed
-    --image   the L2 image to use. Default: the L2 image of the repository
-              when it has a .devcontainer/l2/Dockerfile (built in the engine
-              the first time, and again whenever that file changes), else
-              the first line of .devcontainer/l2-image, else $L2_IMAGE
-
-  What the container gets:
-    - the working tree at its own path, read write unless --ro
-    - the repository git directory, read write, because git needs its index,
-      but with .git/config and .git/hooks read only on top: those are the two
-      places a hook could plant code that later runs in the workbench
-      (core.fsmonitor, core.hooksPath, a hook script)
-    - the paths in PROTECTED below read only, because the workbench or the
-      host execute them (devcontainer.json runs initializeCommand on the host)
-    - a per repository volume at /root for pre-commit environments and caches
-    - nothing from the environment except the proxy variables with --net,
-      and the package mirror settings when the host runs one
-
-  After every run in a repository, the paths in PROTECTED are compared with
-  before: their files by content, their links by target, and whether each
-  exists at all. A run that changed, added or removed one fails, naming it,
-  whether the path was mounted read only or (--protected-rw) not.
-
-  Exit status codes:
-    2    usage error
-    3    the run changed a path the workbench or the host execute
-    any  otherwise, the exit status of COMMAND
-'
+# Run a command in L2: a throwaway container with no network, no credentials
+# and only the working tree mounted. docs/LAYERS.md explains the layers.
+#
+# Usage:
+#   l2 [--net] [--ro] [--engine] [--protected-rw] [--env NAME=VALUE] [--image IMAGE] [--] COMMAND [ARGS...]
+#
+# Options:
+#   --net     give the container network access, through the egress proxy
+#             only (installs: pip, npm, pre-commit install-hooks)
+#   --ro      mount the working tree read only
+#   --engine  for test suites that build and start containers themselves:
+#             give this run the L2 engine socket (`docker` and `podman` in
+#             it talk to the engine) and a scratch directory, TMPDIR, that
+#             the containers it starts can mount at the same path. Those
+#             containers are L2 as well; the engine holds no credentials
+#   --protected-rw
+#             leave PROTECTED writable too. Only for the git hooks, which
+#             compare those paths before and after and refuse a commit a
+#             hook changed them in (formatters open files for writing even
+#             when they change nothing)
+#   --env     pass one environment variable in (repeatable); nothing else
+#             from the workbench environment is passed
+#   --image   the L2 image to use. Default: the L2 image of the repository
+#             when it has a .devcontainer/l2/Dockerfile (built in the engine
+#             the first time, and again whenever that file changes), else
+#             the first line of .devcontainer/l2-image, else $L2_IMAGE
+#
+# What the container gets:
+#   - the working tree at its own path, read write unless --ro
+#   - the repository git directory, read write, because git needs its index,
+#     but with .git/config and .git/hooks read only on top: those are the two
+#     places a hook could plant code that later runs in the workbench
+#     (core.fsmonitor, core.hooksPath, a hook script)
+#   - the paths in PROTECTED below read only, because the workbench or the
+#     host execute them (devcontainer.json runs initializeCommand on the host)
+#   - a per repository volume at /root for pre-commit environments and caches
+#   - nothing from the environment except the proxy variables with --net,
+#     and the package mirror settings when the host runs one
+#
+# After every run in a repository, the paths in PROTECTED are compared with
+# before: their files by content, their links by target, and whether each
+# exists at all. A run that changed, added or removed one fails, naming it,
+# whether the path was mounted read only or (--protected-rw) not.
+#
+# Exit status codes:
+#   2    usage error
+#   3    the run changed a path the workbench or the host execute
+#   any  otherwise, the exit status of COMMAND
 
 set -o errexit
 set -o nounset
@@ -71,7 +69,7 @@ while [ $# -gt 0 ]; do
     --image) image="$2"; shift 2 ;;
     --env) envs+=(-e "$2"); shift 2 ;;
     --) shift; break ;;
-    -h | --help) sed -n '3,30p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,29s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) echo "l2: unknown option $1" >&2; exit 2 ;;
     *) break ;;
   esac
@@ -90,10 +88,7 @@ if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   common="$(git rev-parse --path-format=absolute --git-common-dir)"
   gitdir="$(git rev-parse --path-format=absolute --git-dir)"
   args+=(-v "${top}:${top}:${mode}")
-  case "${common}/" in
-    "${top}"/*) ;;
-    *) args+=(-v "${common}:${common}:rw") ;;
-  esac
+  [[ "${common}/" == "${top}"/* ]] || args+=(-v "${common}:${common}:rw")
   args+=(-v "${common}/config:${common}/config:ro")
   mkdir -p "${common}/hooks"
   args+=(-v "${common}/hooks:${common}/hooks:ro")
@@ -142,10 +137,10 @@ if [ "${engine}" = true ]; then
   scratch=/var/tmp/l2-scratch
   # sys_chroot, inside L2's own user namespace only: podman-remote's copier
   # chroots into the destination of a `docker cp` out of a container.
-  args+=(--cap-add=sys_chroot -v "${sock}:${sock}" -v "${scratch}:${scratch}"
-    -e "CONTAINER_HOST=unix://${sock}" -e "DOCKER_HOST=unix://${sock}"
-    -e "TMPDIR=${scratch}"
-    -e "PATH=/usr/local/lib/l2/engine-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+  args+=(--cap-add=sys_chroot -v "${sock}:${sock}" -v "${scratch}:${scratch}")
+  args+=(-e "CONTAINER_HOST=unix://${sock}" -e "DOCKER_HOST=unix://${sock}")
+  args+=(-e "TMPDIR=${scratch}")
+  args+=(-e "PATH=/usr/local/lib/l2/engine-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 fi
 
 if [ "${net}" = true ]; then
@@ -155,13 +150,10 @@ if [ "${net}" = true ]; then
     # Under Claude Code, HTTPS_PROXY is the workbench's own relay on
     # localhost, which an L2 container cannot reach; the egress proxy it
     # stands in front of is in AIRLOCK_EGRESS_PROXY (bin/claude).
-    case "${v}" in
-      HTTPS_PROXY | https_proxy)
-        if [ -n "${AIRLOCK_EGRESS_PROXY:-}" ]; then
-          args+=(-e "${v}=${AIRLOCK_EGRESS_PROXY}")
-          continue
-        fi ;;
-    esac
+    if [[ ("${v}" == HTTPS_PROXY || "${v}" == https_proxy) && -n "${AIRLOCK_EGRESS_PROXY:-}" ]]; then
+      args+=(-e "${v}=${AIRLOCK_EGRESS_PROXY}")
+      continue
+    fi
     [ -n "${!v:-}" ] && args+=(-e "${v}=${!v}")
   done
   # The package mirror, when the host runs one (docs/LAYERS.md, "Package
@@ -172,10 +164,10 @@ if [ "${net}" = true ]; then
     m="${AIRLOCK_MIRROR%/}"
     gate="${m#http://}"
     gate="${gate%%:*}"
-    args+=(-e "PIP_INDEX_URL=${m}/pypi/simple/" -e "PIP_TRUSTED_HOST=${gate}"
-      -e "UV_DEFAULT_INDEX=${m}/pypi/simple/" -e "UV_INSECURE_HOST=${gate}"
-      -e "NPM_CONFIG_REGISTRY=${m}/npm/" -e "GOPROXY=${m}/go"
-      -e "HTTP_PROXY=${m}" -e "http_proxy=${m}")
+    args+=(-e "PIP_INDEX_URL=${m}/pypi/simple/" -e "PIP_TRUSTED_HOST=${gate}")
+    args+=(-e "UV_DEFAULT_INDEX=${m}/pypi/simple/" -e "UV_INSECURE_HOST=${gate}")
+    args+=(-e "NPM_CONFIG_REGISTRY=${m}/npm/" -e "GOPROXY=${m}/go")
+    args+=(-e "HTTP_PROXY=${m}" -e "http_proxy=${m}")
   fi
 else
   args+=(--network=none --http-proxy=false)
