@@ -358,8 +358,9 @@ token or the ssh key, and that L2 holds nothing at all.
 ### Remote Control
 
 Claude Code sends most of its HTTPS through the egress proxy as CONNECT
-tunnels, but Remote Control's registration (2.1.283) goes to the proxy in
-absolute form, `POST https://api.anthropic.com/v1/environments/bridge`,
+tunnels, but Remote Control (2.1.283) sends its requests to the proxy in
+absolute form, from the registration (`POST
+https://api.anthropic.com/v1/environments/bridge`) to the polling for work,
 leaving the TLS to the proxy. The egress proxy refuses that: opening the
 TLS itself would let it read the request, login token included. Claude Code
 reports the refusal as "Registration: Access denied (403). Check your
@@ -430,11 +431,9 @@ Voice works in a remote control session too, with the host's microphone,
 so from the computer rather than from the paired device. `make claude`
 starts a remote control session unless `REMOTE=0`, so the session shows
 up on your other devices. `DO_NOT_TRACK` stays set: Claude Code 2.1.283
-starts Remote Control with it (measured 2026-10-01). Registering the
-session can still be refused by the account: a 403 that says to check the
-organization's permissions comes from Anthropic's API, not from the egress
-proxy, and means Remote Control is not enabled for that account's
-organization.
+starts Remote Control with it (measured 2026-10-01). It reaches only
+`api.anthropic.com`, most of it in a form the egress proxy refuses, which
+is why Claude Code runs behind a relay here ("Remote Control", above).
 
 ## GitHub access
 
