@@ -73,10 +73,10 @@ PYTHON_SOURCES := \
 	images/workbench/bin/route-to-l2 \
 	scripts/extension-pins.py \
 	scripts/kcov_to_sonar.py
-# The shell scripts held at 100% so far. Each has tests/<name>.test.sh (its
-# file name less any .sh), which runs it. Not every shell script here is
-# listed yet: one that is not has no coverage gate at all, and SonarQube
-# counts it as uncovered.
+# The shell scripts, held at 100%. Each has tests/<name>.test.sh (its file
+# name less any .sh), or a folder tests/<name>/ of *.test.sh files (one per
+# command of host/workbench), which runs it. A shell script left out of this
+# list has no coverage gate at all, and SonarQube counts it as uncovered.
 #
 # A script the image installs only after filling in a template (git-hook) is
 # tested in the form it is installed in: its test renders it into a
@@ -88,6 +88,7 @@ PYTHON_SOURCES := \
 # fills in placeholders within a line, so line N of one is line N of the
 # other, which the test checks.
 SHELL_SCRIPTS := \
+	host/workbench \
 	images/egress-proxy/bin/egress-proxy \
 	images/egress-proxy/bin/egress-reload \
 	images/l2-engine/containers/crun-without-masked-paths \
@@ -104,6 +105,11 @@ SHELL_SCRIPTS := \
 	images/workbench/share/git-hook \
 	scripts/build-images.sh
 JS_SOURCES := images/workbench/bin/airlock-relay
+# Lines kcov counts as code that bash never reports running, because they
+# hold no command of their own: an empty case arm, `fi ;;`, and the end of a
+# loop or a { } group read or written through a redirection. kcov leaves
+# out every line holding one of these.
+KCOV_STRUCTURE := done <,) ;;,fi ;;,} >
 
 comma := ,
 space := $(subst ,, )
@@ -131,8 +137,8 @@ coverage:
 	$(_sources) | $(PODMAN) run --rm --interactive $(_sealed) \
 		-v "$$out/shell:/out:rw,Z" "$(KCOV_IMAGE)" sh -c '$(_unpack); \
 			status=0; \
-			for t in $(foreach s,$(SHELL_SCRIPTS),tests/$(basename $(notdir $(s))).test.sh); do \
-				kcov --include-pattern=$(subst $(space),$(comma),$(addprefix /tmp/w/,$(SHELL_SCRIPTS)) /kcov-rendered/) \
+			for t in $(foreach s,$(SHELL_SCRIPTS),$(wildcard tests/$(basename $(notdir $(s))).test.sh tests/$(basename $(notdir $(s)))/*.test.sh)); do \
+				kcov --exclude-line="$(KCOV_STRUCTURE)" --include-pattern=$(subst $(space),$(comma),$(addprefix /tmp/w/,$(SHELL_SCRIPTS)) /kcov-rendered/) \
 					/out/kcov "$$t" || status=1; \
 			done; \
 			reports="$$(printf "%s," /out/kcov/*/cobertura.xml)"; \
