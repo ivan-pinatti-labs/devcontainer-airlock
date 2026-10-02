@@ -23,6 +23,9 @@ omit =
     */test_*.py
 
 [report]
+# Measure a .py file even where its directory has no __init__.py, so a
+# new untested file shows up at 0% and fails, rather than going unseen.
+include_namespace_packages = true
 fail_under = 100
 show_missing = true
 skip_covered = true
