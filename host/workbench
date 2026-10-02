@@ -1283,7 +1283,8 @@ start_workbench() {
     -e GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/run/devcontainer-ssh/known_hosts -o StrictHostKeyChecking=yes -o HostKeyAlias=github.com -o Hostname=ssh.github.com -o Port=443 -o ProxyCommand='socat - PROXY:$(proxy_ip "${ws}"):%h:%p,proxyport=8888'" \
     "${gitdir[@]}" \
     -v "${DATA}/${agent}:/home/dev/.$(agent_of "${agent}"):Z" "${history[@]}" \
-    -e AIRLOCK_SESSION="${SESSION:-}" \
+    -e AIRLOCK_SESSION="${SESSION:-}" -e AIRLOCK_WORKBENCH="${name}" \
+    --hostname "${name:0:63}" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \

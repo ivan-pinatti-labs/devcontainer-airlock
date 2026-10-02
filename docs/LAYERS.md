@@ -382,6 +382,11 @@ files they cannot edit (root owned, read only):
   `login`, `system service`, a global flag). A managed `ask` rule wins over
   an `allow` rule in any other settings file, so a project cannot lift
   those; it can still allow commands the managed rules do not name.
+- Also there, the status line names the workbench the session runs in
+  (`AIRLOCK_WORKBENCH`, the container name), then the repository, its
+  branch and the model, so one terminal can be told from another. It takes
+  the place of a status line of your own. The container's host name is the
+  same name, so a shell prompt in it, Codex's included, shows it too.
 - `/etc/codex/requirements.toml`: Codex keeps its own sandbox (measured
   working inside the workbench: read only, no network) and asks before
   acting, and the same hook refuses project code with the `l2` command line
