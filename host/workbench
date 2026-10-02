@@ -1922,7 +1922,10 @@ cmd_session_prune() {
       [ ! -e "${f}" ] || podman unshare rm -rf "${f}"
     done < <(session_repos "${S_WS}")
     podman volume rm "$(engine_name "${S_WS}")" >/dev/null 2>&1 || true
-    rm -rf "$(session_dir "${n}")"
+    # Its group root holds the mount points the container runtime made for
+    # the clones, owned by the user namespace's root: removed from inside it
+    # too.
+    podman unshare rm -rf "$(session_dir "${n}")"
     echo "workbench: removed session ${n}"
     kept=1
   done < <(session_names)
