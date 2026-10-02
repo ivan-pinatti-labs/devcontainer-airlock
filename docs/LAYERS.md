@@ -77,12 +77,15 @@ The token is a fine grained personal access token for the organization with:
 | Pull requests | read and write | open, comment on and edit pull requests |
 | Issues | read and write | open and comment on issues |
 | Contents | read and write | `gh pr ready` and `gh pr merge --auto`: GitHub requires contents write to take a pull request out of draft, surprising as that is ([cli/cli#6924](https://github.com/cli/cli/discussions/6924)), and to put one in the merge queue |
-| Actions, commit statuses | read | follow checks and read run logs |
+| Actions | read and write | follow checks, read run logs, and `gh run rerun` a run that failed on something outside the change (a flaky check, an outage) |
+| Commit statuses | read | follow checks |
 
 Nothing else: no administration, secrets or organization permissions. The
 broker never lets contents write be used for anything but `gh pr ready` and
 enqueueing a merge: it refuses every `gh api` call that is not a GET, and
-`gh pr merge --admin`, which would skip the queue. Code still reaches GitHub
+`gh pr merge --admin`, which would skip the queue. Actions write reaches
+only `gh run rerun`: `gh workflow run` and `gh run cancel` are not on the
+allowlist, and the api is GET only. Code still reaches GitHub
 only by `git push` over ssh, and `main` only through the merge queue. The
 key's public half is added to your GitHub account as an authentication key.
 

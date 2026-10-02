@@ -16,6 +16,7 @@ where -F is a field.
 
 Exit status codes:
   1    a --body-file path could not be read
+  124  no reply from the broker within TIMEOUT seconds
   126  the broker refused the command (the message says why)
   127  the broker is not reachable
   any  otherwise, the exit status of gh itself
@@ -55,23 +56,53 @@ def inline_body_file(argv):
     return out, body
 
 
+def reads_stdin(argv):
+    """Whether gh would read its standard input for this command line: a body
+    or an api input given as `-`, or an api field read from `@-`."""
+    for i, a in enumerate(argv):
+        nxt = argv[i + 1] if i + 1 < len(argv) else ""
+        if a in ("--body-file", "--input") and nxt == "-":
+            return True
+        if a in ("--body-file=-", "--input=-") or a.endswith("=@-"):
+            return True
+        if a in ("-F", "--field", "-f", "--raw-field") and nxt.endswith("=@-"):
+            return True
+    return False
+
+
+# The broker kills gh after 300 s; a reply that has not come some time after
+# that is not coming, so the call fails instead of waiting for ever.
+TIMEOUT = 330
+
 argv, body = inline_body_file(sys.argv[1:])
+# Standard input is read only when the command takes it, and before the
+# broker is contacted. Read unconditionally, an input that never ends (a
+# pipe left open by whatever started this) blocked the call before it was
+# sent, with nothing in the broker's log to show it (#81).
+if body is not None:
+    stdin = body
+elif reads_stdin(argv):
+    stdin = sys.stdin.read()
+else:
+    stdin = ""
 path = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
 try:
     s = socket.socket(socket.AF_UNIX)
+    s.settimeout(TIMEOUT)
     s.connect(path)
 except OSError as e:
     sys.stderr.write(
         f"gh: the gh broker is not reachable at {path} ({e.strerror}).\n"
         "gh: start the helpers on the host: host/workbench up\n")
     sys.exit(127)
-if body is not None:
-    stdin = body
-else:
-    stdin = "" if sys.stdin.isatty() else sys.stdin.read()
-s.sendall((json.dumps({"argv": argv, "cwd": os.getcwd(), "stdin": stdin}) + "\n").encode())
-s.shutdown(socket.SHUT_WR)
-reply = json.loads(b"".join(iter(lambda: s.recv(65536), b"")) or b'{"rc":1,"out":"","err":"gh: empty reply from broker\\n"}')
+try:
+    s.sendall((json.dumps({"argv": argv, "cwd": os.getcwd(), "stdin": stdin}) + "\n").encode())
+    s.shutdown(socket.SHUT_WR)
+    raw = b"".join(iter(lambda: s.recv(65536), b""))
+except socket.timeout:
+    sys.stderr.write(f"gh: no reply from the gh broker after {TIMEOUT}s\n")
+    sys.exit(124)
+reply = json.loads(raw or b'{"rc":1,"out":"","err":"gh: empty reply from broker\\n"}')
 sys.stdout.write(reply["out"])
 sys.stderr.write(reply["err"])
 sys.exit(reply["rc"])
