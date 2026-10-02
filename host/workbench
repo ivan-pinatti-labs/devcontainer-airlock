@@ -1839,11 +1839,20 @@ session_clones() {
 
 # Why clone $1 must be kept, empty when nothing in it is only here.
 clone_state() {
-  local f="$1" why=""
-  [ -z "$(git -C "${f}" status --porcelain 2>/dev/null)" ] || why="uncommitted changes"
-  if [ -n "$(git -C "${f}" log --branches --not --remotes --oneline 2>/dev/null | head -1)" ]; then
-    why="${why:+${why}, }commits not pushed"
+  local f="$1" why="" changes ahead
+  # A git that fails (a corrupt clone, dubious ownership, a lock, files an
+  # L2 container left unreadable) is no answer, so it is a reason to keep
+  # the clone, never an empty one.
+  if ! changes="$(git -C "${f}" status --porcelain 2>/dev/null)"; then
+    echo "git status failed"
+    return
   fi
+  if ! ahead="$(git -C "${f}" log --branches --not --remotes --oneline 2>/dev/null)"; then
+    echo "git log failed"
+    return
+  fi
+  [ -z "${changes}" ] || why="uncommitted changes"
+  [ -z "${ahead}" ] || why="${why:+${why}, }commits not pushed"
   echo "${why}"
 }
 
