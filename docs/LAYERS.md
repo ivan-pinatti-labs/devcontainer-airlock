@@ -82,11 +82,13 @@ The token is a fine grained personal access token for the organization with:
 
 Nothing else: no administration, secrets or organization permissions. The
 broker never lets contents write be used for anything but `gh pr ready` and
-enqueueing a merge: it refuses every `gh api` call that is not a GET, and
-`gh pr merge --admin`, which would skip the queue. Actions write reaches
-only `gh run rerun`: `gh workflow run` and `gh run cancel` are not on the
-allowlist, and the api is GET only. Code still reaches GitHub
-only by `git push` over ssh, and `main` only through the merge queue. The
+enqueueing a merge: it refuses every `gh api` call that is not a GET,
+except a reply to a review comment and the GraphQL `resolveReviewThread`
+mutation, and `gh pr merge --admin`, which would skip the queue. Actions
+write reaches only `gh run rerun`: `gh workflow run` and `gh run cancel`
+are not on the allowlist, and the api takes no other write. Code still
+reaches GitHub only by `git push` over ssh, and `main` only through the
+merge queue. The
 key's public half is added to your GitHub account as an authentication key.
 
 Each day, from the repository you are working on:
@@ -502,7 +504,8 @@ Refused: anything outside the allowlist (including `gh auth token`, `repo
 delete`, `secret`), repositories and owners outside `WORKBENCH_GH_OWNERS`
 (named by `-R`, `--repo`, `--owner`, a URL, or a `repo:`, `org:` or `user:`
 qualifier in a search), `gh api` with a method other than GET, and GraphQL
-mutations. Interactive prompts are not
+mutations, except the two writes `allowlist.json` names (a reply to a review
+comment, and `resolveReviewThread`). Interactive prompts are not
 available, so pass the flags a prompt would ask for. The broker never reads
 a file named on the command line, since it would read it beside the token;
 the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the

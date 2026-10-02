@@ -18,7 +18,7 @@ Exit status codes:
   1    a --body-file path could not be read
   124  no reply from the broker within TIMEOUT seconds
   126  the broker refused the command (the message says why)
-  127  the broker is not reachable
+  127  the broker is not reachable, or the connection to it failed
   any  otherwise, the exit status of gh itself
 """
 import json
@@ -102,6 +102,9 @@ try:
 except socket.timeout:
     sys.stderr.write(f"gh: no reply from the gh broker after {TIMEOUT}s\n")
     sys.exit(124)
+except OSError as e:
+    sys.stderr.write(f"gh: the connection to the gh broker failed ({e.strerror})\n")
+    sys.exit(127)
 reply = json.loads(raw or b'{"rc":1,"out":"","err":"gh: empty reply from broker\\n"}')
 sys.stdout.write(reply["out"])
 sys.stderr.write(reply["err"])
