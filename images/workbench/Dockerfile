@@ -106,10 +106,10 @@ RUN printf '%s\n' \
 
 # The workbench's own tools: root owned and read only to the dev account.
 COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh bin/workbench-init bin/airlock-worktree /usr/local/bin/
-COPY bin/route-to-l2 /usr/local/libexec/workbench/route-to-l2
+COPY bin/route-to-l2 bin/status-line /usr/local/libexec/workbench/
 # A quoting slip in one of these fails the build, not the first person to run
 # it (a stray apostrophe in a header comment did, twice).
-RUN for f in /usr/local/bin/l2 /usr/local/bin/l2-hooks-install /usr/local/bin/l2-pre-commit /usr/local/bin/workbench-init /usr/local/bin/airlock-worktree; do \
+RUN for f in /usr/local/bin/l2 /usr/local/bin/l2-hooks-install /usr/local/bin/l2-pre-commit /usr/local/bin/workbench-init /usr/local/bin/airlock-worktree /usr/local/libexec/workbench/status-line; do \
       bash -n "${f}" || exit 1; \
     done
 COPY share/git-hook /usr/local/share/workbench/git-hook
