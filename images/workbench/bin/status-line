@@ -6,7 +6,7 @@
   runs in, so a glance tells one terminal from another. Prints, from
   AIRLOCK_WORKBENCH and the JSON Claude Code passes on stdin:
 
-    workbench-claude-personal-s-brave-otter | pdf-sign-linux (feat/x) | Opus
+    workbench-claude-s-brave-otter | ~/src/pdf-sign-linux/.../brave-otter (feat/x) | Opus, high effort
 
   It never fails the status line: anything missing is left out.
 '
@@ -15,18 +15,24 @@ set -u
 input="$(cat)"
 dir="$(jq -r '.workspace.current_dir // .cwd // empty' <<<"${input}" 2>/dev/null)"
 model="$(jq -r '.model.display_name // empty' <<<"${input}" 2>/dev/null)"
+effort="$(jq -r '.effort.level // empty' <<<"${input}" 2>/dev/null)"
 
 parts=("${AIRLOCK_WORKBENCH:-workbench}")
 if [ -n "${dir}" ]; then
-  where="$(basename "${dir}")"
-  # A session clone sits in <repo>/.claude/worktrees/<session>: name the repo.
-  case "${dir}" in
-    */.claude/worktrees/*) where="$(basename "${dir%%/.claude/worktrees/*}")" ;;
-  esac
+  # The folder, then the branch when it is a repository. The workspace is
+  # mounted at its host path, so the host's home folder (AIRLOCK_HOST_HOME)
+  # is shown as ~, and only that one; a session clone's .claude/worktrees/
+  # is cut to .../.
+  where="${dir}"
+  home="${AIRLOCK_HOST_HOME:-}"
+  if [ -n "${home}" ] && { [ "${where}" = "${home}" ] || [ "${where#"${home}"/}" != "${where}" ]; }; then
+    where="~${where#"${home}"}"
+  fi
+  where="${where//\/.claude\/worktrees\//\/...\/}"
   branch="$(git -C "${dir}" branch --show-current 2>/dev/null)"
   parts+=("${where}${branch:+ (${branch})}")
 fi
-[ -z "${model}" ] || parts+=("${model}")
+[ -z "${model}" ] || parts+=("${model}${effort:+, ${effort} effort}")
 
 out="${parts[0]}"
 for p in "${parts[@]:1}"; do out+=" | ${p}"; done
