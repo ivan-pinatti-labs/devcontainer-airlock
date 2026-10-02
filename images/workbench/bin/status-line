@@ -6,7 +6,7 @@
   runs in, so a glance tells one terminal from another. Prints, from
   AIRLOCK_WORKBENCH and the JSON Claude Code passes on stdin:
 
-    workbench-claude-personal-s-brave-otter | pdf-sign-linux (feat/x) | Opus
+    workbench-claude-personal-s-brave-otter | pdf-sign-linux (feat/x) | Opus, high effort
 
   It never fails the status line: anything missing is left out.
 '
@@ -15,6 +15,7 @@ set -u
 input="$(cat)"
 dir="$(jq -r '.workspace.current_dir // .cwd // empty' <<<"${input}" 2>/dev/null)"
 model="$(jq -r '.model.display_name // empty' <<<"${input}" 2>/dev/null)"
+effort="$(jq -r '.effort.level // empty' <<<"${input}" 2>/dev/null)"
 
 parts=("${AIRLOCK_WORKBENCH:-workbench}")
 if [ -n "${dir}" ]; then
@@ -26,7 +27,7 @@ if [ -n "${dir}" ]; then
   branch="$(git -C "${dir}" branch --show-current 2>/dev/null)"
   parts+=("${where}${branch:+ (${branch})}")
 fi
-[ -z "${model}" ] || parts+=("${model}")
+[ -z "${model}" ] || parts+=("${model}${effort:+, ${effort} effort}")
 
 out="${parts[0]}"
 for p in "${parts[@]:1}"; do out+=" | ${p}"; done
