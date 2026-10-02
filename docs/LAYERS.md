@@ -384,7 +384,7 @@ files they cannot edit (root owned, read only):
   those; it can still allow commands the managed rules do not name.
 - Also there, the status line names the workbench the session runs in
   (`AIRLOCK_WORKBENCH`, the container name), then the folder (`~` for
-  the home folder, `...` for `.claude/worktrees`), its branch in a
+  your home folder on the host, `...` for `.claude/worktrees`), its branch in a
   repository, the model and its effort, so one terminal can be told from
   another. It takes the place of a status line of your own. The
   container's host name is the same name, so a shell prompt in it,
