@@ -156,7 +156,7 @@ coverage:
 				"tests/*.test.js" || status=$$?; \
 			sed "s|^SF:/tmp/w/|SF:|" /tmp/lcov.info > /out/lcov.info; \
 			exit $$status' || js=$$?; \
-	rm -rf "$(COVERAGE_DIR)"; mkdir -p "$(COVERAGE_DIR)"; \
+	mkdir -p "$(COVERAGE_DIR)"; rm -f "$(COVERAGE_DIR)/coverage.xml" "$(COVERAGE_DIR)/shell.xml"; \
 	cp "$$out"/python/coverage.xml "$$out"/shell/shell.xml "$$out"/js/lcov.info \
 		"$(COVERAGE_DIR)"/ 2>/dev/null || true; \
 	echo "coverage: python exit $$py, shell exit $$sh, javascript exit $$js"; \
