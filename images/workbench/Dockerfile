@@ -105,11 +105,11 @@ RUN printf '%s\n' \
   && ln -s /usr/bin/podman-remote /usr/local/bin/podman
 
 # The workbench's own tools: root owned and read only to the dev account.
-COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh bin/workbench-init /usr/local/bin/
-COPY bin/route-to-l2 /usr/local/libexec/workbench/route-to-l2
+COPY bin/l2 bin/l2-hooks-install bin/l2-pre-commit bin/gh bin/workbench-init bin/airlock-worktree /usr/local/bin/
+COPY bin/route-to-l2 bin/status-line /usr/local/libexec/workbench/
 # A quoting slip in one of these fails the build, not the first person to run
 # it (a stray apostrophe in a header comment did, twice).
-RUN for f in /usr/local/bin/l2 /usr/local/bin/l2-hooks-install /usr/local/bin/l2-pre-commit /usr/local/bin/workbench-init; do \
+RUN for f in /usr/local/bin/l2 /usr/local/bin/l2-hooks-install /usr/local/bin/l2-pre-commit /usr/local/bin/workbench-init /usr/local/bin/airlock-worktree /usr/local/libexec/workbench/status-line; do \
       bash -n "${f}" || exit 1; \
     done
 COPY share/git-hook /usr/local/share/workbench/git-hook
@@ -205,7 +205,7 @@ LABEL org.opencontainers.image.description="The ivan-pinatti-labs Claude Code wo
 # Codex's workbench, installed the same way.
 FROM common AS codex
 # renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.156.1
+ARG CODEX_VERSION=0.157.0
 RUN set -eu; \
   export HOME=/root npm_config_cache=/tmp/npm-cache; \
   npm init --yes >/dev/null; \

@@ -10,4 +10,19 @@ if [ -f /usr/local/share/workbench/codex-workbench.rules ]; then
   mkdir -p "${CODEX_HOME}/rules"
   cp /usr/local/share/workbench/codex-workbench.rules "${CODEX_HOME}/rules/workbench.rules"
 fi
+# SonarQube for IDE runs its analysis in a JVM that ignores HTTPS_PROXY and
+# that VS Code proxy settings never reach, so it gets the egress proxy as JVM
+# options. The address differs per workspace, hence here and not in the
+# image (docs/LAYERS.md, "Extensions").
+settings=/home/dev/.vscode-server/data/Machine/settings.json
+proxy="${HTTPS_PROXY:-}"
+proxy="${proxy#*://}"
+proxy="${proxy%%/*}"
+if [ -n "${proxy}" ] && [ -w "${settings}" ]; then
+  host="${proxy%:*}"
+  port="${proxy##*:}"
+  opts="-Dhttps.proxyHost=${host} -Dhttps.proxyPort=${port} -Dhttp.proxyHost=${host} -Dhttp.proxyPort=${port}"
+  jq --arg v "${opts}" '.["sonarlint.ls.vmargs"] = $v' "${settings}" > "${settings}.tmp" \
+    && mv "${settings}.tmp" "${settings}"
+fi
 exec sleep infinity

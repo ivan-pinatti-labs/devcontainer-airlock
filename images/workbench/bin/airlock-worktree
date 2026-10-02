@@ -1,0 +1,46 @@
+#!/bin/bash
+: '
+  airlock-worktree REPO [BRANCH]
+
+  In a session (docs/SESSIONS.md): clone REPO (a path, or the name of a
+  clone in the folder you are in) into the folder of the session in it,
+  REPO/.claude/worktrees/$AIRLOCK_SESSION, the only place the session can
+  write in that repository. The clone is independent: its own objects,
+  branches, config and hooks, nothing shared with the main clone, which is
+  read only here. origin is set to the remote of the main clone and fetched,
+  and BRANCH (default: the name of the session) is made from the default
+  branch of origin. Then the hooks of the repository are installed, to run
+  in L2.
+'
+set -euo pipefail
+
+die() { echo "airlock-worktree: $*" >&2; exit 1; }
+
+[ -n "${AIRLOCK_SESSION:-}" ] || die "not in a session; host/workbench session start (make claude) starts one"
+repo="${1:-}"
+[ -n "${repo}" ] || die "usage: airlock-worktree REPO [BRANCH]"
+[ -d "${repo}" ] || repo="${PWD}/${repo}"
+repo="$(cd "${repo}" 2>/dev/null && pwd)" || die "no repository $1"
+[ -e "${repo}/.git" ] || die "${repo} is not a git repository"
+branch="${2:-${AIRLOCK_SESSION}}"
+dest="${repo}/.claude/worktrees/${AIRLOCK_SESSION}"
+
+[ -d "${dest}" ] || die "${dest} is missing: the session mounts it at start, so this session does not cover ${repo}"
+[ ! -e "${dest}/.git" ] || die "${dest} already holds a clone (branch $(git -C "${dest}" branch --show-current))"
+[ -z "$(ls -A "${dest}")" ] || die "${dest} is not empty"
+
+url="$(git -C "${repo}" remote get-url origin)" || die "${repo} has no origin remote"
+git clone --quiet --no-hardlinks "${repo}" "${dest}"
+cd "${dest}"
+git remote set-url origin "${url}"
+git fetch --quiet origin
+head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+if [ -z "${head}" ]; then
+  git remote set-head origin --auto >/dev/null
+  head="$(git symbolic-ref --short refs/remotes/origin/HEAD)"
+fi
+git switch --quiet -c "${branch}" --no-track "${head}"
+if command -v l2-hooks-install >/dev/null && [ -f .pre-commit-config.yaml ]; then
+  l2-hooks-install
+fi
+echo "airlock-worktree: ${dest} on ${branch}, from ${head}"

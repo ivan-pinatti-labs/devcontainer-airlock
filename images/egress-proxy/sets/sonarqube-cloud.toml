@@ -1,0 +1,2 @@
+description = "SonarQube Cloud, for the SonarQube for IDE extension in connected mode: the server it binds to and its API, the scanner host it downloads the server's analyzers from, the events host it keeps a WebSocket open to, and SonarSource's download server for the analyzers it does not bundle (C#, C and C++). Opt in per repository."
+domains = ["sonarcloud.io", "api.sonarcloud.io", "scanner.sonarcloud.io", "events-api.sonarcloud.io", "binaries.sonarsource.com"]

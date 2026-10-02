@@ -90,11 +90,14 @@ Each day, from the repository you are working on:
 
 ```shell
 make unlock              # type the key's passphrase; lasts 8 hours
-make claude              # Claude Code, in its workbench, in the folder you are in,
+make claude              # a new Claude Code session over the folder you are in,
                          # with voice and remote control (REMOTE=0: without)
 make claude-plain        # neither voice nor remote control
-make codex               # Codex, the same way (no voice)
-make claude-shell        # or codex-shell: a plain terminal in that workbench
+make codex               # a new Codex session (no voice)
+make sessions            # every session, running or stopped, and its branches
+make attach-<session>    # resume one; stop-, shell-, prune- the same way
+make prune               # remove stopped sessions holding nothing of their own
+make claude-shell        # or codex-shell: a terminal in the workspace workbench
 ```
 
 `make` alone lists the targets, and Tab completes them. They come from
@@ -165,6 +168,25 @@ claude-personal=~/.claude-personal`): the host's history for the workspace
 path and the paths under it (transcripts and memory, nothing else) is
 mounted into the matching workbench, so `claude --resume` there lists the
 sessions started on the host, and the other way round.
+
+### Sessions
+
+`make claude` and `make codex` each start a session (docs/SESSIONS.md):
+one agent run with a workbench, an internal network and an L2 engine of its
+own, named at random (`brave-otter`). Sessions run side by side, in any mix
+of agents and accounts, and cannot reach each other's processes, files or
+containers. A session reads the workspace's clones read only and writes
+only in its own folder in each repository, `<repo>/.claude/worktrees/<name>`.
+Other sessions' folders are inside the read only clone, so a session can
+read them but not write them.
+`airlock-worktree <repo> [<branch>]`, run in the session, clones the
+repository there, independent of the main clone. Transcripts, history and
+memory stay shared: every session starts in the workspace's root, so it
+writes under the same project. The session stops when its agent exits, and
+its record, folders and engine stay, so `make attach-<name>` brings it back
+with the same conversation, after a reboot too. `make prune` removes the
+stopped ones whose clones hold no uncommitted change and no commit missing
+from every remote.
 
 ### Several repositories at once
 
@@ -360,6 +382,13 @@ files they cannot edit (root owned, read only):
   `login`, `system service`, a global flag). A managed `ask` rule wins over
   an `allow` rule in any other settings file, so a project cannot lift
   those; it can still allow commands the managed rules do not name.
+- Also there, the status line names the workbench the session runs in
+  (`AIRLOCK_WORKBENCH`, the container name), then the folder (`~` for
+  your home folder on the host, `...` for `.claude/worktrees`), its branch in a
+  repository, the model and its effort, so one terminal can be told from
+  another. It takes the place of a status line of your own. The
+  container's host name is the same name, so a shell prompt in it,
+  Codex's included, shows it too.
 - `/etc/codex/requirements.toml`: Codex keeps its own sandbox (measured
   working inside the workbench: read only, no network) and asks before
   acting, and the same hook refuses project code with the `l2` command line
@@ -534,6 +563,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
 | `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages, trivy's database, sigstore's trust root | |
 | `aws` | AWS service APIs | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
+| `sonarqube-cloud` | SonarQube for IDE in connected mode: SonarQube Cloud (EU region), its scanner and events hosts, SonarSource's analyzer downloads | |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it
@@ -563,6 +593,33 @@ fails falls back to that copy, saying how old it is; with no copy at all the
 set keeps its static domains without the address check, and says so loudly.
 That last case favours availability on purpose: a provider's API being down
 should not stop anyone working while the domain list still holds.
+
+### The proxy's own DNS
+
+Workspaces have no DNS at all: they name a host to the proxy, and the proxy
+resolves it. The proxy resolves only through its own resolver, on its
+loopback, which no workspace can reach. unbound caches and DNSSEC validates,
+and sends every query encrypted to Cloudflare's security resolvers,
+`1.1.1.2` and `1.0.0.2`, which also refuse known malware domains.
+`WORKBENCH_DNS` picks how: `doh` (the default), DNS over HTTPS on port 443
+through dnscrypt-proxy, or `dot`, DNS over TLS on port 853 from unbound
+itself, one process fewer where the network allows it. It takes effect at
+the proxy's next start (`host/workbench restart-proxy`). The certificate is checked against
+`security.cloudflare-dns.com`, so nothing on the way can read or change a
+query or an answer, and nothing in the container asks podman's or the
+host's resolver. Answers that point into private ranges are dropped.
+
+Measured 2026-10-01: names resolve (`api.github.com`, `pypi.org`), a domain
+with a broken DNSSEC chain (`dnssec-failed.org`) does not, Cloudflare's
+malware test domain resolves to `0.0.0.0`, and the container's only
+connections out were to `1.1.1.2:443`. DNS over TLS is not the default because
+port 853 is blocked on many networks, as it was by the firewall of the host
+this was measured on; DNS over HTTPS on 443 is not. With `dot` there and
+853 blocked, the proxy starts, says no name resolves, and every request
+fails until the setting is back to `doh`.
+Port 53 on loopback is opened to the proxy's unprivileged account with
+`net.ipv4.ip_unprivileged_port_start`, inside the container's own network
+namespace only.
 
 ### The proxy
 
@@ -745,6 +802,27 @@ the editor itself; VS Code has no sandbox for them. What limits them here:
 - The coding agents' own logins are readable in the workbench, which the
   agent extensions need. That is accepted: the worst case is someone using
   that subscription, and it can be revoked.
+
+### SonarQube for IDE
+
+`SonarSource.sonarlint-vscode` is in every workbench, with its telemetry off.
+Its analysis runs in a JVM of its own, which ignores `HTTPS_PROXY` and which
+VS Code's proxy settings never reach (measured 2026-10-01: with neither, it
+failed with `UnknownHostException: sonarcloud.io`, as workbenches have no
+DNS). So `workbench-init` writes the workspace's egress proxy into
+`sonarlint.ls.vmargs` as JVM options when the workbench starts.
+
+Without connected mode it analyzes with the rules it bundles, and needs no
+egress set. For connected mode a repository adds the `sonarqube-cloud` egress set to its
+`.devcontainer/egress-sets`: `sonarcloud.io` and `api.sonarcloud.io` (the
+connection), `scanner.sonarcloud.io` (the server's analyzers, which bound
+mode uses instead of the bundled ones: without it the project is left with
+no Python rules at all), `events-api.sonarcloud.io` (a WebSocket for server
+events) and `binaries.sonarsource.com` (the C#, C and C++ analyzers it
+downloads). The set covers the EU region; a US region organization would
+need `sonarqube.us` hosts in a set of their own. Opening a `git worktree`
+logs a JGit "repository not found" error, harmless, since JGit cannot read
+linked worktrees; a session's independent clone does not.
 
 Keep the extensions on the host's own VS Code to the Dev Containers extension:
 anything installed there runs on the host.

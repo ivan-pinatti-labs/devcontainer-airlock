@@ -17,7 +17,7 @@
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
-.PHONY: claude codex claude-shell codex-shell claude-remote claude-plain unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
+.PHONY: claude codex sessions prune claude-shell codex-shell claude-remote claude-plain unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 VOICE ?= 1
@@ -27,10 +27,13 @@ REMOTE ?= 1
 workbench-help:
 	@printf '%s\n' \
 		'Workbench:' \
-		'  claude                      Claude Code in its workbench, here, with voice (hold space) and remote control (REMOTE=0: without).' \
+		'  claude                      A new Claude Code session, here, with voice (hold space) and remote control (REMOTE=0: without).' \
 		'  claude-remote               The same as claude, whatever REMOTE says.' \
 		'  claude-plain                Claude Code with neither voice nor remote control.' \
-		'  codex                       Run Codex in its workbench, here (starts it if needed).' \
+		'  codex                       A new Codex session, here.' \
+		'  sessions                    Every session: running or stopped, and its clones and branches.' \
+		'  attach-<session>            Resume a session (shell-, stop-, prune- the same way).' \
+		'  prune                       Remove stopped sessions with nothing left only in them.' \
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
 		'  unlock                      Unlock the ssh key for git push, for 8 hours.' \
@@ -47,31 +50,31 @@ WORKBENCH_ACCOUNTS := $(shell $(WORKBENCH) accounts 2>/dev/null)
 define workbench_account
 .PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-plain
 claude-$(1):
-	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) $$(if $$(filter 1,$$(REMOTE)),remote )claude-$(1)
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) $$(if $$(filter 1,$$(REMOTE)),--remote)
 codex-$(1):
-	@$$(WORKBENCH) codex-$(1)
+	@$$(WORKBENCH) session start codex-$(1)
 claude-$(1)-shell:
 	@$$(WORKBENCH) shell claude-$(1)
 codex-$(1)-shell:
 	@$$(WORKBENCH) shell codex-$(1)
 claude-$(1)-remote:
-	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) remote claude-$(1)
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --remote
 claude-$(1)-plain:
-	@WORKBENCH_VOICE=0 $$(WORKBENCH) claude-$(1)
+	@WORKBENCH_VOICE=0 $$(WORKBENCH) session start claude-$(1)
 endef
 $(foreach a,$(WORKBENCH_ACCOUNTS),$(eval $(call workbench_account,$(a))))
 
 claude:
-	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) $(if $(filter 1,$(REMOTE)),remote )claude
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude $(if $(filter 1,$(REMOTE)),--remote)
 
 claude-remote:
-	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) remote claude
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --remote
 
 claude-plain:
-	@WORKBENCH_VOICE=0 $(WORKBENCH) claude
+	@WORKBENCH_VOICE=0 $(WORKBENCH) session start claude
 
 codex:
-	@$(WORKBENCH) codex
+	@$(WORKBENCH) session start codex
 
 claude-shell:
 	@$(WORKBENCH) shell claude
@@ -99,3 +102,25 @@ workbench-build:
 
 workbench-pull:
 	@$(WORKBENCH) pull
+
+# Sessions (docs/SESSIONS.md): each `make claude` or `make codex` is one,
+# with a random name. These act on one by name, and Tab lists the names.
+WORKBENCH_SESSIONS := $(shell $(WORKBENCH) session names 2>/dev/null)
+define workbench_session
+.PHONY: attach-$(1) shell-$(1) stop-$(1) prune-$(1)
+attach-$(1):
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session attach $(1) $$(if $$(filter 1,$$(REMOTE)),--remote)
+shell-$(1):
+	@$$(WORKBENCH) session shell $(1)
+stop-$(1):
+	@$$(WORKBENCH) session stop $(1)
+prune-$(1):
+	@$$(WORKBENCH) session prune $(1)
+endef
+$(foreach s,$(WORKBENCH_SESSIONS),$(eval $(call workbench_session,$(s))))
+
+sessions:
+	@$(WORKBENCH) session list
+
+prune:
+	@$(WORKBENCH) session prune

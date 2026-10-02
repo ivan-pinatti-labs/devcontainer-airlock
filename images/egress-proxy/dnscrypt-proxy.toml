@@ -1,0 +1,31 @@
+# DNS over HTTPS to Cloudflare's security resolvers (1.1.1.2 and 1.0.0.2,
+# which also refuse known malware domains), for unbound, which validates
+# what comes back (unbound.conf). Over port 443, not DNS over TLS's 853,
+# which networks often block (measured 2026-10-01 on the first host this
+# ran on). Only on loopback.
+listen_addresses = ['127.0.0.1:5300']
+server_names = ['cloudflare-security-1', 'cloudflare-security-2']
+doh_servers = true
+dnscrypt_servers = false
+odoh_servers = false
+ipv4_servers = true
+ipv6_servers = false
+require_dnssec = true
+require_nolog = true
+require_nofilter = false
+# The servers below carry their own address and name, so nothing is
+# downloaded and no other resolver is ever asked, not even to start.
+ignore_system_dns = true
+bootstrap_resolvers = []
+netprobe_timeout = 0
+cache = false
+log_level = 2
+use_syslog = false
+max_clients = 250
+timeout = 5000
+
+[static]
+  [static.'cloudflare-security-1']
+  stamp = 'sdns://AgMAAAAAAAAABzEuMS4xLjIAG3NlY3VyaXR5LmNsb3VkZmxhcmUtZG5zLmNvbQovZG5zLXF1ZXJ5'
+  [static.'cloudflare-security-2']
+  stamp = 'sdns://AgMAAAAAAAAABzEuMC4wLjIAG3NlY3VyaXR5LmNsb3VkZmxhcmUtZG5zLmNvbQovZG5zLXF1ZXJ5'
