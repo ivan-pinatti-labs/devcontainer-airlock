@@ -226,6 +226,42 @@ def test_forwarded_plain_http(mg, backend):
     assert ask(mg, "GET", "http://example.com/x").status == 403
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/apt/ubuntu/../../repository/npm/evil/-/evil-1.0.0.tgz",
+        "/apt/ubuntu/%2e%2E/%2E./repository/npm/evil/-/evil-1.0.0.tgz",
+        "/apt/ubuntu/..;x/..;/repository/npm/evil",
+        "/apt/ubuntu/..\\..\\repository/npm/evil",
+        "/npm/./left-pad",
+        "http://archive.ubuntu.com/ubuntu/../../repository/pypi/simple/evil/",
+    ],
+)
+def test_a_path_that_climbs_out_of_its_route_is_refused(mg, backend, capsys, path):
+    r = ask(mg, "GET", path)
+    assert (r.status, r.body) == (
+        400,
+        b"mirror-gate: a path may not climb out of its route\n",
+    )
+    assert backend.requests == []
+    assert f"REFUSE {path}: climbs out of its route" in capsys.readouterr().out
+
+
+def test_a_registry_path_that_climbs_is_refused(mg, backend):
+    reg = {"target": "/repository/docker-hub/", "port": 5000, "upstream": "docker.io"}
+    assert ask(mg, "GET", "/v2/../../npm/evil", registry=reg).status == 400
+    assert backend.requests == []
+
+
+def test_dots_inside_a_name_are_not_climbing(mg, backend):
+    backend.table = {
+        "/repository/apt-ubuntu/pool/a..b/x...deb?v=..": Resp(
+            200, b"ok", {"Content-Length": "2"}
+        )
+    }
+    assert ask(mg, "GET", "/apt/ubuntu/pool/a..b/x...deb?v=..").status == 200
+
+
 def test_relay_streams_without_length_as_chunks(mg, backend):
     backend.table = {
         "/repository/apt-ubuntu/a": Resp(
