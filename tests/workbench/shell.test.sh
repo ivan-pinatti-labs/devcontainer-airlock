@@ -84,7 +84,7 @@ IFS=: read -ra dirs <<<"${PATH}"
 for d in "${dirs[@]}"; do
   for f in "${d}"/*; do
     n="$(basename "${f}")"
-    [ "${n}" = pactl ] || [ -e "${bare_path}/${n}" ] || ln -s "${f}" "${bare_path}/${n}"
+    [[ "${n}" = pactl ]] || [[ -e "${bare_path}/${n}" ]] || ln -s "${f}" "${bare_path}/${n}"
   done
 done
 PATH="${bare_path}" run "${wb}" claude

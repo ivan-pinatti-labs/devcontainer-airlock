@@ -276,20 +276,20 @@ test('a TLS failure on the tunnel closes the client', async () => {
 test('a client that resets a pass through tears the upstream down', async () => {
   let upstreamClosed;
   const closed = new Promise((r) => { upstreamClosed = r; });
-  proxyReadsHead((s) => { s.on('close', upstreamClosed); });
+  proxyReadsHead((s) => { s.on('close', () => upstreamClosed(true)); });
   const c = net.connect(relayPort, '127.0.0.1');
   c.on('error', () => {});
   c.write('CONNECT example.com:443 HTTP/1.1\r\n\r\n');
   await sleep(150);
   c.resetAndDestroy();
-  await closed;
+  assert.strictEqual(await closed, true);
 });
 
 test('a client that resets a tunnel tears the upstream down', async () => {
   let upstreamClosed;
   const closed = new Promise((r) => { upstreamClosed = r; });
   proxyReadsHead((s) => {
-    s.on('close', upstreamClosed);
+    s.on('close', () => upstreamClosed(true));
     const o = net.connect(originPort, '127.0.0.1', () => {
       s.write('HTTP/1.1 200 Connection established\r\n\r\n');
       s.pipe(o).pipe(s);
@@ -301,7 +301,7 @@ test('a client that resets a tunnel tears the upstream down', async () => {
   c.write('GET https://localhost/hold HTTP/1.1\r\n\r\n');
   await sleep(300);
   c.resetAndDestroy();
-  await closed;
+  assert.strictEqual(await closed, true);
 });
 
 test('the egress proxy closing after the client left answers nobody', async () => {
@@ -316,6 +316,7 @@ test('the egress proxy closing after the client left answers nobody', async () =
   await sleep(150);
   s.end();
   await sleep(100);
+  assert.ok(c.destroyed);
 });
 
 test('an upstream without a port is on port 80', async () => {

@@ -108,14 +108,14 @@ worktree() {
 # on_remote CLONE REF PATH [TEXT]: PATH on the remote's REF, as CLONE knows it.
 on_remote() {
   mkdir -p "$(dirname "${1}/.git/remote-tree/${2}/${3}")"
-  if [ -n "${4:-}" ]; then echo "${4}"; fi >"${1}/.git/remote-tree/${2}/${3}"
+  if [[ -n "${4:-}" ]]; then echo "${4}"; fi >"${1}/.git/remote-tree/${2}/${3}"
 }
 
 # wait_log TEXT [COUNT]: until TEXT is in the call log COUNT times (default
 # once), for up to ten seconds.
 wait_log() {
   for _ in $(seq 1 200); do
-    [ "$(grep -cF -- "${1}" "${STUB_LOG}")" -lt "${2:-1}" ] || return 0
+    [[ "$(grep -cF -- "${1}" "${STUB_LOG}")" -lt "${2:-1}" ]] || return 0
     "${REAL_SLEEP}" 0.05
   done
   echo "wait_log: '${1}' never came" >&2
