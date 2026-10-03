@@ -31,7 +31,8 @@ help:
 # Every script without an extension is named here by its path: no tool finds
 # those on its own, and a script no test ran would otherwise be left out of
 # its report rather than counted as uncovered. scripts/kcov_to_sonar.py holds
-# each list to 100% of its lines, Python included.
+# the Python and shell lists to 100% of their lines; for JS_SOURCES, each
+# file must have its own SF: record in lcov.info.
 #
 # The tools run in containers that cannot see this checkout. The files git
 # would commit (tracked, plus new ones not ignored) go in on standard input
@@ -156,7 +157,7 @@ coverage:
 	$(PODMAN) run <"$$out/src.tar" --rm --interactive $(_sealed) \
 		-v "$$out/js:/out:rw,Z" "$(NODE_IMAGE)" sh -c '$(_unpack); \
 			status=0; node --test --experimental-test-coverage \
-				--test-coverage-include=$(JS_SOURCES) \
+				$(addprefix --test-coverage-include=,$(JS_SOURCES)) \
 				--test-coverage-lines=100 --test-coverage-branches=100 \
 				--test-coverage-functions=100 \
 				--test-reporter=spec --test-reporter-destination=stdout \
@@ -164,6 +165,9 @@ coverage:
 				"tests/*.test.js" || status=$$?; \
 			if [ -f /tmp/lcov.info ]; then \
 				sed "s|^SF:/tmp/w/|SF:|" /tmp/lcov.info > /out/lcov.info || status=1; \
+				for f in $(JS_SOURCES); do \
+					grep -qx "SF:$$f" /out/lcov.info || { echo "$$f: not in the report, so no test ran it"; status=1; }; \
+				done; \
 			else echo "node wrote no lcov report; see its error above"; status=1; fi; \
 			exit $$status' || js=$$?; \
 	mkdir -p "$(COVERAGE_DIR)" && rm -f "$(COVERAGE_DIR)/coverage.xml" "$(COVERAGE_DIR)/shell.xml" "$(COVERAGE_DIR)/lcov.info" || exit 1; \
