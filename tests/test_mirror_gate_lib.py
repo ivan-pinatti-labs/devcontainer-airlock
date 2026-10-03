@@ -12,8 +12,11 @@ from __future__ import annotations
 import datetime
 import io
 import json
+import random
+import re
 import sys
 import urllib.error
+import urllib.parse
 import zipfile
 
 import pytest
@@ -161,6 +164,142 @@ def test_go_requests_and_list(go):
         b"v1.2.2\nv1.2.3\nv1.3.0\n", "github.com/Evil/mod", go
     )
     assert (body, removed) == (b"v1.2.2\nv1.3.0\n", ["v1.2.3"])
+
+
+# The regular expressions the filters used before they were rewritten
+# without polynomial backtracking, as references: the rewrites must give the
+# same answer for every input. Random strings from pieces that matter to
+# each, many of them, from a fixed seed.
+OLD_HREF = re.compile(
+    r'<a\s[^>]*href="([^"]+)"[^>]*>([^<]+)</a>\s*(<br\s*/?>)?', re.IGNORECASE
+)
+OLD_TARBALL = re.compile(
+    r"(?P<pkg>(?:@[^/]+(?:/|%2[fF]))?[^/@]+)/-/(?P<file>[^/]+)\.tgz"
+)
+OLD_GO = re.compile(r"(?P<mod>.+)/@v/(?P<rest>.+)")
+
+
+def randoms(templates, pieces, count=20000, seed=7):
+    """Each of the templates, then each changed in a few random places by
+    inserting a piece or cutting a stretch out."""
+    rng = random.Random(seed)  # noqa: S311 # test inputs, not secrets
+    yield from templates
+    for _ in range(count):
+        text = rng.choice(templates)
+        for _ in range(rng.randint(1, 4)):
+            at = rng.randint(0, len(text))
+            if rng.random() < 0.6:
+                text = text[:at] + rng.choice(pieces) + text[at:]
+            else:
+                text = text[:at] + text[at + rng.randint(1, 4) :]
+        yield text
+
+
+def test_links_are_what_the_old_expression_found():
+    templates = [
+        '<a href="p-1.tar.gz">p-1.tar.gz</a><br/>\n<a x="1" href="q-2.zip" y>q-2.zip</a>',
+        '<A\tclass=x HREF="u">t</A> <br >',
+        '<a href="a>b" title="href=">t</a>\n<br/>',
+    ]
+    pieces = [
+        "<a ",
+        "<A\t",
+        "<a",
+        "<a\x1c",
+        'href="',
+        'HREF="',
+        '"',
+        ">",
+        "<",
+        "</a>",
+        "</A>",
+        "x",
+        " ",
+        "\n",
+        "\u00a0",
+        "<br>",
+        "<br />",
+        "<BR/>",
+        "<br/ >",
+        "<b",
+        "=",
+        "/",
+    ]
+    for text in randoms(templates, pieces):
+        old = [(m.start(), m.end(), m.group(2)) for m in OLD_HREF.finditer(text)]
+        assert list(filters.links(text)) == old, text
+
+
+def test_npm_tarballs_are_what_the_old_expression_found():
+    templates = [
+        "left-pad/-/left-pad-1.3.1.tgz",
+        "@scope/pkg/-/pkg-2.0.0-rc.1.tgz",
+        "@scope%2fpkg/-/pkg-2.0.0.tgz",
+        "@a%2Fb%2Fc@d%2Fe/-/e-1.tgz",
+    ]
+    pieces = [
+        "@",
+        "s",
+        "/",
+        "%2f",
+        "%2F",
+        "%2",
+        "%",
+        "2",
+        "f",
+        "-",
+        "/-/",
+        "p-1",
+        ".tgz",
+        "x",
+    ]
+    for path in randoms(templates, pieces):
+        m = OLD_TARBALL.fullmatch(path)
+        old = None
+        if m:
+            pkg = urllib.parse.unquote(m["pkg"])
+            base = pkg.rsplit("/", 1)[-1]
+            if m["file"].startswith(base + "-"):
+                old = pkg, m["file"][len(base) + 1 :]
+        assert filters.npm_tarball(path) == old, path
+
+
+def old_go_request(path):
+    m = OLD_GO.fullmatch(path)
+    if m:
+        if m["rest"] == "list":
+            return filters.go_decode(m["mod"]), "list", None
+        v = re.fullmatch(r"(?P<v>.+)\.(?P<k>info|mod|zip)", m["rest"])
+        if v:
+            return filters.go_decode(m["mod"]), v["k"], urllib.parse.unquote(v["v"])
+        return None
+    m = re.fullmatch(r"(?P<mod>.+)/@latest", path)
+    return (filters.go_decode(m["mod"]), "latest", None) if m else None
+
+
+def test_go_requests_are_what_the_old_expression_found():
+    templates = [
+        "github.com/!evil/mod/@v/list",
+        "github.com/!evil/mod/@v/v1.2.3.zip",
+        "github.com/!evil/mod/@latest",
+        "m/@v/@v/v1.info",
+    ]
+    pieces = [
+        "/@v/",
+        "/@v",
+        "@v/",
+        "/",
+        "@",
+        "v",
+        "m",
+        "list",
+        ".zip",
+        ".info",
+        "\n",
+        "/@latest",
+    ]
+    for path in randoms(templates, pieces):
+        assert filters.go_request(path) == old_go_request(path), path
 
 
 def test_too_young():

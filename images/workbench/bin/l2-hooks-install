@@ -18,7 +18,7 @@ set -o pipefail
 
 top="$(git rev-parse --show-toplevel)" || exit 1
 cd "${top}"
-[ -f .pre-commit-config.yaml ] || { echo "l2-hooks-install: no .pre-commit-config.yaml in ${top}" >&2; exit 1; }
+[[ -f .pre-commit-config.yaml ]] || { echo "l2-hooks-install: no .pre-commit-config.yaml in ${top}" >&2; exit 1; }
 if hp="$(git config --get core.hooksPath)"; then
   echo "l2-hooks-install: core.hooksPath is set to ${hp}; unset it first (git config --unset core.hooksPath)" >&2
   exit 1
@@ -46,7 +46,7 @@ PY
 hooks="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
 mkdir -p "${hooks}"
 for t in ${types}; do
-  if [ -f "${hooks}/${t}" ] && ! grep -q "Installed by l2-hooks-install" "${hooks}/${t}"; then
+  if [[ -f "${hooks}/${t}" ]] && ! grep -q "Installed by l2-hooks-install" "${hooks}/${t}"; then
     mv "${hooks}/${t}" "${hooks}/${t}.pre-l2"
     echo "kept the previous ${t} hook as ${t}.pre-l2, used outside the workbench"
   fi

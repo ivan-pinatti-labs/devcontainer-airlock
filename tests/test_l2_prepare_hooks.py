@@ -63,7 +63,7 @@ def test_without_a_store_only_the_own_hooks_are_installed(hooks, tmp_path, monke
     (tmp_path / "work/.pre-commit-config.yaml").write_text("")
     monkeypatch.delenv("PRE_COMMIT_HOME")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    assert hooks.main() == 0
+    assert hooks.main() is None
     assert hooks.calls == [
         ["pre-commit", "install-hooks", "--config", ".pre-commit-config.yaml"]
     ]
@@ -112,7 +112,7 @@ repos:
       - id: bare
 """)
     make_store(tmp_path / "store", [(LIBRARY, "v1", str(clone))])
-    assert hooks.main() == 0
+    assert hooks.main() is None
     configs = [c[-1] for c in hooks.calls]
     assert configs == [
         ".pre-commit-config.yaml",

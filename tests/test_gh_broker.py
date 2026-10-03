@@ -354,7 +354,9 @@ def test_serve_times_out(broker, monkeypatch):
 
 def test_main_needs_the_token(broker, monkeypatch, capsys):
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    assert broker.main() == 1
+    with pytest.raises(SystemExit) as e:
+        broker.main()
+    assert e.value.code == 1
     assert "GH_TOKEN" in capsys.readouterr().err
 
 
@@ -362,7 +364,9 @@ def test_main_needs_the_token(broker, monkeypatch, capsys):
 def test_main_needs_valid_owners(monkeypatch, capsys, owners):
     fresh = load_broker(monkeypatch, owners)
     monkeypatch.setenv("GH_TOKEN", "t")
-    assert fresh.main() == 1
+    with pytest.raises(SystemExit) as e:
+        fresh.main()
+    assert e.value.code == 1
     assert "GH_BROKER_OWNERS" in capsys.readouterr().err
 
 

@@ -22,7 +22,7 @@ set -o nounset
 original=("$@")
 
 delegate() {
-  if [ -n "${CONTAINER_HOST:-}" ]; then
+  if [[ -n "${CONTAINER_HOST:-}" ]]; then
     exec podman-remote "${original[@]}"
   fi
   echo "l2 docker: $*" >&2
@@ -32,17 +32,17 @@ delegate() {
 
 # pre-commit asks whether the runtime is rootless before deciding whether to
 # pass --user. The answer that matches L2 is yes.
-if [ "${1:-}" = system ] && [ "${2:-}" = info ] && [ -z "${CONTAINER_HOST:-}" ]; then
+if [[ "${1:-}" = system ]] && [[ "${2:-}" = info ]] && [[ -z "${CONTAINER_HOST:-}" ]]; then
   echo '{"SecurityOptions": ["name=rootless"]}'
   exit 0
 fi
 
-[ "${1:-}" = run ] || delegate "only 'docker run' is supported here, not '${1:-}'"
+[[ "${1:-}" = run ]] || delegate "only 'docker run' is supported here, not '${1:-}'"
 shift
 
 workdir=""
 mounts=()
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --rm | -i | -t | -it | --interactive | --tty | --init) shift ;;
     -v | --volume) mounts+=("$2"); shift 2 ;;
@@ -56,7 +56,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ $# -gt 0 ] || delegate "no image given"
+[[ $# -gt 0 ]] || delegate "no image given"
 image="$1"
 shift
 
@@ -68,19 +68,19 @@ esac
 
 baked=""
 for entry in ${L2_BAKED_IMAGES:-}; do
-  if [ "${entry%%=*}" = "${name}" ]; then
+  if [[ "${entry%%=*}" = "${name}" ]]; then
     baked="${entry#*=}"
   fi
 done
-[ -n "${baked}" ] || delegate "image ${name} is not baked into this L2 image"
-if [ -n "${tag}" ] && [ "${tag}" != "${baked}" ]; then
+[[ -n "${baked}" ]] || delegate "image ${name} is not baked into this L2 image"
+if [[ -n "${tag}" ]] && [[ "${tag}" != "${baked}" ]]; then
   echo "l2 docker: hook asks for ${name}:${tag} but this L2 image carries ${baked}; rebuild L2 with the new version" >&2
   exit 125
 fi
 
 # Translate the container's working directory back to the path it was mounted
 # from, so relative file arguments resolve the same way.
-if [ -n "${workdir}" ]; then
+if [[ -n "${workdir}" ]]; then
   host_dir=""
   for m in "${mounts[@]}"; do
     src="${m%%:*}"
@@ -91,7 +91,7 @@ if [ -n "${workdir}" ]; then
       "${dst}"/*) host_dir="${src}${workdir#"${dst}"}" ;;
     esac
   done
-  [ -n "${host_dir}" ] || delegate "working directory ${workdir} is not inside a mounted volume"
+  [[ -n "${host_dir}" ]] || delegate "working directory ${workdir} is not inside a mounted volume"
   cd "${host_dir}"
 fi
 

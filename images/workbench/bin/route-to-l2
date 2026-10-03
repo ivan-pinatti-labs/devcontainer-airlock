@@ -77,13 +77,13 @@ def main():
     try:
         call = json.load(sys.stdin)
     except ValueError:
-        return 0
+        return
     command = (call.get("tool_input") or {}).get("command")
     if not isinstance(command, str) or not command.strip():
-        return 0
+        return
     routed, net = classify(command)
     if not routed:
-        return 0
+        return
     l2 = "l2 --net --" if net else "l2 --"
     words = next(segments(command), [])
     if words and words[0] == "pre-commit" and not net and len(list(segments(command))) == 1:
@@ -111,8 +111,7 @@ def main():
             "additionalContext": context,
             "updatedInput": dict(call["tool_input"], command=wrapped)}}
     json.dump(out, sys.stdout)
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

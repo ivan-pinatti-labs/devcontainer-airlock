@@ -37,10 +37,10 @@ COPY vscode/extensions.txt /tmp/extensions.txt
 # command that fails on its own when its input is wrong (sha256sum -c, diff).
 # hadolint ignore=DL4006
 RUN set -eu; \
-  meta="$(curl -fsSL "https://update.code.visualstudio.com/api/versions/commit:${VSCODE_COMMIT}/server-linux-x64/stable")"; \
+  meta="$(curl -fsSL --proto '=https' "https://update.code.visualstudio.com/api/versions/commit:${VSCODE_COMMIT}/server-linux-x64/stable")"; \
   url="$(printf '%s' "${meta}" | jq -r .url)"; \
   sum="$(printf '%s' "${meta}" | jq -r .sha256hash)"; \
-  curl -fsSL -o /tmp/server.tgz "${url}"; \
+  curl -fsSL --proto '=https' -o /tmp/server.tgz "${url}"; \
   echo "${sum}  /tmp/server.tgz" | sha256sum -c -; \
   mkdir -p /tmp/server; \
   tar -xzf /tmp/server.tgz -C /tmp/server --strip-components=1; \

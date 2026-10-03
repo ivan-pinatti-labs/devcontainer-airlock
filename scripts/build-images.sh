@@ -80,11 +80,11 @@ staging_up() {
 build() {
   local name="$1" base="${2:-}" ref dir="$1" args=()
   ref="${STAGING}/${PREFIX}-${name}:ci"
-  [ -n "${base}" ] && args+=(--build-arg "BASE_IMAGE=${base}")
+  [[ -n "${base}" ]] && args+=(--build-arg "BASE_IMAGE=${base}")
   case "${name}" in
     workbench-*) dir=workbench; args+=(--target "${name#workbench-}") ;;
   esac
-  if [ "${RUNTIME}" = docker ]; then
+  if [[ "${RUNTIME}" = docker ]]; then
     # buildx, for the SBOM and provenance attestations, which travel with the
     # image when it is copied on to the real registry.
     docker buildx build "${args[@]}" --push --sbom=true --provenance=mode=max \
@@ -132,10 +132,10 @@ scan() {
 # this script that never run.
 publish() {
   local name="$1" digest="$2" to="$3" rehearsal=false tag copy
-  [ "${to}" = "${STAGING}/rehearsal" ] && rehearsal=true
+  [[ "${to}" = "${STAGING}/rehearsal" ]] && rehearsal=true
   IFS= read -r -d '' copy <<'SH' || true
 set -e
-if [ "${REHEARSAL}" = true ]; then
+if [[ "${REHEARSAL}" = true ]]; then
   set -- --dest-tls-verify=false "$@"
 else
   umask 077
@@ -160,7 +160,7 @@ SH
 
 main() {
   local digests=() name digest base_ref
-  if [ -n "${PUBLISH_TO}" ] && { [ -z "${REGISTRY_USER:-}" ] || [ -z "${REGISTRY_TOKEN:-}" ]; }; then
+  if [[ -n "${PUBLISH_TO}" ]] && { [[ -z "${REGISTRY_USER:-}" ]] || [[ -z "${REGISTRY_TOKEN:-}" ]]; }; then
     echo "build-images: PUBLISH_TO needs REGISTRY_USER and REGISTRY_TOKEN" >&2
     exit 2
   fi

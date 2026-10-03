@@ -291,10 +291,10 @@ def serve(conn):
 def main():
     if not os.environ.get("GH_TOKEN"):
         print("gh-broker: GH_TOKEN is not set; start it with the token's podman secret", file=sys.stderr)
-        return 1
+        sys.exit(1)
     if not OWNERS or len(OWNERS) != len(_OWNER_NAMES):
         print("gh-broker: set GH_BROKER_OWNERS to the GitHub owners it may act on, comma separated (host: WORKBENCH_GH_OWNERS)", file=sys.stderr)
-        return 1
+        sys.exit(1)
     if os.path.exists(SOCK):
         os.unlink(SOCK)
     s = socket.socket(socket.AF_UNIX)
@@ -308,4 +308,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

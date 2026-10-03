@@ -42,7 +42,7 @@ def test_classify(hook, command, routed, net):
 def run(hook, monkeypatch, capsys, stdin, *args):
     monkeypatch.setattr(hook.sys, "argv", ["route-to-l2", *args])
     monkeypatch.setattr(hook.sys, "stdin", io.StringIO(stdin))
-    assert hook.main() == 0
+    assert hook.main() is None
     out = capsys.readouterr().out
     return json.loads(out)["hookSpecificOutput"] if out else None
 
