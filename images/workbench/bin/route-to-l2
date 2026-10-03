@@ -15,8 +15,12 @@ exact `l2` command line to use instead, because Codex does not take a
 rewritten command from a hook.
 
 Commands that are not matched (git, gh, ls, cat, podman, l2 itself) are left
-alone. This is a policy for the agents, not a security boundary on its own:
-docs/LAYERS.md says what is.
+alone. A command that both calls l2 and runs project code outside it (say
+`pytest; l2 -- pytest`) is refused in either mode: wrapped whole, its l2
+would run inside L2, where there is no l2, and left alone, the bare part
+would run in the workbench. Run the two as separate commands. This is a
+policy for the agents, not a security boundary on its own: docs/LAYERS.md
+says what is.
 """
 import json
 import re
@@ -55,12 +59,18 @@ def segments(command):
             yield words
 
 
+def calls_l2(command):
+    return any(words[0] == "l2" for words in segments(command))
+
+
 def classify(command):
+    """Whether the command runs project code outside l2, and whether that
+    code needs the network. A segment that is an l2 call is already routed."""
     routed = net = False
     for words in segments(command):
         head = words[0].rsplit("/", 1)[-1]
         if words[0] == "l2":
-            return False, False
+            continue
         script = words[0].startswith(("./", "scripts/", "tests/", "bin/")) or (
             head in ("bash", "sh") and len(words) > 1 and not words[1].startswith("-"))
         if head in RUNS_CODE or script:
@@ -83,6 +93,16 @@ def main():
         return
     routed, net = classify(command)
     if not routed:
+        return
+    if calls_l2(command):
+        json.dump({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "Calls l2 and also runs project code outside it. Wrapped in l2 whole, "
+                "the inner l2 would not be found there; left as is, the rest would run "
+                "in the workbench. Run the l2 call and the rest as separate commands.")}},
+            sys.stdout)
         return
     l2 = "l2 --net --" if net else "l2 --"
     words = next(segments(command), [])

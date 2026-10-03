@@ -31,7 +31,8 @@ def hook():
         ("bash", False, False),
         ("echo 'unclosed ; pytest", True, False),
         ("l2 -- pytest", False, False),
-        ("pytest; l2 -- pytest", False, False),
+        ("pytest; l2 -- pytest", True, False),
+        ("l2 -- pytest && npm ci", True, True),
         ("ls ;; pytest", True, False),
     ],
 )
@@ -100,3 +101,15 @@ def test_deny_mode_names_the_command_to_run(hook, monkeypatch, capsys):
     out = run(hook, monkeypatch, capsys, call("pytest"), "--deny")
     assert out["permissionDecision"] == "deny"
     assert out["permissionDecisionReason"].endswith("Run it as: l2 -- bash -c pytest")
+
+
+def test_a_standalone_l2_call_is_left_alone(hook, monkeypatch, capsys):
+    assert run(hook, monkeypatch, capsys, call("l2 --net -- npm ci")) is None
+
+
+@pytest.mark.parametrize("args", [(), ("--deny",)])
+def test_a_bare_command_beside_l2_is_refused(hook, monkeypatch, capsys, args):
+    out = run(hook, monkeypatch, capsys, call("pytest; l2 -- pytest"), *args)
+    assert out["permissionDecision"] == "deny"
+    assert "updatedInput" not in out
+    assert "as separate commands" in out["permissionDecisionReason"]
