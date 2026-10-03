@@ -82,7 +82,8 @@ only, and the session writes only in its own clone of each repository,
 helpers, the egress proxy and the mirror (as for workspaces), the account's
 agent folder with its login and settings, and the transcripts and memory.
 Kept apart: the processes, the containers, the network and every file a
-session writes. `make claude-shell` and `make codex-shell` still open the
+session writes in the repositories, which goes to its own clone only.
+`make claude-shell` and `make codex-shell` still open the
 workspace's own workbench, the one VS Code attaches to outside a session.
 
 ## How they talk to each other
