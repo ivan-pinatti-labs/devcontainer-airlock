@@ -43,12 +43,7 @@ class Broker:
 
 
 class Stdin(io.StringIO):
-    def __init__(self, text="", tty=False):
-        super().__init__(text)
-        self.tty = tty
-
-    def isatty(self):
-        return self.tty
+    """A piped standard input."""
 
 
 def run_gh(monkeypatch, argv, stdin=None):
@@ -74,16 +69,92 @@ def test_relays_the_reply(monkeypatch, capsys, sock, tmp_path):
     assert broker.request == {
         "argv": ["pr", "list"],
         "cwd": str(tmp_path),
-        "stdin": "piped",
+        "stdin": "",
     }
     assert capsys.readouterr() == ("o", "e")
 
 
-def test_a_terminal_sends_no_stdin(monkeypatch, sock):
+class Unread(Stdin):
+    """A standard input that must not be read: one left open by whatever
+    started gh would block it for ever."""
+
+    def read(self, *args):
+        raise AssertionError("stdin was read")
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["pr", "create", "--body-file", "-"],
+        ["api", "graphql", "--input", "-"],
+        ["pr", "create", "--body-file=-"],
+        ["api", "graphql", "--input=-"],
+        ["api", "graphql", "--raw-field=query=@-"],
+        ["api", "graphql", "-F", "query=@-"],
+        ["api", "graphql", "--field", "query=@-"],
+        ["api", "graphql", "-f", "query=@-"],
+        ["api", "graphql", "--raw-field", "query=@-"],
+    ],
+)
+def test_stdin_is_sent_when_the_command_reads_it(monkeypatch, sock, argv):
     broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')
-    assert run_gh(monkeypatch, ["api", "user"], Stdin("typed", tty=True)) == 0
+    assert run_gh(monkeypatch, argv, Stdin("piped")) == 0
+    broker.thread.join()
+    assert broker.request["stdin"] == "piped"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["pr", "list"],
+        ["api", "graphql", "--input"],
+        ["api", "graphql", "--input", "file.json"],
+        ["api", "graphql", "-F", "query=@file"],
+        ["api", "graphql", "-F"],
+    ],
+)
+def test_stdin_is_left_alone_otherwise(monkeypatch, sock, argv):
+    broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')
+    assert run_gh(monkeypatch, argv, Unread()) == 0
     broker.thread.join()
     assert broker.request["stdin"] == ""
+
+
+class StalledSocket:
+    """A connection that opens, then fails as `error` says when read."""
+
+    error = TimeoutError
+
+    def __init__(self, *args):
+        self.timeout = None
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def connect(self, path):
+        pass
+
+    def sendall(self, data):
+        pass
+
+    def shutdown(self, how):
+        pass
+
+    def recv(self, size):
+        raise self.error(32, "Broken pipe")
+
+
+def test_a_broker_that_never_answers_times_out(monkeypatch, capsys, sock):
+    monkeypatch.setattr("socket.socket", StalledSocket)
+    assert run_gh(monkeypatch, ["pr", "list"]) == 124
+    assert "no reply from the gh broker after 330s" in capsys.readouterr().err
+
+
+def test_a_connection_that_breaks_is_unreachable(monkeypatch, capsys, sock):
+    monkeypatch.setattr(StalledSocket, "error", BrokenPipeError)
+    monkeypatch.setattr("socket.socket", StalledSocket)
+    assert run_gh(monkeypatch, ["pr", "list"]) == 127
+    assert "connection to the gh broker failed (Broken pipe)" in capsys.readouterr().err
 
 
 def test_an_empty_reply_is_an_error(monkeypatch, capsys, sock):
