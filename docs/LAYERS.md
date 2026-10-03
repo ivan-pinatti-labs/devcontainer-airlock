@@ -187,7 +187,10 @@ read them but not write them.
 `airlock-worktree <repo> [<branch>]`, run in the session, clones the
 repository there, independent of the main clone. Transcripts, history and
 memory stay shared: every session starts in the workspace's root, so it
-writes under the same project. The session stops when its agent exits, and
+writes under the same project. So does the account's agent folder, login
+and settings with it: Claude Code saves its login by renaming a file over it
+in that folder, so it cannot be shared on its own (docs/SESSIONS.md, "Why
+the account folder is shared"). The session stops when its agent exits, and
 its record, folders and engine stay, so `make attach-<name>` brings it back
 with the same conversation, after a reboot too. `make prune` removes the
 stopped ones whose clones hold no uncommitted change and no commit missing
