@@ -45,6 +45,20 @@ no app code to run tests against and nothing to build a container image
 from. Every place rsync-crypt's document reasons about those two, this one
 simply drops.
 
+`SonarQube`, the job in `sonarqube.yml`, runs on every pull request and on
+every push to `main`, and fails when SonarQube Cloud's quality gate fails
+(`sonar.qualitygate.wait=true`). It is not a required context yet, and
+`bot-auto-merge.yml` does not wait for it. A later change makes it required
+and removes `codeql.yml`, which it replaces. On `merge_group` it passes
+without analyzing, because the pull request's head was already analyzed and
+gated and SonarQube Cloud has no pull request to attach a queue commit to;
+the push to `main` right after the merge analyzes the result. A fork's pull
+request fails the job with an explanation, since it cannot receive
+`SONAR_TOKEN`; a maintainer pushes the branch here instead. SonarQube Cloud's
+own GitHub App posts a second check, `SonarCloud Code Analysis`, which stays
+informational: that app never posts on a merge queue commit, so requiring it
+would stall the queue.
+
 ## A human pull request
 
 Open it as a **draft** first. `Pre-commit` runs the full hook set over every
@@ -230,10 +244,9 @@ of these files already on `main`, and the bootstrap gap closes for good.
 ## Using this pipeline from a repository created from this template
 
 Every file this document describes is part of the template and ships to a
-repository created from it. Five pieces of setup do not transfer
-automatically. The first four are repository or organization settings; none
-of them are files, so template creation has nothing to copy. The fifth is a
-copied bot schedule whose slot must be reassigned to avoid collisions:
+repository created from it. The pieces of setup below do not transfer
+automatically. Most are repository or organization settings, which are not
+files, so template creation has nothing to copy:
 
 - **`REPO_OWNER_LOGIN`.** A repository variable, read by
   `bot-auto-merge.yml`'s `resolve-owner` job. This repository's own copy is
@@ -258,6 +271,15 @@ copied bot schedule whose slot must be reassigned to avoid collisions:
   `repository_selection: selected`. A new repository needs adding to both
   installations' repository lists before either app does anything on it at
   all; until then, `CodeRabbit` posts no status and Renovate opens nothing.
+- **A SonarQube Cloud project.** `sonar-project.properties` ships with
+  this repository's project key, `ivan-pinatti-labs_devcontainer-airlock`,
+  which a derived repository cannot analyze into. Create the new
+  repository's own project in SonarQube Cloud (bound to GitHub, Automatic
+  Analysis off, since `sonarqube.yml` analyzes from CI and the two cannot
+  run side by side), change `sonar.organization`, `sonar.projectKey` and
+  `sonar.projectName` to match, and make a `SONAR_TOKEN` secret visible to
+  the repository. Until then the `SonarQube` job fails on every pull
+  request.
 - **Nothing, for the bot schedules.** Both Dependabot and Renovate run daily
   in every repository in this organization, so a repository created from this
   template needs no schedule picked for it and can collide with no sibling.
