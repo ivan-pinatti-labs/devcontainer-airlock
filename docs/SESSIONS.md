@@ -91,13 +91,37 @@ itself, as today.
 | Thing | Per session or shared | How |
 | --- | --- | --- |
 | transcripts, history, memory | shared, both accounts | the resolved `projects/` folder (both accounts' project folders already point at one target) mounted into every session. The agent always starts in the workspace root (`~/wo/public`), so every session writes under the same project key, whatever folder it works in |
-| login | shared per account | only the credentials file is shared (one file, so a token refresh by one session does not break the others) |
-| the rest of `~/.claude`, `~/.codex` | per session | a private copy seeded from the account's, so one session cannot change another's settings, agents or skills while it runs |
+| login, and the rest of `~/.claude`, `~/.codex` | shared per account | the account's folder, mounted into every session of that account, as into its workspace workbench. Not a private copy per session: see "Why the account folder is shared" below |
 | L2 engine | per session | own socket, own containers, own writable image store; below it, one read only store the host fills (`additionalimagestores`, measured above) |
 | egress proxy | shared (#54) | one registration per session network, the union of the egress sets of the repositories in scope; `mirror` works as today |
 | package mirror (#56) | shared | the gate joins each session network at `.254` |
 | gh broker, ssh-agent | shared, through the profile | sockets, as today |
 | voice | per session | already per session: its own pipes |
+
+**Why the account folder is shared.** The plan was a private copy of
+`~/.claude` for each session with only the login, `.credentials.json`,
+shared, so one session could not change another's settings, agents or
+skills while it ran. Claude Code (2.1.283, read in its code) rules that out:
+
+- It saves the login by writing a temporary file and renaming it over
+  `.credentials.json`, under a lock file in the same folder. A rename onto a
+  file that is itself a mount fails, so a credentials file mounted alone
+  into a private copy would lose every token refresh.
+- A symbolic link to a shared file is replaced by that rename, so the
+  session keeps a token of its own; its next refresh rotates the token the
+  others hold. Its newer credentials store also refuses a symlinked file.
+- Copying the file in at start and back at stop has the same rotation
+  problem whenever two sessions overlap.
+
+So the login is shared the only way it can be, by sharing its folder, which
+is how Claude Code itself expects several processes on one account to work
+(hence its lock). `settings.json` and `.claude.json` sit at the same root
+and are saved the same way. What keeps a session from changing what the
+others run with is what holds today: hooks come only from managed settings
+(`allowManagedHooksOnly`); Claude Code's command sandbox refuses writes to
+`settings.json`, `CLAUDE.md`, `agents/`, `skills/`, `commands/`, `hooks/`
+and `plugins/` under `~/.claude`; and an edit there through the agent's own
+editing tools asks first. Codex's `~/.codex` is shared the same way.
 
 **Profile.** A session runs under a profile: the GitHub identity (the
 broker, its token and its owners), the git author, the egress defaults.
@@ -166,7 +190,9 @@ and `host/workbench.mk` the targets above. `make claude-shell` and
 5. **Repository L2 images**: prebuilt by the host into the shared store,
    and buildable in each session's own engine.
 6. **Settings changed inside a session** (`/config`) stay in that session,
-   for now.
+   for now. Superseded 2026-10-03: they reach every session of the
+   account, since the account folder is shared (section 3, "Why the account
+   folder is shared").
 
 ## Plan
 
@@ -177,6 +203,7 @@ One pull request each, in this order:
    container, network and engine; read only clones; per session folders;
    `airlock-worktree`; persistent records; attach, list, stop, prune.
 3. Per session agent configuration with shared credentials and history,
-   under the `default` profile.
+   under the `default` profile. Dropped 2026-10-03: the credentials can
+   only be shared with their whole folder (section 3).
 4. docs/ARCHITECTURE.md and docs/LAYERS.md, then the AGENTS.md change in
    every repository.
