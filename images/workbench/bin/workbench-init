@@ -4,7 +4,9 @@
 # to the image copy. Then waits; the terminal and the editor attach to the
 # running container.
 #
-# WORKBENCH_SHARE stands in for /usr/local/share/workbench, for the tests.
+# WORKBENCH_SHARE stands in for /usr/local/share/workbench, and
+# WORKBENCH_VSCODE_SETTINGS for VS Code's machine settings file, for the
+# tests.
 set -eu
 rules="${WORKBENCH_SHARE:-/usr/local/share/workbench}/codex-workbench.rules"
 if [ -f "${rules}" ]; then
@@ -15,7 +17,7 @@ fi
 # that VS Code proxy settings never reach, so it gets the egress proxy as JVM
 # options. The address differs per workspace, hence here and not in the
 # image (docs/LAYERS.md, "Extensions").
-settings=/home/dev/.vscode-server/data/Machine/settings.json
+settings="${WORKBENCH_VSCODE_SETTINGS:-/home/dev/.vscode-server/data/Machine/settings.json}"
 proxy="${HTTPS_PROXY:-}"
 proxy="${proxy#*://}"
 proxy="${proxy%%/*}"
