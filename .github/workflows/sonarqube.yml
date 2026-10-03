@@ -6,16 +6,16 @@ name: SonarQube
 # sonar-project.properties), the one JavaScript script, the Dockerfiles,
 # YAML and these workflows, plus secrets detection over every text file.
 # Settings live in sonar-project.properties. It sits next to the pre-commit
-# hooks, it does not replace them: shellcheck, ruff, hadolint, actionlint and
-# zizmor keep running on every commit through the library's checklists, and
-# Sonar's rules are different from theirs, not a superset.
+# hooks, it does not replace them: ruff, hadolint, actionlint and zizmor keep
+# running on every commit through the library's checklists, and Sonar's rules
+# are different from theirs, not a superset.
 #
 # The job fails when the SonarQube Cloud quality gate fails
 # (`sonar.qualitygate.wait=true`), so the `SonarQube` check is the gate
 # verdict itself, reported by GitHub Actions like `Pre-commit`. SonarQube
 # Cloud's own GitHub App also posts a check on the pull request; that one is
 # informational only, because it is never posted on a merge queue commit.
-# `SonarQube` is not a required context yet; see docs/MERGE_PIPELINE.md.
+# `SonarQube` is a required context; see docs/MERGE_PIPELINE.md.
 #
 # Coverage comes from `make coverage` (see the Makefile), which holds the
 # Python, the JavaScript and the listed shell scripts at 100% and writes the

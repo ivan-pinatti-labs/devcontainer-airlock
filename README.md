@@ -6,6 +6,8 @@
 [![GitHub Repo stars](https://img.shields.io/github/stars/ivan-pinatti-labs/devcontainer-airlock?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-airlock)
 [![GitHub forks](https://img.shields.io/github/forks/ivan-pinatti-labs/devcontainer-airlock?logo=Github&style=for-the-badge)](https://github.com/ivan-pinatti-labs/devcontainer-airlock/forks)
 [![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/ivan-pinatti-labs/devcontainer-airlock?utm_source=oss&utm_medium=github&utm_campaign=ivan-pinatti-labs%2Fdevcontainer-airlock&labelColor=171717&color=FF570A&label=CodeRabbit+Reviews&style=for-the-badge)](https://coderabbit.ai)
+[![SonarQube Quality Gate](https://img.shields.io/sonar/quality_gate/ivan-pinatti-labs_devcontainer-airlock?server=https%3A%2F%2Fsonarcloud.io&logo=sonarqubecloud&style=for-the-badge)](https://sonarcloud.io/project/overview?id=ivan-pinatti-labs_devcontainer-airlock)
+[![SonarQube Coverage](https://img.shields.io/sonar/coverage/ivan-pinatti-labs_devcontainer-airlock?server=https%3A%2F%2Fsonarcloud.io&logo=sonarqubecloud&style=for-the-badge)](https://sonarcloud.io/component_measures?id=ivan-pinatti-labs_devcontainer-airlock&metric=coverage)
 
 Secure, layered devcontainers for AI coding agents.
 
