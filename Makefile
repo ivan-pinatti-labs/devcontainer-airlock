@@ -169,4 +169,5 @@ coverage:
 		if [ -f "$$report" ]; then cp "$$report" "$(COVERAGE_DIR)"/ || exit 1; fi; \
 	done; \
 	echo "coverage: python exit $$py, shell exit $$sh, javascript exit $$js"; \
-	test "$$py" -eq 0 && test "$$sh" -eq 0 && test "$$js" -eq 0
+	test "$$py" -eq 0 && test "$$sh" -eq 0 && test "$$js" -eq 0 && \
+		test -s "$(COVERAGE_DIR)/coverage.xml" && test -s "$(COVERAGE_DIR)/shell.xml" && test -s "$(COVERAGE_DIR)/lcov.info"
