@@ -6,9 +6,9 @@ name: SonarQube
 # sonar-project.properties), the one JavaScript script, the Dockerfiles,
 # YAML and these workflows, plus secrets detection over every text file.
 # Settings live in sonar-project.properties. It sits next to the pre-commit
-# hooks, it does not replace them: ruff, hadolint, actionlint and zizmor keep
-# running on every commit through the library's checklists, and Sonar's rules
-# are different from theirs, not a superset.
+# hooks, it does not replace them: ruff, shellcheck, hadolint, actionlint and
+# zizmor keep running on every commit through the library's checklists, and
+# Sonar's rules are different from theirs, not a superset.
 #
 # The job fails when the SonarQube Cloud quality gate fails
 # (`sonar.qualitygate.wait=true`), so the `SonarQube` check is the gate
