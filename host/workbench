@@ -1833,13 +1833,15 @@ cmd_session_stop() {
 }
 
 # One line per clone a session made: repository, branch, and what is not
-# pushed or committed yet.
+# pushed or committed yet, separated by the unit separator (0x1f). Not a
+# tab: read splits on runs of whitespace, so an empty branch would vanish
+# and the reason would be read as the branch.
 session_clones() {
   local r f
   while read -r r; do
     f="${r}/.claude/worktrees/$1"
     [ -e "${f}/.git" ] || continue
-    printf '%s\t%s\t%s\n' "$(basename "${r}")" "$(git -C "${f}" branch --show-current 2>/dev/null)" "$(clone_state "${f}")"
+    printf '%s\x1f%s\x1f%s\n' "$(basename "${r}")" "$(git -C "${f}" branch --show-current 2>/dev/null)" "$(clone_state "${f}")"
   done < <(session_repos "$2")
 }
 
@@ -1872,7 +1874,7 @@ cmd_session_list() {
     state=stopped
     running "$(wb_name "${S_WS}" "${S_AGENT}")" && state=running
     printf '%-18s %-18s %-8s %s\n' "${n}" "${S_AGENT}" "${state}" "${S_WS}"
-    while IFS=$'\t' read -r repo branch why; do
+    while IFS=$'\x1f' read -r repo branch why; do
       line="    ${repo}: ${branch:-no branch}"
       [ -z "${why}" ] || line="${line} (${why})"
       echo "${line}"

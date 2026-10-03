@@ -144,7 +144,10 @@ check "and each clone it made, with what is only there" 0 out \
 rm "${git_s}/changes"
 run "${wb}" session list
 check "only what is only there" 0 out "    app: feat/x (commits not pushed)"
-rm "${git_s}/branch" "${git_s}/ahead"
+rm "${git_s}/branch"
+run "${wb}" session list
+check "a clone on no branch says so, before the reason" 0 out "    app: no branch (commits not pushed)"
+rm "${git_s}/ahead"
 run "${wb}" session list
 assert "a clean clone on no branch says nothing more" grep -qx "    app: no branch" "${__scratch}/out"
 
