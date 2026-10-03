@@ -205,7 +205,7 @@ LABEL org.opencontainers.image.description="The ivan-pinatti-labs Claude Code wo
 # Codex's workbench, installed the same way.
 FROM common AS codex
 # renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.157.0
+ARG CODEX_VERSION=0.157.1
 RUN set -eu; \
   export HOME=/root npm_config_cache=/tmp/npm-cache; \
   npm init --yes >/dev/null; \
