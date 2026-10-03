@@ -95,12 +95,14 @@ SHELL_SCRIPTS := \
 	images/l2/bin/actionlint \
 	images/l2/bin/docker \
 	images/l2/engine-bin/podman \
+	images/workbench/bin/airlock-worktree \
 	images/workbench/bin/claude \
 	images/workbench/bin/finish-image \
 	images/workbench/bin/l2 \
 	images/workbench/bin/l2-hooks-install \
 	images/workbench/bin/l2-pre-commit \
 	images/workbench/bin/rec \
+	images/workbench/bin/status-line \
 	images/workbench/bin/workbench-init \
 	images/workbench/share/git-hook \
 	scripts/build-images.sh

@@ -1,17 +1,15 @@
 #!/bin/bash
-: '
-  airlock-worktree REPO [BRANCH]
-
-  In a session (docs/SESSIONS.md): clone REPO (a path, or the name of a
-  clone in the folder you are in) into the folder of the session in it,
-  REPO/.claude/worktrees/$AIRLOCK_SESSION, the only place the session can
-  write in that repository. The clone is independent: its own objects,
-  branches, config and hooks, nothing shared with the main clone, which is
-  read only here. origin is set to the remote of the main clone and fetched,
-  and BRANCH (default: the name of the session) is made from the default
-  branch of origin. Then the hooks of the repository are installed, to run
-  in L2.
-'
+# airlock-worktree REPO [BRANCH]
+#
+# In a session (docs/SESSIONS.md): clone REPO (a path, or the name of a
+# clone in the folder you are in) into the folder of the session in it,
+# REPO/.claude/worktrees/$AIRLOCK_SESSION, the only place the session can
+# write in that repository. The clone is independent: its own objects,
+# branches, config and hooks, nothing shared with the main clone, which is
+# read only here. origin is set to the remote of the main clone and fetched,
+# and BRANCH (default: the name of the session) is made from the default
+# branch of origin. Then the hooks of the repository are installed, to run
+# in L2.
 set -euo pipefail
 
 die() { echo "airlock-worktree: $*" >&2; exit 1; }
