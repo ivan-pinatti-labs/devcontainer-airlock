@@ -114,7 +114,10 @@ def main(argv):
     try:
         return provision(argv)
     except urllib.error.HTTPError as e:
-        log(f"{e.code} from {e.url}: {e.read().decode()[:300]}")
+        # Whatever the body holds (bytes that are not UTF-8, a page of HTML
+        # over many lines), it is told on the one line, whitespace folded.
+        body = " ".join(e.read().decode(errors="replace").split())
+        log(f"{e.code} from {e.url}: {body[:300]}")
         return 1
 
 

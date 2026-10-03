@@ -292,3 +292,24 @@ def test_main_tells_an_http_error_in_one_line(prov, monkeypatch, tmp_path, capsy
     err = capsys.readouterr().err
     assert "503 from http://nexus/service/rest/v1/status/writable: starting x" in err
     assert "x" * 300 not in err
+
+
+def http_error_with(monkeypatch, prov, body):
+    def refused():
+        raise urllib.error.HTTPError("http://nexus/x", 500, "no", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(prov, "wait_up", refused)
+
+
+def test_main_tells_a_body_that_is_not_utf8(prov, monkeypatch, tmp_path, capsys):
+    http_error_with(monkeypatch, prov, b"bad \xff\xfe byte")
+    assert prov.main([wanted(tmp_path)]) == 1
+    replaced = "\N{REPLACEMENT CHARACTER}" * 2
+    assert f"500 from http://nexus/x: bad {replaced} byte\n" in capsys.readouterr().err
+
+
+def test_main_folds_a_body_over_many_lines(prov, monkeypatch, tmp_path, capsys):
+    http_error_with(monkeypatch, prov, b"<html>\r\n  <body>down</body>\n</html>\n")
+    assert prov.main([wanted(tmp_path)]) == 1
+    folded = "<html> <body>down</body> </html>"
+    assert capsys.readouterr().err == f"provision: 500 from http://nexus/x: {folded}\n"
