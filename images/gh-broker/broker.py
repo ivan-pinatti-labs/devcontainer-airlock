@@ -110,9 +110,8 @@ def mutation_fields(query):
     while i < len(query) and depth > 0:
         c = query[i]
         if in_string:
-            if c == "\\":
-                i += 1
-            elif c == '"':
+            # No escapes to skip: a query holding a backslash is refused above.
+            if c == '"':
                 in_string = False
         elif c == '"':
             in_string = True

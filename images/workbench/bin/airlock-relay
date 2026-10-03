@@ -17,7 +17,13 @@ const net = require('net');
 const tls = require('tls');
 
 const port = Number(process.env.AIRLOCK_RELAY_PORT || 8889);
-const upstream = new URL(process.env.AIRLOCK_RELAY_UPSTREAM || '');
+// URL.parse, not new URL: an unset or unparsable value has to reach the
+// message below, where new URL would throw first and exit 1 with a stack.
+const upstream = URL.parse(process.env.AIRLOCK_RELAY_UPSTREAM || '');
+if (!upstream || !upstream.hostname) {
+  process.stderr.write('airlock-relay: AIRLOCK_RELAY_UPSTREAM is not set to a proxy URL\n');
+  process.exit(2);
+}
 const upHost = upstream.hostname;
 const upPort = Number(upstream.port || 80);
 const MAX_HEAD = 64 * 1024;
@@ -112,8 +118,4 @@ const server = net.createServer((client) => {
   client.on('error', () => {});
 });
 
-if (!upHost) {
-  process.stderr.write('airlock-relay: AIRLOCK_RELAY_UPSTREAM is not set\n');
-  process.exit(2);
-}
 server.listen(port, '127.0.0.1');

@@ -17,9 +17,9 @@ name: SonarQube
 # informational only, because it is never posted on a merge queue commit.
 # `SonarQube` is not a required context yet; see docs/MERGE_PIPELINE.md.
 #
-# No coverage step yet: the only Python tests are the two standalone scripts
-# the gh-broker and mirror-gate image builds run, and a later change adds
-# coverage for the Python and the shell.
+# Coverage comes from `make coverage` (see the Makefile), which holds the
+# Python, the JavaScript and the listed shell scripts at 100% and writes the
+# reports the scan reads.
 #
 # Triggers:
 #   pull_request   the analysis a reviewer reads, decorated onto the pull
@@ -84,6 +84,19 @@ jobs:
           # are new code, and a shallow clone makes every line look new.
           fetch-depth: 0
 
+      # Coverage of the Python, the JavaScript and the listed shell scripts,
+      # held at 100% (see the Makefile's `coverage` target). The quality gate
+      # also requires 80% on new code, and with no report every new line
+      # would count as uncovered. Each tool runs in a podman container that
+      # sees the source only through a tar stream; the runner ships podman.
+      # The step is allowed to fail so SonarQube still gets the reports of a
+      # run that falls short, and the last step below fails the job on it.
+      - name: Measure coverage
+        id: coverage
+        if: github.event_name != 'merge_group'
+        continue-on-error: true
+        run: make coverage
+
       - name: Scan
         if: github.event_name != 'merge_group'
         uses: SonarSource/sonarqube-scan-action@ba9859eae8dd6bd29e412f25ddbbef3d032000f4 # v8.2.2
@@ -92,3 +105,12 @@ jobs:
         with:
           args: >-
             -Dsonar.qualitygate.wait=true
+
+      - name: Require 100% coverage
+        # After the scan, so a pull request below 100% still gets SonarQube's
+        # report of which lines are missing. `make coverage` above printed
+        # them too; this only carries its verdict.
+        if: github.event_name != 'merge_group' && steps.coverage.outcome == 'failure'
+        run: |
+          echo "::error::Coverage is below 100%; see the Measure coverage step."
+          exit 1

@@ -28,10 +28,10 @@
 #   pre-commit run --all-files
 #
 # One id below (checklist-git-commit-msg) runs at the commit-msg git hook
-# stage instead of pre-commit, so default_install_hook_types wires up both
-# stages. Every other hook is pinned to stages: [pre-commit] so it does not
-# also re-run during that commit-msg invocation.
-default_install_hook_types: [pre-commit, commit-msg]
+# stage instead of pre-commit, and one (coverage) at pre-push, so
+# default_install_hook_types wires up all three stages. Every other hook is
+# pinned to stages: [pre-commit] so it does not also re-run during those.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 repos:
   - repo: https://github.com/ivan-pinatti-labs/pre-commit-checklists
     # Bump this to whatever https://github.com/ivan-pinatti-labs/pre-commit-checklists/releases
@@ -138,16 +138,10 @@ repos:
 
       # check-ast, check-builtin-literals, debug-statements,
       # requirements-txt-fixer, ruff-check --fix, ruff-format. Scoped to
-      # scripts/, not the whole repo: this template stays language-agnostic,
-      # and the only Python here is the merge pipeline's two verdict scripts
-      # The two scripts that used to be the only Python here moved to
-      # ivan-pinatti-labs/gh-actions on 2026-09-22. The id stays so this
-      # repository gets Python coverage as soon as it adds any; with no
-      # matching files it simply does nothing.
-      # Drop this id, or widen the selector, once the repo created from this
-      # template actually is a Python project.
+      # scripts/ and tests/: the Python the images ship predates this hook and
+      # has not been through ruff yet.
       - id: checklist-dev-python
-        files: ^scripts/.*\.py$
+        files: ^(scripts|tests)/.*\.py$
         stages: [pre-commit]
 
       # Lints the image definitions with hadolint. hadolint-docker runs in a
@@ -212,3 +206,22 @@ repos:
         files: ^CITATION\.cff$
         pass_filenames: false
         stages: [pre-commit]
+
+  # This repository's own coverage gate: 100% of the Python (lines and
+  # branches), the JavaScript and the listed shell scripts (lines). `make
+  # coverage` runs each suite in a podman container that sees the source only
+  # through a tar stream; see the Makefile. pre-push, not pre-commit: it
+  # starts three containers, and SonarQube's CI job runs the same target on
+  # every pull request anyway, so this only saves a round trip. In a
+  # workbench, push from where `l2 --engine --net` is available, or run
+  # `l2 --engine --net -- make coverage` first. The files: pattern names the
+  # scripts without an extension by their directories.
+  - repo: local
+    hooks:
+      - id: coverage
+        name: Coverage, 100% of the Python, the JavaScript and the listed shell
+        language: system
+        entry: make coverage
+        pass_filenames: false
+        files: '(\.(py|sh|js)$|/bin/|/backends/|^\.coveragerc$|^Makefile$|requirements\.txt$)'
+        stages: [pre-push]

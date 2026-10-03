@@ -1,10 +1,8 @@
 #!/bin/sh
-: '
-  The egress proxy container main process: generate the rules from the
-  registered workspaces and their sets, start squid, and refresh the
-  providers lists every EGRESS_REFRESH_SECONDS (default six hours),
-  reloading squid in place.
-'
+# The egress proxy container main process: generate the rules from the
+# registered workspaces and their sets, start squid, and refresh the
+# providers lists every EGRESS_REFRESH_SECONDS (default six hours),
+# reloading squid in place.
 set -eu
 # The resolvers first: egress-refresh and squid resolve through unbound,
 # which forwards encrypted, by EGRESS_DNS: doh (default) through

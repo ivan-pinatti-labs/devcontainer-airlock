@@ -1,16 +1,14 @@
 #!/bin/sh
-: '
-  actionlint, run as an account of its own.
-
-  actionlint v1.7.12 deadlocks when a workflow `run:` script is larger than
-  the pipe capacity in effect (upstream rhysd/actionlint#702): it writes the
-  script into shellcheck'\''s stdin before starting shellcheck. Pipe capacity
-  drops from 64 KiB to 8 KiB once the calling uid owns enough pipes in total,
-  and L2 runs as your own host uid, which usually does. Measured 2026-09-24 on
-  gh-actions: as that uid it hung past 60 seconds, as nobody it finished at
-  once. So this drops to nobody, whose pipe budget is untouched, when L2 gives
-  it the capabilities to (the l2 wrapper does), and runs as is otherwise.
-'
+# actionlint, run as an account of its own.
+#
+# actionlint v1.7.12 deadlocks when a workflow `run:` script is larger than
+# the pipe capacity in effect (upstream rhysd/actionlint#702): it writes the
+# script into shellcheck's stdin before starting shellcheck. Pipe capacity
+# drops from 64 KiB to 8 KiB once the calling uid owns enough pipes in total,
+# and L2 runs as your own host uid, which usually does. Measured 2026-09-24 on
+# gh-actions: as that uid it hung past 60 seconds, as nobody it finished at
+# once. So this drops to nobody, whose pipe budget is untouched, when L2 gives
+# it the capabilities to (the l2 wrapper does), and runs as is otherwise.
 if [ "$(id -u)" = 0 ] && setpriv --reuid 65534 --regid 65534 --clear-groups true 2>/dev/null; then
   exec setpriv --reuid 65534 --regid 65534 --clear-groups /usr/local/lib/l2/actionlint "$@"
 fi

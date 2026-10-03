@@ -280,7 +280,9 @@ class Gate(http.server.BaseHTTPRequestHandler):
                 body, removed = filters.pypi_simple(body, feed)
             elif want_body == "go":
                 body, removed = filters.go_list(body, module, feed)
-            elif want_body == "go-info" and kind in ("info", "latest"):
+            else:
+                # "go-info": the answer for a .info or @latest, the only kinds
+                # it is set for.
                 info = json.loads(body)
                 v = info.get("Version", version)
                 if feed.blocked(module, v):
