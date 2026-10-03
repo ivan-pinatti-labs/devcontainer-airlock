@@ -115,8 +115,10 @@ skills while it ran. Claude Code (2.1.283, read in its code) rules that out:
 
 So the login is shared the only way it can be, by sharing its folder, which
 is how Claude Code itself expects several processes on one account to work
-(hence its lock). `settings.json` and `.claude.json` sit at the same root
-and are saved the same way. What keeps a session from changing what the
+(hence its lock). The rest of the account's state goes with it: the
+workbench sets `CLAUDE_CONFIG_DIR` to `~/.claude`, so `settings.json` and
+`.claude.json` (which defaults to `~/.claude.json` without that variable)
+both live in that folder. What keeps a session from changing what the
 others run with is what holds today: hooks come only from managed settings
 (`allowManagedHooksOnly`); Claude Code's command sandbox refuses writes to
 `settings.json`, `CLAUDE.md`, `agents/`, `skills/`, `commands/`, `hooks/`
