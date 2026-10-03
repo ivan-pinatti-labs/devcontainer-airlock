@@ -34,8 +34,8 @@ Reading the picture:
 | ssh-agent | one per host | `ssh-agent`, read only, no capabilities | the ssh key, in memory for eight hours after `make unlock` | none |
 | gh-broker | one per host | `gh`, for the commands in its allowlist | the GitHub token | straight to GitHub |
 | egress-proxy | one per host | squid | nothing | every workspace's internal network, at `.2` on each, and out for the hosts of each workspace's egress sets |
-| workbench | one per agent and login, per workspace | the agent, the VS Code server and extensions, git, a `gh` client of the broker | that agent's own login | the internal network only |
-| L2 engine | one per workspace | rootless podman | nothing | the internal network only |
+| workbench | one per agent and login, per workspace, and one per session | the agent, the VS Code server and extensions, git, a `gh` client of the broker | that agent's own login | the internal network only |
+| L2 engine | one per workspace, and one per session | rootless podman | nothing | the internal network only |
 | mirror gate | one per host, on by default | the package mirror's front: fixed paths, registry mirror ports, the OSV malicious package filter | nothing | `.254` on every workspace network, and the mirror network |
 | mirror backend | one per host, on by default | Nexus Repository CE, proxy repositories only | cached packages | the mirror network only; out through the egress proxy |
 | L2 run | one per command, thrown away | hooks, tests, package installs, throwaway binaries | nothing | none (the proxy with `l2 --net`) |
@@ -69,6 +69,22 @@ a letter, a digit, `_`, `.` or `-` becomes `_` in that name. Each container
 records the folder it belongs to in a label, and a second folder whose name
 maps to a running one's is refused and told which folder holds the name. A
 container without that label (one made by hand, say) is not checked.
+
+## What a session is
+
+`make claude` and `make codex` start a session over the workspace
+([SESSIONS.md](SESSIONS.md), [LAYERS.md](LAYERS.md), "Sessions"): the
+picture's "one per workspace" box once more, for one agent run, with its own
+internal network, workbench and L2 engine, named after the session
+(`workbench-claude-s-brave-otter`). The workspace's clones are mounted read
+only, and the session writes only in its own clone of each repository,
+`<repo>/.claude/worktrees/<session>`. Shared with the other sessions: the
+helpers, the egress proxy and the mirror (as for workspaces), the account's
+agent folder with its login and settings, and the transcripts and memory.
+Kept apart: the processes, the containers, the network and every file a
+session writes in the repositories, which goes to its own clone only.
+`make claude-shell` and `make codex-shell` still open the
+workspace's own workbench, the one VS Code attaches to outside a session.
 
 ## How they talk to each other
 

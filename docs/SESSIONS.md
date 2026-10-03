@@ -184,7 +184,8 @@ and `host/workbench.mk` the targets above. `make claude-shell` and
 1. **Names**: random, fixed for the session's life; no rename.
 2. **Clones**, full and independent (`--no-hardlinks`), not `git worktree`
    and not `--reference`. The organization's AGENTS.md section "Parallel
-   work uses worktrees" changes in every repository after this lands.
+   work uses worktrees" changes in every repository after this lands; it
+   is now "Parallel work uses separate checkouts".
 3. **Shared memory is a channel between sessions**: accepted. Isolation holds
    for files, processes and containers, not for what sessions tell each
    other; docs/LAYERS.md says so.
@@ -208,4 +209,4 @@ One pull request each, in this order:
    under the `default` profile. Dropped 2026-10-03: the credentials can
    only be shared with their whole folder (section 3).
 4. docs/ARCHITECTURE.md and docs/LAYERS.md, then the AGENTS.md change in
-   every repository.
+   every repository. Done 2026-10-03.
