@@ -62,19 +62,49 @@ image=""
 envs=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --net) net=true; shift ;;
-    --ro) ro=true; shift ;;
-    --engine) engine=true; shift ;;
-    --protected-rw) protect=false; shift ;;
-    --image) image="$2"; shift 2 ;;
-    --env) envs+=(-e "$2"); shift 2 ;;
-    --) shift; break ;;
-    -h | --help) sed -n '2,29s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    -*) echo "l2: unknown option $1" >&2; exit 2 ;;
-    *) break ;;
+  --net)
+    net=true
+    shift
+    ;;
+  --ro)
+    ro=true
+    shift
+    ;;
+  --engine)
+    engine=true
+    shift
+    ;;
+  --protected-rw)
+    protect=false
+    shift
+    ;;
+  --image)
+    image="$2"
+    shift 2
+    ;;
+  --env)
+    envs+=(-e "$2")
+    shift 2
+    ;;
+  --)
+    shift
+    break
+    ;;
+  -h | --help)
+    sed -n '2,29s/^# \{0,1\}//p' "$0"
+    exit 0
+    ;;
+  -*)
+    echo "l2: unknown option $1" >&2
+    exit 2
+    ;;
+  *) break ;;
   esac
 done
-[[ $# -gt 0 ]] || { echo "l2: no command given" >&2; exit 2; }
+[[ $# -gt 0 ]] || {
+  echo "l2: no command given" >&2
+  exit 2
+}
 
 mode=rw
 [[ "${ro}" = true ]] && mode=ro
@@ -111,7 +141,10 @@ if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   dockerfile="${top}/.devcontainer/l2/Dockerfile"
   if [[ -n "${image}" ]] && [[ -f "${dockerfile}" ]] && [[ "${image}" = "localhost/airlock-l2-${key//[^A-Za-z0-9_.-]/_}:local" ]]; then
     base_id="$(podman image inspect --format '{{.Id}}' "${L2_IMAGE:-}" 2>/dev/null || true)"
-    want="$({ cat "${dockerfile}"; echo "${base_id}"; } | sha256sum | cut -d' ' -f1)"
+    want="$({
+      cat "${dockerfile}"
+      echo "${base_id}"
+    } | sha256sum | cut -d' ' -f1)"
     have="$(podman image inspect --format '{{index .Labels "workbench.l2.dockerfile"}}' "${image}" 2>/dev/null || true)"
     if [[ "${want}" != "${have}" ]]; then
       echo "l2: building ${image} from .devcontainer/l2/Dockerfile, in the engine" >&2
@@ -196,8 +229,8 @@ after="$(snapshot)"
 if [[ "${before}" != "${after}" ]]; then
   echo "" >&2
   echo "l2: this run changed files the workbench or the host execute:" >&2
-  printf '%s\n' "${before}" "${after}" | sort | uniq -u \
-    | awk 'NF {print "  " $2}' | sort -u >&2
+  printf '%s\n' "${before}" "${after}" | sort | uniq -u |
+    awk 'NF {print "  " $2}' | sort -u >&2
   echo "l2: review them (git status, git diff) before anything runs them." >&2
   exit 3
 fi

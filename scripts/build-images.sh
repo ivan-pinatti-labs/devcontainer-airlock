@@ -82,7 +82,10 @@ build() {
   ref="${STAGING}/${PREFIX}-${name}:ci"
   [[ -n "${base}" ]] && args+=(--build-arg "BASE_IMAGE=${base}")
   case "${name}" in
-    workbench-*) dir=workbench; args+=(--target "${name#workbench-}") ;;
+  workbench-*)
+    dir=workbench
+    args+=(--target "${name#workbench-}")
+    ;;
   esac
   if [[ "${RUNTIME}" = docker ]]; then
     # buildx, for the SBOM and provenance attestations, which travel with the
@@ -115,7 +118,7 @@ scan() {
   # One category per image in code scanning, rather than six reports
   # overwriting each other under one.
   jq --arg id "trivy-${name}/" '.runs[].automationDetails = {id: $id}' \
-    "${SARIF_DIR}/${name}.sarif" > "${SARIF_DIR}/${name}.sarif.tmp"
+    "${SARIF_DIR}/${name}.sarif" >"${SARIF_DIR}/${name}.sarif.tmp"
   mv "${SARIF_DIR}/${name}.sarif.tmp" "${SARIF_DIR}/${name}.sarif"
   log "scanning ${name}: fixable critical vulnerabilities (blocking)"
   trivy --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 "${ref}"
