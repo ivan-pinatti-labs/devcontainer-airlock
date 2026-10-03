@@ -227,7 +227,7 @@ def main(argv):
     if argv == ["--list"]:
         for p in sorted(SETS_DIR.glob("*.toml")):
             print(f"{p.stem:12} {tomllib.loads(p.read_text()).get('description', '')}")
-        return 0
+        return
     cached = argv == ["--cached"]
     OUT.mkdir(parents=True, exist_ok=True)
     spaces = workspaces()
@@ -254,8 +254,7 @@ def main(argv):
         log(f"{ws} ({subnet}): {', '.join(sets)}")
     if not spaces:
         log("no workspaces registered; everything is refused")
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    main(sys.argv[1:])

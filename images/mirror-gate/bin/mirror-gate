@@ -57,6 +57,15 @@ def log(*a):
     print(*a, flush=True)
 
 
+def climbs(path):
+    """Whether a request path holds a . or .. segment, plain or percent
+    encoded, with or without ;parameters. The backend resolves those, so
+    /apt/ubuntu/../../repository/npm/... would reach the npm repository
+    past the npm filter."""
+    plain = urllib.parse.unquote(path.split("?", 1)[0]).replace("\\", "/")
+    return any(seg.split(";", 1)[0] in (".", "..") for seg in plain.split("/"))
+
+
 class Gate(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     registry = None  # set per registry port
@@ -156,6 +165,10 @@ class Gate(http.server.BaseHTTPRequestHandler):
 
     def route(self):
         path = self.path
+        if climbs(path):
+            log(f"REFUSE {path}: climbs out of its route")
+            self.reply(400, b"mirror-gate: a path may not climb out of its route\n")
+            return
         if self.registry:
             self.registry_request(path)
             return
@@ -280,7 +293,9 @@ class Gate(http.server.BaseHTTPRequestHandler):
                 body, removed = filters.pypi_simple(body, feed)
             elif want_body == "go":
                 body, removed = filters.go_list(body, module, feed)
-            elif want_body == "go-info" and kind in ("info", "latest"):
+            else:
+                # "go-info": the answer for a .info or @latest, the only kinds
+                # it is set for.
                 info = json.loads(body)
                 v = info.get("Version", version)
                 if feed.blocked(module, v):

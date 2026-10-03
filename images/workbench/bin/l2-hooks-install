@@ -1,16 +1,16 @@
 #!/bin/bash
-: '
-  Install git hooks that run pre-commit in L2 instead of in the workbench.
-
-  Replaces `pre-commit install`, which would run every hook right here, next
-  to the credentials. Installs one small script per hook type listed in the
-  repository .pre-commit-config.yaml (default_install_hook_types, or
-  pre-commit alone), each of which calls `l2`.
-
-  Exit status codes:
-    1  not in a git repository, no .pre-commit-config.yaml, or
-      core.hooksPath is set (git would ignore the installed hooks)
-'
+# Install git hooks that run pre-commit in L2 instead of in the workbench.
+#
+# Replaces `pre-commit install`, which would run every hook right here, next
+# to the credentials. Installs one small script per hook type listed in the
+# repository .pre-commit-config.yaml (default_install_hook_types, or
+# pre-commit alone), each of which calls `l2`.
+#
+# Exit status codes:
+#   1  not in a git repository, no .pre-commit-config.yaml, or
+#     core.hooksPath is set (git would ignore the installed hooks)
+#
+# WORKBENCH_SHARE stands in for /usr/local/share/workbench, for the tests.
 
 set -o errexit
 set -o nounset
@@ -18,7 +18,7 @@ set -o pipefail
 
 top="$(git rev-parse --show-toplevel)" || exit 1
 cd "${top}"
-[ -f .pre-commit-config.yaml ] || { echo "l2-hooks-install: no .pre-commit-config.yaml in ${top}" >&2; exit 1; }
+[[ -f .pre-commit-config.yaml ]] || { echo "l2-hooks-install: no .pre-commit-config.yaml in ${top}" >&2; exit 1; }
 if hp="$(git config --get core.hooksPath)"; then
   echo "l2-hooks-install: core.hooksPath is set to ${hp}; unset it first (git config --unset core.hooksPath)" >&2
   exit 1
@@ -46,11 +46,11 @@ PY
 hooks="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
 mkdir -p "${hooks}"
 for t in ${types}; do
-  if [ -f "${hooks}/${t}" ] && ! grep -q "Installed by l2-hooks-install" "${hooks}/${t}"; then
+  if [[ -f "${hooks}/${t}" ]] && ! grep -q "Installed by l2-hooks-install" "${hooks}/${t}"; then
     mv "${hooks}/${t}" "${hooks}/${t}.pre-l2"
     echo "kept the previous ${t} hook as ${t}.pre-l2, used outside the workbench"
   fi
-  sed "s/@HOOK_TYPE@/${t}/g" /usr/local/share/workbench/git-hook > "${hooks}/${t}"
+  sed "s/@HOOK_TYPE@/${t}/g" "${WORKBENCH_SHARE:-/usr/local/share/workbench}/git-hook" > "${hooks}/${t}"
   chmod 0755 "${hooks}/${t}"
   echo "installed ${t} hook (runs in L2)"
 done

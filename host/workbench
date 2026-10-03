@@ -1,5 +1,5 @@
 #!/bin/bash
-: '
+: <<'USAGE'
   Build, start and enter the workbench and its helpers. Runs on the host, and
   does nothing there but call podman. docs/LAYERS.md explains the layers.
 
@@ -178,7 +178,7 @@
   Exit status codes:
     1  a prerequisite is missing (the message says which)
     2  usage error
-'
+USAGE
 
 set -o errexit
 set -o nounset
@@ -346,10 +346,7 @@ lock_state() {
   mkdir -p "${RUN}/workbench"
   # One process holding the lock on its own descriptor; its sleeps get
   # none, so killing it releases the lock at once.
-  coproc LOCK_HOLDER {
-    exec sh -c 'exec 9>"$2"; flock -w 120 9 || exit 1; echo locked
-      while kill -0 "$1" 2>/dev/null; do sleep 1 9>&-; done' sh "${owner}" "${LOCK_FILE}"
-  }
+  coproc LOCK_HOLDER { exec sh -c 'exec 9>"$2"; flock -w 120 9 || exit 1; echo locked; while kill -0 "$1" 2>/dev/null; do sleep 1 9>&-; done' sh "${owner}" "${LOCK_FILE}"; }
   LOCK_PID="${LOCK_HOLDER_PID}"
   fd="${LOCK_HOLDER[0]}"
   wfd="${LOCK_HOLDER[1]}"
@@ -569,8 +566,8 @@ ensure_net() { create_net "$(net_name "$1")"; }
 create_net() {
   local net="$1" used n
   podman network exists "${net}" && return
-  used="$(podman network ls --format '{{.Name}}' \
-    | xargs -r podman network inspect --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | tr '\n' ' ')"
+  used="$(podman network ls --format '{{.Name}}' |
+    xargs -r podman network inspect --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | tr '\n' ' ')"
   for n in $(seq 1 254); do
     case " ${used} " in
       *" 10.203.${n}.0/24 "*) ;;
@@ -619,10 +616,8 @@ set_proxy_env() {
     [ "${2:-}" = engine ] && plain="http://${gate}:8081"
   fi
   # shellcheck disable=SC2054 # the commas are inside NO_PROXY's value
-  PROXY_ENV=(
-    -e HTTPS_PROXY="${url}" -e HTTP_PROXY="${plain}" -e NO_PROXY="${no}"
-    -e https_proxy="${url}" -e http_proxy="${plain}" -e no_proxy="${no}"
-  )
+  PROXY_ENV=(-e HTTPS_PROXY="${url}" -e HTTP_PROXY="${plain}" -e NO_PROXY="${no}")
+  PROXY_ENV+=(-e https_proxy="${url}" -e http_proxy="${plain}" -e no_proxy="${no}")
   if mirror_on; then PROXY_ENV+=(-e AIRLOCK_MIRROR="http://${gate}:8081"); fi
 }
 
@@ -778,8 +773,7 @@ pull_published() {
   podman tag "${ref}" "localhost/airlock-$1:${TAG}" || return 1
   mine="$(podman image inspect --format '{{.Digest}}' "${ref}")" || return 1
   [ -n "${mine}" ] || return 1
-  index="$(podman image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${ref}" \
-    | grep -F "${REGISTRY}/airlock-$1@" | grep -vF "${mine}" | head -n1 || true)"
+  index="$(podman image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${ref}" | grep -F "${REGISTRY}/airlock-$1@" | grep -vF "${mine}" | head -n1 || true)"
   echo "${index:-${REGISTRY}/airlock-$1@${mine}}"
 }
 
@@ -937,7 +931,7 @@ proxy_join() {
   case ",${sets}," in
     *,mirror,*)
       mirror_on || die "${ws} lists mirror in .devcontainer/egress-sets; the package mirror is off (WORKBENCH_MIRROR=${MIRROR})"
-      sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | grep -vx mirror | paste -sd, -)" ;;
+      sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | { grep -vx mirror || true; } | paste -sd, -)" ;;
   esac
   # Every name checked against the proxy image before anything changes, so
   # a bad one costs nothing: not an old proxy, not a registration, and never
@@ -1201,8 +1195,8 @@ start_engine() {
   for p in $(profiles "${ws}"); do
     case "${p}" in
       nested-network)
-        extra+=(--device /dev/net/tun --security-opt unmask=/proc/sys
-          -e CONTAINERS_CONF_OVERRIDE=/usr/local/share/devcontainer/containers-bridge-network.conf) ;;
+        extra+=(--device /dev/net/tun --security-opt unmask=/proc/sys)
+        extra+=(-e CONTAINERS_CONF_OVERRIDE=/usr/local/share/devcontainer/containers-bridge-network.conf) ;;
       nested-devices)
         extra+=(--device /dev/net/tun) ;;
     esac
@@ -1443,8 +1437,7 @@ voice_session() {
     echo "workbench: voice: no pactl on the host (PipeWire's or PulseAudio's tools), so this session has no microphone" >&2
     return 0
   fi
-  if ! sink="$(pactl load-module module-pipe-sink sink_name="airlock_voice_$$" file="${dir}/mic-$$" \
-    format=s16le rate=16000 channels=1)"; then
+  if ! sink="$(pactl load-module module-pipe-sink sink_name="airlock_voice_$$" file="${dir}/mic-$$" format=s16le rate=16000 channels=1)"; then
     echo "workbench: voice: PipeWire refused the microphone pipe, so this session has no microphone" >&2
     return 0
   fi
@@ -1457,7 +1450,7 @@ voice_session() {
   reader=$!
   trap 'kill "${reader}" 2>/dev/null; wait "${reader}" 2>/dev/null; pactl unload-module "${sink}" 2>/dev/null; rm -f "${dir}/mic-$$" "${ctl}"' EXIT
   podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
-    -e WORKBENCH_VOICE_CTL="/run/workbench-voice/ctl-$$" "$@"
+    -e WORKBENCH_VOICE_CTL="/run/workbench-voice/ctl-$$" "$@" || exit
   exit $?
 }
 
@@ -1588,8 +1581,7 @@ sync_l2() {
   for image in "${L2_IMAGE}" ${L2_EXTRA_IMAGES:-}; do
     mine="$(podman image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" || continue
     if engine_shares_store "${name}"; then
-      id="$(podman exec "${name}" podman images --format '{{.ReadOnly}} {{.ID}} {{.Repository}}:{{.Tag}}' \
-        | awk -v want="${image}" '$1 == "false" && $3 == want {print $2}')"
+      id="$(podman exec "${name}" podman images --format '{{.ReadOnly}} {{.ID}} {{.Repository}}:{{.Tag}}' | awk -v want="${image}" '$1 == "false" && $3 == want {print $2}')"
       if [ -n "${id}" ]; then
         podman exec "${name}" podman untag "${id}" "${image}" >/dev/null
       fi
@@ -1841,13 +1833,15 @@ cmd_session_stop() {
 }
 
 # One line per clone a session made: repository, branch, and what is not
-# pushed or committed yet.
+# pushed or committed yet, separated by the unit separator (0x1f). Not a
+# tab: read splits on runs of whitespace, so an empty branch would vanish
+# and the reason would be read as the branch.
 session_clones() {
   local r f
   while read -r r; do
     f="${r}/.claude/worktrees/$1"
     [ -e "${f}/.git" ] || continue
-    printf '%s\t%s\t%s\n' "$(basename "${r}")" "$(git -C "${f}" branch --show-current 2>/dev/null)" "$(clone_state "${f}")"
+    printf '%s\x1f%s\x1f%s\n' "$(basename "${r}")" "$(git -C "${f}" branch --show-current 2>/dev/null)" "$(clone_state "${f}")"
   done < <(session_repos "$2")
 }
 
@@ -1880,7 +1874,7 @@ cmd_session_list() {
     state=stopped
     running "$(wb_name "${S_WS}" "${S_AGENT}")" && state=running
     printf '%-18s %-18s %-8s %s\n' "${n}" "${S_AGENT}" "${state}" "${S_WS}"
-    while IFS=$'\t' read -r repo branch why; do
+    while IFS=$'\x1f' read -r repo branch why; do
       line="    ${repo}: ${branch:-no branch}"
       [ -z "${why}" ] || line="${line} (${why})"
       echo "${line}"

@@ -23,12 +23,16 @@
   // pins in images/base/Dockerfile), so enabledManagers below does name a
   // regex manager, as that repo's does.
   //
-  // enabledManagers below is an explicit list of exactly those four
+  // The test suite's hash locked tests/requirements.txt is the fifth
+  // surface, moved by pip-compile, and the images `make coverage` runs are
+  // annotated in the Makefile for custom.regex.
+  //
+  // enabledManagers below is an explicit list of exactly those five
   // managers, not left as a generic catch-all the way this template's
   // config was before this file was first aligned with the org's merge
   // pipeline (docs/MERGE_PIPELINE.md): this repo has nothing else for
   // Renovate to manage yet. A repo created from this template that grows
-  // real dependencies beyond these four surfaces (pip, a Terraform module
+  // real dependencies beyond these surfaces (a Terraform module
   // registry, ...) needs to widen enabledManagers, or drop
   // it entirely to fall back to config:recommended's own defaults, once it
   // has something else for Renovate to watch; see README.md's "Using this
@@ -114,13 +118,42 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n[A-Z_]+=[^:\\s]+:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
       ],
     },
+    {
+      // The container images `make coverage` runs, annotated the same way
+      // but written as make variables:
+      //   # renovate: datasource=docker depName=<image>
+      //   NAME ?= <image>:<tag>@sha256:<digest>
+      customType: "regex",
+      managerFilePatterns: ["/^Makefile$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+[A-Z_]+ \\?= \\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
+      ],
+    },
   ],
+
+  // tests/requirements.txt is a hash lock compiled from
+  // tests/requirements.in with `uv pip compile --generate-hashes`.
+  // pip-compile reads the lock's header, bumps the pin in the .in file and
+  // replays that command, so the hashes move with the version.
+  // `--exclude-newer=P7D` in the header is a rolling window, so a replay
+  // never resolves a release younger than seven days, transitive ones
+  // included, matching minimumReleaseAge.
+  "pip-compile": {
+    managerFilePatterns: ["/(^|/)requirements\\.txt$/"],
+  },
+
+  // config:recommended extends :ignoreModulesAndTests, whose ignorePaths
+  // include "**/tests/**", which would hide tests/requirements.txt from
+  // pip-compile. ignorePaths is not mergeable, so this replaces the
+  // inherited list; the two entries kept are Renovate's own bare default.
+  ignorePaths: ["**/node_modules/**", "**/bower_components/**"],
 
   enabledManagers: [
     "github-actions",
     "pre-commit",
     "dockerfile",
     "custom.regex",
+    "pip-compile",
   ],
 
   // Renovate's pre-commit manager ships disabled by its own default even
@@ -269,6 +302,25 @@
     {
       matchManagers: ["github-actions"],
       matchDepTypes: ["github-runner", "uses-with"],
+      enabled: false,
+    },
+
+    // pip-compile bumps the exact pins in tests/requirements.in and
+    // regenerates the hash locked tests/requirements.txt. One pull request
+    // per dependency, labeled python.
+    {
+      matchManagers: ["pip-compile"],
+      addLabels: ["python"],
+    },
+
+    // The images `make coverage` runs in the Makefile move by digest only. A
+    // tag change is not a pin bump: python 3.14 is the interpreter the images
+    // ship, node 24 the one the workbench ships, and kcov publishes nothing
+    // but `latest`.
+    {
+      matchManagers: ["custom.regex"],
+      matchFileNames: ["Makefile"],
+      matchUpdateTypes: ["major", "minor", "patch"],
       enabled: false,
     },
   ],

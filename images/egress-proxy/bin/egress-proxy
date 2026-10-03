@@ -1,15 +1,14 @@
 #!/bin/sh
-: '
-  The egress proxy container main process: generate the rules from the
-  registered workspaces and their sets, start squid, and refresh the
-  providers lists every EGRESS_REFRESH_SECONDS (default six hours),
-  reloading squid in place.
-'
+# The egress proxy container main process: generate the rules from the
+# registered workspaces and their sets, start squid, and refresh the
+# providers lists every EGRESS_REFRESH_SECONDS (default six hours),
+# reloading squid in place.
 set -eu
 # The resolvers first: egress-refresh and squid resolve through unbound,
 # which forwards encrypted, by EGRESS_DNS: doh (default) through
 # dnscrypt-proxy, or dot from unbound itself (unbound.conf). Ready once a
-# name resolves.
+# name resolves. forward.conf goes where egress-refresh writes squid's rules
+# (EGRESS_OUT, /run/egress unless a test says otherwise).
 dnscrypt_pid=""
 unbound_pid=""
 squid_pid=""
@@ -19,14 +18,14 @@ squid_pid=""
 trap 'kill ${squid_pid} ${unbound_pid} ${dnscrypt_pid} 2>/dev/null; exit 0' TERM INT
 case "${EGRESS_DNS:-doh}" in
   doh)
-    printf '%s\n' 'forward-zone:' '  name: "."' '  forward-addr: 127.0.0.1@5300' > /run/egress/forward.conf
+    printf '%s\n' 'forward-zone:' '  name: "."' '  forward-addr: 127.0.0.1@5300' > "${EGRESS_OUT:-/run/egress}/forward.conf"
     dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml &
     dnscrypt_pid=$!
     ;;
   dot)
     printf '%s\n' 'forward-zone:' '  name: "."' '  forward-tls-upstream: yes' \
       '  forward-addr: 1.1.1.2@853#security.cloudflare-dns.com' \
-      '  forward-addr: 1.0.0.2@853#security.cloudflare-dns.com' > /run/egress/forward.conf
+      '  forward-addr: 1.0.0.2@853#security.cloudflare-dns.com' > "${EGRESS_OUT:-/run/egress}/forward.conf"
     ;;
   *)
     echo "egress-proxy: EGRESS_DNS is '${EGRESS_DNS}'; use doh or dot" >&2

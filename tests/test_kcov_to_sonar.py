@@ -1,0 +1,177 @@
+"""Tests for scripts/kcov_to_sonar.py.
+
+The report fixtures are the shape kcov writes: a <class> per traced script,
+its filename relative to the directory kcov ran in, and a <line> with a hit
+count for every line kcov considers executable.
+"""
+
+from __future__ import annotations
+
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import kcov_to_sonar
+
+REPORT = """<?xml version="1.0" ?>
+<coverage line-rate="0.75" version="1.9">
+  <sources><source>/srv/repo/</source></sources>
+  <packages><package name="work"><classes>
+    <class name="a_sh" filename="rotate-logs.sh" line-rate="0.75">
+      <lines>
+        <line number="3" hits="1"/>
+        <line number="4" hits="0"/>
+        <line number="7" hits="2"/>
+      </lines>
+    </class>
+    <class name="t_sh" filename="tests/rotate-logs.test.sh" line-rate="1.0">
+      <lines><line number="1" hits="1"/></lines>
+    </class>
+  </classes></package></packages>
+</coverage>
+"""
+
+
+def write_report(tmp_path: Path, text: str = REPORT) -> Path:
+    path = tmp_path / "cobertura.xml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_read_cobertura_maps_each_line_to_covered(tmp_path):
+    files = kcov_to_sonar.read_cobertura(str(write_report(tmp_path)), "/srv/repo")
+    assert files["rotate-logs.sh"] == {3: True, 4: False, 7: True}
+    assert files["tests/rotate-logs.test.sh"] == {1: True}
+
+
+def test_read_cobertura_counts_a_line_once_it_ran_anywhere(tmp_path):
+    """A script kcov reports twice is covered where either report ran it."""
+    twice = REPORT.replace(
+        '<class name="t_sh"',
+        '<class name="b_sh" filename="rotate-logs.sh"><lines>'
+        '<line number="4" hits="3"/><line number="3" hits="0"/></lines></class>'
+        '<class name="t_sh"',
+    )
+    files = kcov_to_sonar.read_cobertura(
+        str(write_report(tmp_path, twice)), "/srv/repo"
+    )
+    assert files["rotate-logs.sh"] == {3: True, 4: True, 7: True}
+
+
+def test_read_cobertura_makes_absolute_names_relative_to_the_root(tmp_path):
+    """kcov writes absolute names when it is given a file to include, with
+    `/` as the source. A file outside the root keeps its absolute name."""
+    absolute = REPORT.replace("<source>/srv/repo/</source>", "<source>/</source>")
+    absolute = absolute.replace(
+        'filename="rotate-logs.sh"', 'filename="/srv/repo/rotate-logs.sh"'
+    )
+    absolute = absolute.replace(
+        'filename="tests/rotate-logs.test.sh"', 'filename="/usr/lib/helper.sh"'
+    )
+    files = kcov_to_sonar.read_cobertura(
+        str(write_report(tmp_path, absolute)), "/srv/repo"
+    )
+    assert sorted(files) == ["/usr/lib/helper.sh", "rotate-logs.sh"]
+
+
+def test_read_cobertura_without_sources_reads_names_from_the_filesystem_root(tmp_path):
+    bare = REPORT.replace("<sources><source>/srv/repo/</source></sources>", "")
+    bare = bare.replace(
+        'filename="rotate-logs.sh"', 'filename="srv/repo/rotate-logs.sh"'
+    )
+    files = kcov_to_sonar.read_cobertura(str(write_report(tmp_path, bare)), "/srv/repo")
+    assert "rotate-logs.sh" in files
+
+
+def test_read_cobertura_reads_coverage_py_relative_names(tmp_path):
+    """coverage.py with relative_files writes an empty source, then "."."""
+    rel = REPORT.replace(
+        "<sources><source>/srv/repo/</source></sources>",
+        "<sources><source></source><source>.</source></sources>",
+    )
+    files = kcov_to_sonar.read_cobertura(str(write_report(tmp_path, rel)), "/srv/repo")
+    assert sorted(files) == ["rotate-logs.sh", "tests/rotate-logs.test.sh"]
+
+
+def test_read_cobertura_counts_a_rendered_file_for_its_template(tmp_path):
+    """A test renders a template under kcov-rendered, at the template's own
+    path; its lines count for the template, with any the template has."""
+    rendered = REPORT.replace("<source>/srv/repo/</source>", "<source>/</source>")
+    rendered = rendered.replace(
+        'filename="tests/rotate-logs.test.sh"',
+        'filename="tmp/tmp.x/kcov-rendered/a/kcov-rendered/rotate-logs.sh"',
+    )
+    rendered = rendered.replace(
+        'filename="rotate-logs.sh"', 'filename="/srv/repo/rotate-logs.sh"'
+    )
+    rendered = rendered.replace(
+        '<line number="1" hits="1"/>', '<line number="4" hits="1"/>'
+    )
+    files = kcov_to_sonar.read_cobertura(
+        str(write_report(tmp_path, rendered)), "/srv/repo"
+    )
+    assert files == {"rotate-logs.sh": {3: True, 4: True, 7: True}}
+
+
+def test_main_reads_several_reports_as_one(tmp_path, capsys):
+    first = write_report(tmp_path)
+    second = tmp_path / "second.xml"
+    second.write_text(REPORT.replace('number="4" hits="0"', 'number="4" hits="1"'))
+    out = tmp_path / "shell.xml"
+    argv = ["/srv/repo", f"{first},{second}", str(out), "rotate-logs.sh"]
+    assert kcov_to_sonar.main(argv) == 0
+    assert "Coverage 100%" in capsys.readouterr().out
+
+
+def test_to_generic_writes_sonar_format(tmp_path):
+    out = tmp_path / "shell.xml"
+    kcov_to_sonar.to_generic({"b.sh": {2: True}, "a.sh": {9: False, 1: True}}).write(
+        out
+    )
+    root = ET.parse(out).getroot()  # noqa: S314 (the file this test just wrote)
+    assert root.tag == "coverage"
+    assert root.get("version") == "1"
+    assert [f.get("path") for f in root] == ["a.sh", "b.sh"]
+    assert [(line.get("lineNumber"), line.get("covered")) for line in root[0]] == [
+        ("1", "true"),
+        ("9", "false"),
+    ]
+
+
+def test_shortfalls_names_missed_lines_and_untested_scripts():
+    files = {"a.sh": {1: True, 2: False, 5: False}, "b.sh": {1: True}}
+    assert kcov_to_sonar.shortfalls(files, ["a.sh", "b.sh", "c.sh"]) == [
+        "a.sh: lines not covered: 2, 5",
+        "c.sh: not in the report, so no test ran it",
+    ]
+
+
+def test_main_passes_at_100_percent(tmp_path, capsys):
+    report = write_report(tmp_path, REPORT.replace('hits="0"', 'hits="1"'))
+    out = tmp_path / "shell.xml"
+    assert (
+        kcov_to_sonar.main(["/srv/repo", str(report), str(out), "rotate-logs.sh"]) == 0
+    )
+    assert "Coverage 100%: rotate-logs.sh" in capsys.readouterr().out
+    written = ET.parse(out).getroot()  # noqa: S314 (the file main just wrote)
+    assert written.find("file").get("path") == "rotate-logs.sh"
+
+
+def test_main_fails_below_100_percent_but_still_writes_the_report(tmp_path, capsys):
+    out = tmp_path / "shell.xml"
+    assert (
+        kcov_to_sonar.main(
+            ["/srv/repo", str(write_report(tmp_path)), str(out), "rotate-logs.sh"]
+        )
+        == 1
+    )
+    assert "rotate-logs.sh: lines not covered: 4" in capsys.readouterr().err
+    assert out.exists()
+
+
+def test_main_refuses_too_few_arguments(capsys):
+    assert kcov_to_sonar.main(["/srv/repo", "report.xml", "out.xml"]) == 2
+    assert capsys.readouterr().err.startswith("Usage:")

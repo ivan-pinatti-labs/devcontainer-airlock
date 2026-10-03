@@ -23,6 +23,9 @@ allowed_paths:
   - images/gh-broker/Dockerfile
   - images/egress-proxy/Dockerfile
   - images/mirror-gate/Dockerfile
+  - tests/requirements.in
+  - tests/requirements.txt
+  - Makefile
 
 # The coding agent CLI versions are annotated ARGs in the workbench's
 # Dockerfile.
@@ -34,6 +37,18 @@ arg_sources:
 rules:
   - path: "*Dockerfile"
     grammars: [docker_image_pin, arg_pin]
+  # The test suite's exact pins, and the hash lock compiled from them.
+  # hash_locked_requirements grades the lock as a whole: same packages, only
+  # versions and hashes moved, and every new hash one PyPI publishes for that
+  # release. A bump that pulls in a new package waits for a person.
+  - path: tests/requirements.in
+    grammars: [requirement_line]
+  - path: tests/requirements.txt
+    grammars: [hash_locked_requirements]
+  # The images `make coverage` runs, pinned by digest; Renovate's packageRules
+  # keep their tags fixed, so only the digest ever moves.
+  - path: Makefile
+    grammars: [digest]
 
 # Block scalars are passed through on every path here, not only workflows.
 default_grammars:

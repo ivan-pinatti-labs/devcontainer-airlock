@@ -5,6 +5,10 @@ pre-commit.log
 __pycache__/
 *.pyc
 
+# Reports `make coverage` writes
+coverage/
+.coverage
+
 # Editors
 .idea/
 .vscode/*

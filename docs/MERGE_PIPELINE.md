@@ -5,7 +5,8 @@
 What happens between opening a pull request against this repository and it
 landing on `main`. Ported from `ivan-pinatti-labs/rsync-crypt`'s document of
 the same name, trimmed to what this repository actually has: no app code and
-no test suite, so there is no `Tests` context here, unlike that repository.
+no `Tests` context, unlike that repository (its test suite runs under
+`make coverage`, in the `SonarQube` job).
 It does have a Dockerfile, `images/base/Dockerfile`, which is the whole point
 of the repository; an earlier version of this document claimed otherwise, and
 the pin-only check was written to match that claim, which is
@@ -47,8 +48,9 @@ simply drops.
 
 `SonarQube`, the job in `sonarqube.yml`, runs on every pull request and on
 every push to `main`, and fails when SonarQube Cloud's quality gate fails
-(`sonar.qualitygate.wait=true`). It is not a required context yet, and
-`bot-auto-merge.yml` does not wait for it. A later change makes it required
+(`sonar.qualitygate.wait=true`) or when `make coverage` finds the Python, the
+JavaScript or a listed shell script below 100% (see the Makefile). It is not
+a required context yet, and `bot-auto-merge.yml` does not wait for it. A later change makes it required
 and removes `codeql.yml`, which it replaces. On `merge_group` it passes
 without analyzing, because the pull request's head was already analyzed and
 gated and SonarQube Cloud has no pull request to attach a queue commit to;

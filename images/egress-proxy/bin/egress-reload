@@ -1,22 +1,20 @@
 #!/bin/sh
-: '
-  Rebuild the rules and reload squid in place, keeping the tunnels already
-  open. host/workbench runs it (podman exec) when a workspace comes or goes;
-  the main process runs it with --fetch every few hours, to ask the providers
-  again. One at a time: a second caller waits for the first.
-
-  Usage:
-    egress-reload [--fetch]
-
-  Exit status codes:
-    0  squid runs the new rules
-    1  the rules could not be built (the message says why); squid keeps the
-      ones it had
-'
+# Rebuild the rules and reload squid in place, keeping the tunnels already
+# open. host/workbench runs it (podman exec) when a workspace comes or goes;
+# the main process runs it with --fetch every few hours, to ask the providers
+# again. One at a time: a second caller waits for the first.
+#
+# Usage:
+#   egress-reload [--fetch]
+#
+# Exit status codes:
+#   0  squid runs the new rules
+#   1  the rules could not be built (the message says why); squid keeps the
+#     ones it had
 set -eu
 mode=--cached
 if [ "${1:-}" = --fetch ]; then mode=""; fi
-exec 9>/run/egress/reload.lock
+exec 9>"${EGRESS_OUT:-/run/egress}/reload.lock"
 flock 9
 # shellcheck disable=SC2086 # mode is empty or one word
 egress-refresh ${mode} || exit 1

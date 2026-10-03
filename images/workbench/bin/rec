@@ -1,37 +1,38 @@
 #!/bin/bash
-: '
-  rec for Claude Code voice mode in a workbench: SoX recording from the
-  microphone pipe of a voice session instead of an audio device. The
-  workbench has no audio device and no way to the host audio server.
-  A session started with voice (make claude, the default) gets two named
-  pipes from the host, named only to that session: WORKBENCH_VOICE_MIC,
-  which PipeWire writes the microphone into (16 kHz, 16 bit, mono), and
-  WORKBENCH_VOICE_CTL, on which this writes "start" when it begins and
-  "stop" when it ends. Claude Code runs rec only while space is held, so the
-  host routes the microphone only then. docs/LAYERS.md, "Voice".
-
-  Takes what SoX rec takes after its input: the output format, the output
-  file and the effects, as Claude Code passes them. Without a voice session
-  it fails, `rec --version` included, so Claude Code says there is no
-  microphone rather than recording nothing.
-'
+# rec for Claude Code voice mode in a workbench: SoX recording from the
+# microphone pipe of a voice session instead of an audio device. The
+# workbench has no audio device and no way to the host audio server.
+# A session started with voice (make claude, the default) gets two named
+# pipes from the host, named only to that session: WORKBENCH_VOICE_MIC,
+# which PipeWire writes the microphone into (16 kHz, 16 bit, mono), and
+# WORKBENCH_VOICE_CTL, on which this writes "start" when it begins and
+# "stop" when it ends. Claude Code runs rec only while space is held, so the
+# host routes the microphone only then. docs/LAYERS.md, "Voice".
+#
+# Takes what SoX rec takes after its input: the output format, the output
+# file and the effects, as Claude Code passes them. Without a voice session
+# it fails, `rec --version` included, so Claude Code says there is no
+# microphone rather than recording nothing.
+#
+# REC_SOX and WORKBENCH_VOICE_DIR stand in for /usr/bin/sox and
+# /run/workbench-voice, for the tests.
 set -o errexit
 set -o nounset
 
+sox="${REC_SOX:-/usr/bin/sox}"
+voice="${WORKBENCH_VOICE_DIR:-/run/workbench-voice}"
 mic="${WORKBENCH_VOICE_MIC:-}"
 ctl="${WORKBENCH_VOICE_CTL:-}"
-case "${mic}:${ctl}" in
-  /run/workbench-voice/*:/run/workbench-voice/*) ;;
-  *)
-    echo "rec: no microphone in this session; start it with make claude (make claude-plain has none; docs/LAYERS.md, Voice)" >&2
-    exit 1 ;;
-esac
-if [ ! -p "${mic}" ] || [ ! -p "${ctl}" ]; then
+if [[ "${mic}" != "${voice}"/* || "${ctl}" != "${voice}"/* ]]; then
+  echo "rec: no microphone in this session; start it with make claude (make claude-plain has none; docs/LAYERS.md, Voice)" >&2
+  exit 1
+fi
+if [[ ! -p "${mic}" ]] || [[ ! -p "${ctl}" ]]; then
   echo "rec: the microphone pipes of this session are gone; its voice session has ended" >&2
   exit 1
 fi
 case "${1:-}" in
-  --version | -h | --help) exec /usr/bin/sox "$@" ;;
+  --version | -h | --help) exec "${sox}" "$@" ;;
 esac
 
 # One word to the host. Opened without waiting, so a host end that has gone
@@ -48,8 +49,8 @@ say() {
 # and cut the microphone off, so this recording is refused instead. The
 # path is matched literally (pgrep takes a regular expression).
 mic_re="$(printf '%s' "${mic}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
-old_sox="$(pgrep -f -- "^/usr/bin/sox .* ${mic_re} " || true)"
-if [ -n "${old_sox}" ]; then
+old_sox="$(pgrep -f -- "^${sox} .* ${mic_re} " || true)"
+if [[ -n "${old_sox}" ]]; then
   # shellcheck disable=SC2086 # one pid per word
   old_rec="$(ps -o ppid= -p "$(echo ${old_sox} | tr ' ' ,)" || true)"
   # shellcheck disable=SC2086
@@ -58,11 +59,11 @@ if [ -n "${old_sox}" ]; then
   while true; do
     alive=""
     for p in ${old_rec}; do
-      if [ "${p}" != "$$" ] && kill -0 "${p}" 2>/dev/null; then alive=1; fi
+      if [[ "${p}" != "$$" ]] && kill -0 "${p}" 2>/dev/null; then alive=1; fi
     done
-    [ -n "${alive}" ] || break
+    [[ -n "${alive}" ]] || break
     tries=$((tries + 1))
-    if [ "${tries}" -gt 10 ]; then
+    if [[ "${tries}" -gt 10 ]]; then
       echo "rec: an earlier recording of this session is still stopping; try again" >&2
       exit 1
     fi
@@ -87,7 +88,7 @@ done
 # never return and SoX would hang on the pipe.
 pid=""
 finish() {
-  if [ -n "${pid}" ]; then
+  if [[ -n "${pid}" ]]; then
     kill -TERM "${pid}" 2>/dev/null || true
     for _ in 1 2 3 4 5; do
       kill -0 "${pid}" 2>/dev/null || break
@@ -101,7 +102,7 @@ trap 'finish; exit 143' TERM
 trap 'finish; exit 130' INT
 trap 'finish; exit 129' HUP
 say start
-/usr/bin/sox -t raw -r 16000 -e signed -b 16 -c 1 "${mic}" "$@" &
+"${sox}" -t raw -r 16000 -e signed -b 16 -c 1 "${mic}" "$@" &
 pid=$!
 set +o errexit
 wait "${pid}"

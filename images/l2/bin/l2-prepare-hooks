@@ -35,7 +35,7 @@ def main():
     config = yaml.safe_load(open(CONFIG)) or {}
     store = os.path.join(os.environ.get("PRE_COMMIT_HOME") or os.path.expanduser("~/.cache/pre-commit"), "db.db")
     if not os.path.exists(store):
-        return 0
+        return
     db = sqlite3.connect(store)
     for repo in config.get("repos", []):
         ids = [h.get("id", "") for h in repo.get("hooks", [])]
@@ -59,8 +59,7 @@ def main():
             nested = os.path.join(row[0], "checklists", f"{i}.yaml")
             if os.path.exists(nested):
                 run(["install-hooks", "--config", nested])
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

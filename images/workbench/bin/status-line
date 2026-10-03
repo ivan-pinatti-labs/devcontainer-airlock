@@ -1,15 +1,13 @@
 #!/bin/bash
-: '
-  status-line
-
-  Claude Code status line (managed settings): the workbench this session
-  runs in, so a glance tells one terminal from another. Prints, from
-  AIRLOCK_WORKBENCH and the JSON Claude Code passes on stdin:
-
-    workbench-claude-s-brave-otter | ~/src/pdf-sign-linux/.../brave-otter (feat/x) | Opus, high effort
-
-  It never fails the status line: anything missing is left out.
-'
+# status-line
+#
+# Claude Code status line (managed settings): the workbench this session
+# runs in, so a glance tells one terminal from another. Prints, from
+# AIRLOCK_WORKBENCH and the JSON Claude Code passes on stdin:
+#
+#   workbench-claude-s-brave-otter | ~/src/pdf-sign-linux/.../brave-otter (feat/x) | Opus, high effort
+#
+# It never fails the status line: anything missing is left out.
 set -u
 
 input="$(cat)"

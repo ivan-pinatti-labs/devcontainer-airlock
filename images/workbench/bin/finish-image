@@ -1,21 +1,20 @@
 #!/bin/sh
-: '
-  Run last by each agent stage of the workbench Dockerfile, as root.
-
-  Merges that agent editor settings (the file given) over the shared machine
-  settings, then checks that everything under the dev account home belongs
-  to it, apart from the extensions link and the sticky directory holding it:
-  a root owned leftover from a build step (a cache, a tool first run) would
-  break that tool for dev at run time.
-
-  Exit status codes:
-    1    a root owned path is left under /home/dev (listed)
-'
+# Run last by each agent stage of the workbench Dockerfile, as root.
+#
+# Merges that agent editor settings (the file given) over the shared machine
+# settings, then checks that everything under the dev account home belongs
+# to it, apart from the extensions link and the sticky directory holding it:
+# a root owned leftover from a build step (a cache, a tool first run) would
+# break that tool for dev at run time.
+#
+# Exit status codes:
+#   1    a root owned path is left under /home/dev (listed)
 set -eu
 settings=/home/dev/.vscode-server/data/Machine/settings.json
-jq -s '.[0] * .[1]' "${settings}" "$1" > /tmp/settings.json
-install -o 1000 -g 1000 -m 0644 /tmp/settings.json "${settings}"
-rm /tmp/settings.json
+merged="${TMPDIR:-/tmp}/settings.json"
+jq -s '.[0] * .[1]' "${settings}" "$1" > "${merged}"
+install -o 1000 -g 1000 -m 0644 "${merged}" "${settings}"
+rm "${merged}"
 left="$(find /home/dev ! -user dev ! -path /home/dev/.vscode-server ! -path /home/dev/.vscode-server/extensions)"
 if [ -n "${left}" ]; then
   echo "root owned paths under /home/dev:" >&2
