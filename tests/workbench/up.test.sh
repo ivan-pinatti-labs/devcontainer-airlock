@@ -30,7 +30,7 @@ assert "into known_hosts" grep -q "github.com ssh-ed25519 KEY" "${XDG_RUNTIME_DI
 check "the ssh-agent holds the key, with no network" 0 calls \
   "podman run -d --name devcontainer-ssh-agent --network=none --cap-drop=all --read-only --security-opt no-new-privileges --userns=keep-id --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/sock:Z -v ${HOME}/.ssh/devcontainer/id_ed25519:/key/id:ro,Z --entrypoint ssh-agent localhost/airlock-workbench-claude:local -D -a /sock/agent.sock"
 check "the proxy starts with no workspace yet" 0 calls \
-  "podman run -d --name egress-proxy --network podman --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /run/egress:U --tmpfs /run/squid:U --tmpfs /tmp -v egress-cache:/var/lib/egress:U -v ${run_dir}/egress:/etc/egress/workspaces:ro,Z localhost/airlock-egress-proxy:local"
+  "podman run -d --name egress-proxy --network podman --cap-drop=all --security-opt no-new-privileges --read-only --dns 127.0.0.1 --sysctl net.ipv4.ip_unprivileged_port_start=53 -e EGRESS_DNS=doh --tmpfs /run/egress:U --tmpfs /run/squid:U --tmpfs /tmp -v egress-cache:/var/lib/egress:U -v ${run_dir}/egress:/etc/egress/workspaces:ro,Z localhost/airlock-egress-proxy:local"
 check "its cache volume is made" 0 calls "podman volume create egress-cache"
 check "the sets are checked against the proxy image" 0 calls \
   "podman run --rm --network none localhost/airlock-egress-proxy:local egress-refresh --list"
@@ -68,15 +68,15 @@ check "the engine is on the workspace network, through the gate for plain http" 
   "podman run -d --name l2-engine-app --label workbench.engine=${ws} --userns=keep-id:uid=1000,gid=1000 --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 --device /dev/fuse -v ${run_dir}/mirror/app.registries.conf:/etc/containers/registries.conf.d/50-airlock-mirror.conf:ro,Z --network workbench-net-app -e HTTPS_PROXY=http://10.203.1.2:8888 -e HTTP_PROXY=http://10.203.1.254:8081 -e NO_PROXY=localhost,127.0.0.1,10.203.1.254 -e https_proxy=http://10.203.1.2:8888 -e http_proxy=http://10.203.1.254:8081 -e no_proxy=localhost,127.0.0.1,10.203.1.254 -e AIRLOCK_MIRROR=http://10.203.1.254:8081 -v ${ws}:${ws}:Z -v ${run_dir}/app:/run/l2-engine:Z -v l2-engine-app:/home/dev/.local/share/containers -v l2-store:/var/lib/airlock/l2-store:ro localhost/airlock-l2-engine:local"
 refute "an engine sharing the store gets no copy of its own" "podman exec -i l2-engine-app podman load"
 check "each workbench is on the workspace network, plain http through the proxy" 0 calls \
-  "podman run -d --name workbench-claude-app --label workbench.workspace=${ws} --label workbench.agent=claude --tz=local --userns=keep-id:uid=1000,gid=1000 --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 --network workbench-net-app -e HTTPS_PROXY=http://10.203.1.2:8888 -e HTTP_PROXY=http://10.203.1.2:8888 -e NO_PROXY=localhost,127.0.0.1,10.203.1.254"
+  "podman run -d --name workbench-claude-app --label workbench.workspace=${ws} --label workbench.agent=claude --label workbench.session= --tz=local --userns=keep-id:uid=1000,gid=1000 --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 --network workbench-net-app -e HTTPS_PROXY=http://10.203.1.2:8888 -e HTTP_PROXY=http://10.203.1.2:8888 -e NO_PROXY=localhost,127.0.0.1,10.203.1.254"
 check "with your git identity" 0 calls \
   "-e GIT_AUTHOR_NAME=A Dev -e GIT_AUTHOR_EMAIL=dev@example.com -e GIT_COMMITTER_NAME=A Dev -e GIT_COMMITTER_EMAIL=dev@example.com -e SSH_AUTH_SOCK=/run/devcontainer-ssh/agent.sock"
 check "git over ssh through the proxy" 0 calls \
   "ProxyCommand='socat - PROXY:10.203.1.2:%h:%p,proxyport=8888'"
 check "the claude login folder and the sockets" 0 calls \
-  "-v ${ws}:${ws}:Z -v ${HOME}/.local/share/workbench/claude:/home/dev/.claude:Z -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine --label workbench.voice=ready -v ${run_dir}/voice/workbench-claude-app:/run/workbench-voice:ro,Z -w ${ws} --entrypoint catatonit localhost/airlock-workbench-claude:local -- workbench-init"
+  "-v ${ws}:${ws}:Z -v ${HOME}/.local/share/workbench/claude:/home/dev/.claude:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-claude-app -e AIRLOCK_HOST_HOME=${HOME} --hostname workbench-claude-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine --label workbench.voice=ready -v ${run_dir}/voice/workbench-claude-app:/run/workbench-voice:ro,Z -w ${ws} --entrypoint catatonit localhost/airlock-workbench-claude:local -- workbench-init"
 check "codex has its own login folder and no voice folder" 0 calls \
-  "-v ${HOME}/.local/share/workbench/codex:/home/dev/.codex:Z -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine -w ${ws} --entrypoint catatonit localhost/airlock-workbench-codex:local -- workbench-init"
+  "-v ${HOME}/.local/share/workbench/codex:/home/dev/.codex:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-codex-app -e AIRLOCK_HOST_HOME=${HOME} --hostname workbench-codex-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine -w ${ws} --entrypoint catatonit localhost/airlock-workbench-codex:local -- workbench-init"
 
 # Everything is running now: a second up starts nothing.
 run "${wb}" up

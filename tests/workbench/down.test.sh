@@ -47,14 +47,14 @@ unrule
 
 run "${wb}" down "${other}"
 check "down from anywhere, of the workspace named" 0 out \
-  "workbench: no workspace left, so the shared services stopped too; the next up starts them"
+  "workbench: nothing else running, so the shared services stopped too; the next start brings them back"
 check "the shared services stop with the last one" 0 calls \
   "podman rm -f -t 5 mirror-gate mirror-nexus egress-proxy gh-broker devcontainer-ssh-agent"
 check "and the mirror's network" 0 calls "podman network rm workbench-net-airlock-mirror"
 assert "and the mirror's registration" test ! -e "${egress}/airlock-mirror.conf"
 
 run "${wb}" down "${other}"
-check "down again finds nothing to stop" 0 out "workbench: no workspace left"
+check "down again finds nothing to stop" 0 out "workbench: nothing else running"
 refute "the proxy is not running, so nothing to reload" "podman exec"
 
 # Another host/workbench holds the state lock.

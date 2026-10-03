@@ -132,7 +132,7 @@ check "a subnet in use is skipped" 0 calls "podman network create --internal --d
 check "the heap is set" 0 calls "-Xms2048m -Xmx2048m -XX:MaxDirectMemorySize=2048m"
 check "the minimum age reaches the gate" 0 calls "-e MIN_AGE_DAYS=7 localhost/airlock-mirror-gate:dev"
 check "an account's workbench has a login of its own" 0 calls \
-  "--label workbench.agent=claude-personal --tz=America/Toronto"
+  "--label workbench.agent=claude-personal --label workbench.session= --tz=America/Toronto"
 check "mounted as the agent's" 0 calls "-v ${HOME}/.local/share/workbench/claude-personal:/home/dev/.claude:Z"
 check "it runs that agent's image" 0 calls "--entrypoint catatonit localhost/airlock-workbench-claude:dev -- workbench-init"
 unset WORKBENCH_TAG WORKBENCH_TZ WORKBENCH_MIRROR_HEAP WORKBENCH_MIRROR_MIN_AGE

@@ -30,7 +30,9 @@
 # git answers from the files in the scratch directory: a checkout is a
 # folder with .git (a directory, or a file naming the git directory as a
 # linked worktree's does), and what a remote's default branch holds is
-# under GIT_DIR/remote-tree/REF/PATH.
+# under GIT_DIR/remote-tree/REF/PATH. In GIT_DIR, `branch` holds the
+# current branch, `changes` what status prints, `ahead` the commits on
+# no remote, and `status-fails` or `log-fails` make those commands fail.
 
 # shellcheck source=tests/shell-test-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../shell-test-lib.sh"
@@ -150,6 +152,9 @@ case "$*" in
   "cat-file -e "*) [ -f "${common}/remote-tree/${3%%:*}/${3#*:}" ] ;;
   "show "*) cat "${common}/remote-tree/${2%%:*}/${2#*:}" 2>/dev/null || exit 128 ;;
   ls-files) cd "${top}" && find . -path ./.git -prune -o -type f -print | sed "s|^\./||" | sort ;;
+  "status --porcelain") [ ! -f "${gd}/status-fails" ] || exit 1; cat "${gd}/changes" 2>/dev/null || true ;;
+  "log --branches --not --remotes --oneline") [ ! -f "${gd}/log-fails" ] || exit 1; cat "${gd}/ahead" 2>/dev/null || true ;;
+  "branch --show-current") cat "${gd}/branch" 2>/dev/null || true ;;
   *) exit 1 ;;
 esac'
 
@@ -322,7 +327,10 @@ case "$1" in
     case "$2" in
       exists) [ -f "${S}/vol/$3" ] ;;
       create) touch "${S}/vol/$3" ;;
+      rm) [ -f "${S}/vol/$3" ] || exit 1; rm "${S}/vol/$3" ;;
     esac ;;
+  # In the user namespace, which here is the scratch directory's own.
+  unshare) shift; "$@" ;;
   secret) [ -f "${S}/secret/$3" ] ;;
   image)
     f="${S}/img/$(key "${*: -1}")"

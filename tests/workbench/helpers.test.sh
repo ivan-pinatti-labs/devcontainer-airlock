@@ -57,10 +57,19 @@ run "${wb}" restart-proxy
 check "a proxy that stops at once is reported" 1 err "workbench: the egress proxy did not start; podman logs egress-proxy"
 check "with its last log lines" 1 err "squid: starting"
 rm "${PODMAN_STATE}/dies/egress-proxy"
+# One that accepts connections only on the third look is waited for. (One
+# that never does is given two minutes by the clock, too long to wait for
+# here.)
+# shellcheck disable=SC2016 # expanded when the rule runs
+rule 'logs egress-proxy' '
+n="$(cat "${PODMAN_STATE}/looks" 2>/dev/null || echo 0)"
+echo $((n + 1)) >"${PODMAN_STATE}/looks"
+[ "${n}" -lt 2 ] || echo "Accepting HTTP Socket connections"'
 run "${wb}" restart-proxy
-check "so is one that never accepts connections" 1 err "workbench: the egress proxy did not start"
-assert "after trying a hundred times" test "$(grep -c 'podman logs egress-proxy' "${STUB_LOG}")" -eq 101
-rm "${PODMAN_STATE}/start-logs/egress-proxy"
+check "a proxy slow to accept connections is waited for" 0 out "workbench: egress proxy restarted"
+assert "looking again until it does" test "$(grep -c 'podman logs egress-proxy' "${STUB_LOG}")" -eq 3
+unrule
+rm "${PODMAN_STATE}/start-logs/egress-proxy" "${PODMAN_STATE}/looks"
 run "${wb}" restart-proxy
 check "with no workspace, it serves nothing yet" 0 out "workbench: egress proxy restarted, serving: nothing yet"
 
