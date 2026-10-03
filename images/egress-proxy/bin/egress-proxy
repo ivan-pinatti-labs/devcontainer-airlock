@@ -17,20 +17,20 @@ squid_pid=""
 # shellcheck disable=SC2086 # an empty process id drops out
 trap 'kill ${squid_pid} ${unbound_pid} ${dnscrypt_pid} 2>/dev/null; exit 0' TERM INT
 case "${EGRESS_DNS:-doh}" in
-  doh)
-    printf '%s\n' 'forward-zone:' '  name: "."' '  forward-addr: 127.0.0.1@5300' > "${EGRESS_OUT:-/run/egress}/forward.conf"
-    dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml &
-    dnscrypt_pid=$!
-    ;;
-  dot)
-    printf '%s\n' 'forward-zone:' '  name: "."' '  forward-tls-upstream: yes' \
-      '  forward-addr: 1.1.1.2@853#security.cloudflare-dns.com' \
-      '  forward-addr: 1.0.0.2@853#security.cloudflare-dns.com' > "${EGRESS_OUT:-/run/egress}/forward.conf"
-    ;;
-  *)
-    echo "egress-proxy: EGRESS_DNS is '${EGRESS_DNS}'; use doh or dot" >&2
-    exit 2
-    ;;
+doh)
+  printf '%s\n' 'forward-zone:' '  name: "."' '  forward-addr: 127.0.0.1@5300' >"${EGRESS_OUT:-/run/egress}/forward.conf"
+  dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml &
+  dnscrypt_pid=$!
+  ;;
+dot)
+  printf '%s\n' 'forward-zone:' '  name: "."' '  forward-tls-upstream: yes' \
+    '  forward-addr: 1.1.1.2@853#security.cloudflare-dns.com' \
+    '  forward-addr: 1.0.0.2@853#security.cloudflare-dns.com' >"${EGRESS_OUT:-/run/egress}/forward.conf"
+  ;;
+*)
+  echo "egress-proxy: EGRESS_DNS is '${EGRESS_DNS}'; use doh or dot" >&2
+  exit 2
+  ;;
 esac
 unbound -d -c /etc/unbound/unbound.conf &
 unbound_pid=$!
@@ -39,8 +39,14 @@ unbound_pid=$!
 resolved=""
 deadline=$(($(date +%s) + 15))
 while [ "$(date +%s)" -lt "${deadline}" ]; do
-  if timeout 2 getent hosts api.github.com >/dev/null 2>&1; then resolved=1; break; fi
-  kill -0 "${unbound_pid}" 2>/dev/null || { echo "egress-proxy: unbound exited" >&2; exit 1; }
+  if timeout 2 getent hosts api.github.com >/dev/null 2>&1; then
+    resolved=1
+    break
+  fi
+  kill -0 "${unbound_pid}" 2>/dev/null || {
+    echo "egress-proxy: unbound exited" >&2
+    exit 1
+  }
   sleep 0.2
 done
 [ -n "${resolved}" ] || echo "egress-proxy: no name resolves over ${EGRESS_DNS:-doh} yet; with dot, check that port 853 is open (docs/LAYERS.md, \"The proxy's own DNS\")" >&2

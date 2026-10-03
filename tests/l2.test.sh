@@ -86,7 +86,10 @@ check "a repository's own Dockerfile is built in the engine" 0 calls \
   "podman build --quiet --label workbench.l2.dockerfile="
 check "saying so" 0 err "l2: building ${own} from .devcontainer/l2/Dockerfile, in the engine"
 check "and its image used" 0 calls "${own} true"
-want="$({ echo "FROM l2"; echo abc; } | sha256sum | cut -d' ' -f1)"
+want="$({
+  echo "FROM l2"
+  echo abc
+} | sha256sum | cut -d' ' -f1)"
 BASE_ID=abc HAVE_LABEL="${want}" run "${l2}" true
 refute "and not built again while it and its base are the same" "podman build"
 BASE_ID=abd HAVE_LABEL="${want}" run "${l2}" true

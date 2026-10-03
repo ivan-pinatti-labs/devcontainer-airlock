@@ -30,10 +30,10 @@ bundle=""
 previous=""
 for argument in "$@"; do
   case "${previous}" in
-    --bundle | -b) bundle="${argument}" ;;
+  --bundle | -b) bundle="${argument}" ;;
   esac
   case "${argument}" in
-    --bundle=*) bundle="${argument#--bundle=}" ;;
+  --bundle=*) bundle="${argument#--bundle=}" ;;
   esac
   previous="${argument}"
 done

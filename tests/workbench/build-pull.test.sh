@@ -39,7 +39,7 @@ WORKBENCH_REGISTRY=registry.example/me WORKBENCH_PULL_TAG=v1 run "${wb}" pull
 check "with no index digest, the manifest's" 0 out "workbench: l2 registry.example/me/airlock-l2@sha256:mine"
 check "from WORKBENCH_REGISTRY, at WORKBENCH_PULL_TAG" 0 calls "podman pull --quiet registry.example/me/airlock-l2:v1"
 
-for step in 'pull --quiet *' 'tag *' 'image inspect --format {{.Digest}} *' ; do
+for step in 'pull --quiet *' 'tag *' 'image inspect --format {{.Digest}} *'; do
   rule "${step}" 'exit 1'
   run "${wb}" pull
   check "a failed ${step%% *} stops pull" 1 err "workbench: could not pull ${reg}/airlock-base"

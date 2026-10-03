@@ -18,14 +18,18 @@ set -o pipefail
 
 top="$(git rev-parse --show-toplevel)" || exit 1
 cd "${top}"
-[[ -f .pre-commit-config.yaml ]] || { echo "l2-hooks-install: no .pre-commit-config.yaml in ${top}" >&2; exit 1; }
+[[ -f .pre-commit-config.yaml ]] || {
+  echo "l2-hooks-install: no .pre-commit-config.yaml in ${top}" >&2
+  exit 1
+}
 if hp="$(git config --get core.hooksPath)"; then
   echo "l2-hooks-install: core.hooksPath is set to ${hp}; unset it first (git config --unset core.hooksPath)" >&2
   exit 1
 fi
 
 # default_install_hook_types in either YAML form: [a, b] or a block list.
-types="$(python3 - <<'PY'
+types="$(
+  python3 - <<'PY'
 import re
 text = open(".pre-commit-config.yaml").read()
 flow = re.search(r"^default_install_hook_types:\s*\[([^\]]*)\]", text, re.M)
@@ -50,7 +54,7 @@ for t in ${types}; do
     mv "${hooks}/${t}" "${hooks}/${t}.pre-l2"
     echo "kept the previous ${t} hook as ${t}.pre-l2, used outside the workbench"
   fi
-  sed "s/@HOOK_TYPE@/${t}/g" "${WORKBENCH_SHARE:-/usr/local/share/workbench}/git-hook" > "${hooks}/${t}"
+  sed "s/@HOOK_TYPE@/${t}/g" "${WORKBENCH_SHARE:-/usr/local/share/workbench}/git-hook" >"${hooks}/${t}"
   chmod 0755 "${hooks}/${t}"
   echo "installed ${t} hook (runs in L2)"
 done

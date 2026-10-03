@@ -12,7 +12,7 @@
 set -eu
 settings=/home/dev/.vscode-server/data/Machine/settings.json
 merged="${TMPDIR:-/tmp}/settings.json"
-jq -s '.[0] * .[1]' "${settings}" "$1" > "${merged}"
+jq -s '.[0] * .[1]' "${settings}" "$1" >"${merged}"
 install -o 1000 -g 1000 -m 0644 "${merged}" "${settings}"
 rm "${merged}"
 left="$(find /home/dev ! -user dev ! -path /home/dev/.vscode-server ! -path /home/dev/.vscode-server/extensions)"

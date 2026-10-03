@@ -189,7 +189,10 @@ set -o pipefail
 # and could walk a marked main clone past the worktree-only guard.
 unset GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_NAMESPACE GIT_CEILING_DIRECTORIES
 
-die() { echo "workbench: $*" >&2; exit 1; }
+die() {
+  echo "workbench: $*" >&2
+  exit 1
+}
 
 # Settings, from the environment or from this file as KEY=value lines (the
 # environment wins). The file is read, never sourced, so it cannot run
@@ -200,13 +203,13 @@ load_config() {
   [ -f "${CONFIG}" ] || return 0
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
-      '' | '#'*) continue ;;
-      WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY | WORKBENCH_MIRROR | WORKBENCH_MIRROR_MIN_AGE | WORKBENCH_MIRROR_HEAP | WORKBENCH_DNS) ;;
-      *) die "unknown setting '${key}' in ${CONFIG}" ;;
+    '' | '#'*) continue ;;
+    WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY | WORKBENCH_MIRROR | WORKBENCH_MIRROR_MIN_AGE | WORKBENCH_MIRROR_HEAP | WORKBENCH_DNS) ;;
+    *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
     [[ -v "${key}" ]] || printf -v "${key}" '%s' "${value}"
-  done < "${CONFIG}"
+  done <"${CONFIG}"
 }
 load_config
 
@@ -372,8 +375,8 @@ unlock_state() {
 check_owner() {
   local name="$1" label="$2" ws="$3" owner
   owner="$(podman inspect -f "{{index .Config.Labels \"${label}\"}}" "${name}" 2>/dev/null)" || return 0
-  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
-    || die "${name} belongs to ${owner}, another folder of the same name; stop it first (host/workbench down ${owner})"
+  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] ||
+    die "${name} belongs to ${owner}, another folder of the same name; stop it first (host/workbench down ${owner})"
 }
 
 # Whether $1 is a repository's main checkout rather than one of its linked
@@ -480,7 +483,7 @@ ws_mounts() {
   else
     f="$(state_dir "${ws}")/.mcp.json"
     mkdir -p "$(dirname "${f}")"
-    [ -f "${f}" ] || printf '{"mcpServers":{}}\n' > "${f}"
+    [ -f "${f}" ] || printf '{"mcpServers":{}}\n' >"${f}"
     printf '%s\n' -v "${f}:${ws}/.mcp.json:ro,Z"
   fi
 }
@@ -500,8 +503,8 @@ workspace() {
   # the checkout you are in: its workspace is then that worktree, and never
   # the main clone, which up would relabel under those containers.
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  if is_main_checkout "${w}" && { is_worktree_only "${w}" \
-    || { [ -n "${top}" ] && is_worktree_only "${top}"; }; }; then
+  if is_main_checkout "${w}" && { is_worktree_only "${w}" ||
+    { [ -n "${top}" ] && is_worktree_only "${top}"; }; }; then
     if [ -z "${1:-}" ] && [ -n "${top}" ] && [ "${top}" != "${w}" ]; then
       w="${top}"
     else
@@ -517,8 +520,8 @@ workspace() {
 slug() {
   local name
   case "$1" in
-    */.claude/worktrees/*) name="$(basename "${1%%/.claude/worktrees/*}")-$(basename "$1")" ;;
-    *) name="$(basename "$1")" ;;
+  */.claude/worktrees/*) name="$(basename "${1%%/.claude/worktrees/*}")-$(basename "$1")" ;;
+  *) name="$(basename "$1")" ;;
   esac
   printf '%s\n' "${name}" | tr -c 'A-Za-z0-9_.\n-' _
 }
@@ -570,10 +573,11 @@ create_net() {
     xargs -r podman network inspect --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | tr '\n' ' ')"
   for n in $(seq 1 254); do
     case " ${used} " in
-      *" 10.203.${n}.0/24 "*) ;;
-      *)
-        podman network create --internal --disable-dns --subnet "10.203.${n}.0/24" "${net}" >/dev/null
-        return ;;
+    *" 10.203.${n}.0/24 "*) ;;
+    *)
+      podman network create --internal --disable-dns --subnet "10.203.${n}.0/24" "${net}" >/dev/null
+      return
+      ;;
     esac
   done
   die "no free 10.203.N.0/24 subnet left for ${net}"
@@ -586,8 +590,8 @@ git_dir_mount() {
   local ws="$1" common
   common="$(git -C "${ws}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
   case "${common}/" in
-    "${ws}"/*) ;;
-    *) printf '%s\n' "-v" "${common}:${common}:$(rw_opts)" ;;
+  "${ws}"/*) ;;
+  *) printf '%s\n' "-v" "${common}:${common}:$(rw_opts)" ;;
   esac
 }
 
@@ -661,9 +665,9 @@ group_sets_of() {
   local r="$1" p out=""
   while read -r p; do
     case "${p}" in
-      '' | '#'*) ;;
-      *[!a-z0-9-]*) die "'${p}' in ${r}/.devcontainer/egress-sets is not an egress set name" ;;
-      *) out="${out:+${out},}${p}" ;;
+    '' | '#'*) ;;
+    *[!a-z0-9-]*) die "'${p}' in ${r}/.devcontainer/egress-sets is not an egress set name" ;;
+    *) out="${out:+${out},}${p}" ;;
     esac
   done < <(repo_file "${r}" .devcontainer/egress-sets)
   if [ -z "${out}" ]; then out="${DEFAULT_SETS}"; fi
@@ -678,11 +682,11 @@ sets_of() {
   if [ -f "${f}" ]; then
     while read -r p; do
       case "${p}" in
-        '' | '#'*) ;;
-        *[!a-z0-9-]*) die "'${p}' in ${f} is not an egress set name" ;;
-        *) out="${out:+${out},}${p}" ;;
+      '' | '#'*) ;;
+      *[!a-z0-9-]*) die "'${p}' in ${f} is not an egress set name" ;;
+      *) out="${out:+${out},}${p}" ;;
       esac
-    done < "${f}"
+    done <"${f}"
   else
     out="${DEFAULT_SETS}"
   fi
@@ -697,8 +701,8 @@ profile_source() {
   local ws="$1" top
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   case "${top}/" in
-    "${ws}"/*) echo "${top}" ;;
-    *) echo "${ws}" ;;
+  "${ws}"/*) echo "${top}" ;;
+  *) echo "${ws}" ;;
   esac
 }
 
@@ -712,9 +716,9 @@ profiles() {
     while read -r r; do
       while read -r p; do
         case "${p}" in
-          '' | '#'*) ;;
-          nested-network | nested-devices | hooks-engine) out="${out}"$'\n'"${p}" ;;
-          *) die "unknown profile '${p}' in ${r}/.devcontainer/workbench-profile" ;;
+        '' | '#'*) ;;
+        nested-network | nested-devices | hooks-engine) out="${out}"$'\n'"${p}" ;;
+        *) die "unknown profile '${p}' in ${r}/.devcontainer/workbench-profile" ;;
         esac
       done < <(repo_file "${r}" .devcontainer/workbench-profile)
     done < <(group_repos "$1")
@@ -731,11 +735,11 @@ profiles_of() {
   [ -f "${f}" ] || return 0
   while read -r p; do
     case "${p}" in
-      '' | '#'*) ;;
-      nested-network | nested-devices | hooks-engine) echo "${p}" ;;
-      *) die "unknown profile '${p}' in ${f}" ;;
+    '' | '#'*) ;;
+    nested-network | nested-devices | hooks-engine) echo "${p}" ;;
+    *) die "unknown profile '${p}' in ${f}" ;;
     esac
-  done < "${f}"
+  done <"${f}"
 }
 
 cmd_build() {
@@ -783,8 +787,8 @@ pull_published() {
 # once; it never edits anything else, so it is safe to run again.
 cmd_init() {
   local top f sets=() l2 files
-  top="$(git -C "${1:-${PWD}}" rev-parse --show-toplevel 2>/dev/null)" \
-    || die "${1:-${PWD}} is not in a git repository"
+  top="$(git -C "${1:-${PWD}}" rev-parse --show-toplevel 2>/dev/null)" ||
+    die "${1:-${PWD}} is not in a git repository"
   files="$(git -C "${top}" ls-files)"
   has() { grep -qE "$1" <<<"${files}"; }
   # The one step that can fail runs before anything is written, so a failed
@@ -812,17 +816,17 @@ cmd_init() {
       echo "# egress-refresh --list\` lists every set. Written by host/workbench init"
       echo "# from this repository's files: check it, and add what they missed."
       if [ "${#sets[@]}" -gt 0 ]; then printf '%s\n' "${sets[@]}"; fi
-    } > "${f}"
+    } >"${f}"
     echo "workbench: wrote ${f} (${sets[*]:-no sets})"
-    has '(^|/)(Cargo\.toml|Gemfile|composer\.json|pom\.xml|build\.gradle)$' \
-      && echo "workbench: this repository uses a package registry no egress set covers yet; its installs will be refused until one exists (images/egress-proxy/sets/)"
+    has '(^|/)(Cargo\.toml|Gemfile|composer\.json|pom\.xml|build\.gradle)$' &&
+      echo "workbench: this repository uses a package registry no egress set covers yet; its installs will be refused until one exists (images/egress-proxy/sets/)"
   fi
 
   f="${top}/.devcontainer/l2/Dockerfile"
   if [ -e "${f}" ]; then
     echo "workbench: kept ${f}"
   else
-    cat > "${f}" <<DOCKERFILE
+    cat >"${f}" <<DOCKERFILE
 # This repository's L2 image: where its hooks, tests and package installs
 # run, with the working tree and nothing else (no network, no credentials).
 # \`l2\` builds it inside the L2 engine the first time it is needed, and again
@@ -846,10 +850,10 @@ DOCKERFILE
   else
     # Recipe lines start with a tab, written by printf so this script holds none.
     if [ ! -e "${f}" ]; then
-      printf '%s\n' '.PHONY: all help' '' 'all: help' '' 'help:' > "${f}"
-      printf '\t%s\n' '@$(MAKE) --no-print-directory workbench-help' >> "${f}"
+      printf '%s\n' '.PHONY: all help' '' 'all: help' '' 'help:' >"${f}"
+      printf '\t%s\n' '@$(MAKE) --no-print-directory workbench-help' >>"${f}"
     fi
-    cat >> "${f}" <<'MAKEFILE'
+    cat >>"${f}" <<'MAKEFILE'
 
 # The workbench targets (make claude, make codex, make unlock and the rest)
 # from a devcontainer-airlock clone, by default the one next to this
@@ -859,9 +863,9 @@ WORKBENCH_HOME ?= $(abspath $(dir $(shell git rev-parse --path-format=absolute -
 
 MAKEFILE
     printf '%s\n' '' '.PHONY: workbench-help' \
-      'ifeq ($(wildcard $(WORKBENCH_HOME)/host/workbench.mk),)' 'workbench-help:' >> "${f}"
-    printf '\t%s\n' "@echo 'Workbench: clone ivan-pinatti-labs/devcontainer-airlock next to this repository, or set WORKBENCH_HOME.'" >> "${f}"
-    printf '%s\n' 'endif' >> "${f}"
+      'ifeq ($(wildcard $(WORKBENCH_HOME)/host/workbench.mk),)' 'workbench-help:' >>"${f}"
+    printf '\t%s\n' "@echo 'Workbench: clone ivan-pinatti-labs/devcontainer-airlock next to this repository, or set WORKBENCH_HOME.'" >>"${f}"
+    printf '%s\n' 'endif' >>"${f}"
     echo "workbench: added the workbench targets to ${f}"
   fi
 
@@ -929,9 +933,10 @@ proxy_join() {
   # says the workspace installs through the package mirror, and a workspace
   # that lists it and nothing else reaches no registry directly at all.
   case ",${sets}," in
-    *,mirror,*)
-      mirror_on || die "${ws} lists mirror in .devcontainer/egress-sets; the package mirror is off (WORKBENCH_MIRROR=${MIRROR})"
-      sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | { grep -vx mirror || true; } | paste -sd, -)" ;;
+  *,mirror,*)
+    mirror_on || die "${ws} lists mirror in .devcontainer/egress-sets; the package mirror is off (WORKBENCH_MIRROR=${MIRROR})"
+    sets="$(printf '%s\n' "${sets}" | tr ',' '\n' | { grep -vx mirror || true; } | paste -sd, -)"
+    ;;
   esac
   # Every name checked against the proxy image before anything changes, so
   # a bad one costs nothing: not an old proxy, not a registration, and never
@@ -954,21 +959,21 @@ proxy_register() {
   mkdir -p "${EGRESS_DIR}"
   chmod 755 "${EGRESS_DIR}"
   owner="$(sed -n 's/^workspace=//p' "${f}" 2>/dev/null || true)"
-  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] \
-    || die "the egress proxy already serves ${owner} as ${slug}, another folder of the same name; stop it first (host/workbench down ${owner})"
+  [ -z "${owner}" ] || [ "${owner}" = "${ws}" ] ||
+    die "the egress proxy already serves ${owner} as ${slug}, another folder of the same name; stop it first (host/workbench down ${owner})"
   # The registration it replaces, if any, comes back when anything after
   # this fails, so a running workspace keeps its rules.
   rm -f "${f}.prev"
   if [ -f "${f}" ]; then cp -p "${f}" "${f}.prev"; fi
-  printf 'workspace=%s\nsubnet=%s\nsets=%s\n' "${ws}" "$(net_subnet "${net}")" "${sets}" > "${f}.tmp"
+  printf 'workspace=%s\nsubnet=%s\nsets=%s\n' "${ws}" "$(net_subnet "${net}")" "${sets}" >"${f}.tmp"
   chmod 644 "${f}.tmp"
   mv "${f}.tmp" "${f}"
   # In a child shell, so a start_proxy that dies comes back here to be undone.
   # The reload's own report (squid parsing its configuration) is shown only
   # when it fails; otherwise it would fill the terminal on every start.
   local out=""
-  if ! (start_proxy) || ! proxy_connect "${net}" "$(net_proxy_ip "${net}")" \
-    || ! out="$(podman exec "${PROXY}" egress-reload 2>&1)"; then
+  if ! (start_proxy) || ! proxy_connect "${net}" "$(net_proxy_ip "${net}")" ||
+    ! out="$(podman exec "${PROXY}" egress-reload 2>&1)"; then
     [ -z "${out}" ] || printf '%s\n' "${out}" >&2
     if [ -f "${f}.prev" ]; then mv "${f}.prev" "${f}"; else rm -f "${f}"; fi
     if running "${PROXY}"; then
@@ -982,8 +987,8 @@ proxy_register() {
 
 # The proxy on network $1 at address $2, unless it is there already.
 proxy_connect() {
-  podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "${PROXY}" \
-    | tr ' ' '\n' | grep -qx "$1" && return 0
+  podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' "${PROXY}" |
+    tr ' ' '\n' | grep -qx "$1" && return 0
   podman network connect --ip "$2" "$1" "${PROXY}"
 }
 
@@ -991,11 +996,11 @@ proxy_connect() {
 # image knows. For workspace $1, in the message.
 check_sets() {
   local known name
-  known="$(podman run --rm --network none "${PROXY_IMAGE}" egress-refresh --list | awk '{print $1}')" \
-    || die "could not list the egress sets in ${PROXY_IMAGE}"
+  known="$(podman run --rm --network none "${PROXY_IMAGE}" egress-refresh --list | awk '{print $1}')" ||
+    die "could not list the egress sets in ${PROXY_IMAGE}"
   for name in ${2//,/ }; do
-    grep -qx "${name}" <<<"${known}" \
-      || die "${1} asks for egress set '${name}', which the proxy does not know; known sets: $(paste -sd' ' <<<"${known}")"
+    grep -qx "${name}" <<<"${known}" ||
+      die "${1} asks for egress set '${name}', which the proxy does not know; known sets: $(paste -sd' ' <<<"${known}")"
   done
 }
 
@@ -1017,9 +1022,9 @@ proxy_leave() {
 MIRROR_SETS=python,node,golang,docker-hub,ghcr,ubuntu,alpine,fedora
 mirror_on() {
   case "${MIRROR}" in
-    1 | on | yes | true) return 0 ;;
-    '' | 0 | off | no | false) return 1 ;;
-    *) die "WORKBENCH_MIRROR is '${MIRROR}'; use 1 or 0" ;;
+  1 | on | yes | true) return 0 ;;
+  '' | 0 | off | no | false) return 1 ;;
+  *) die "WORKBENCH_MIRROR is '${MIRROR}'; use 1 or 0" ;;
   esac
 }
 # The gate's address on workspace $1's network, and the mirror network's
@@ -1027,8 +1032,16 @@ mirror_on() {
 # The gate takes the top of the range: the engine and the workbenches get
 # the next free addresses from the bottom (measured: .1, .3, .4), so a low
 # fixed one would collide.
-mirror_ip() { local s; s="$(net_subnet "$(net_name "$1")")"; echo "${s%.0/24}.254"; }
-mirror_net_ip() { local s; s="$(net_subnet "${MIRROR_NET}")"; echo "${s%.0/24}.$1"; }
+mirror_ip() {
+  local s
+  s="$(net_subnet "$(net_name "$1")")"
+  echo "${s%.0/24}.254"
+}
+mirror_net_ip() {
+  local s
+  s="$(net_subnet "${MIRROR_NET}")"
+  echo "${s%.0/24}.$1"
+}
 
 start_mirror() {
   local nexus upstream f net nets=() heap="${WORKBENCH_MIRROR_HEAP:-1024}" fresh=""
@@ -1058,8 +1071,8 @@ start_mirror() {
       -v mirror-nexus-data:/nexus-data:ro -v mirror-admin:/var/lib/mirror-admin:U \
       -e NEXUS_URL=http://mirror-nexus:8081 -e UPSTREAM_PROXY="${upstream}" \
       "${GATE_IMAGE}" /usr/local/lib/mirror-gate/backends/nexus/provision \
-      /usr/local/lib/mirror-gate/backends/nexus/repositories.json \
-      || die "the package mirror could not be provisioned; podman logs mirror-nexus"
+      /usr/local/lib/mirror-gate/backends/nexus/repositories.json ||
+      die "the package mirror could not be provisioned; podman logs mirror-nexus"
   fi
   running mirror-gate && return
   mkdir -p "${MIRROR_DIR}"
@@ -1090,7 +1103,11 @@ start_mirror() {
   podman logs mirror-gate 2>&1 | tail -5 >&2
   die "the package mirror's gate did not start; podman logs mirror-gate"
 }
-net_gate_ip() { local s; s="$(net_subnet "$1")"; echo "${s%.0/24}.254"; }
+net_gate_ip() {
+  local s
+  s="$(net_subnet "$1")"
+  echo "${s%.0/24}.254"
+}
 
 # Put the gate on workspace $1's network, at .254, and write the registry
 # mirror settings its engine mounts.
@@ -1099,9 +1116,9 @@ mirror_join() {
   slug="$(unit "${ws}")"
   net="$(net_name "${ws}")"
   mkdir -p "${MIRROR_DIR}"
-  printf '%s\n' "${ws}" > "${MIRROR_DIR}/${slug}.ws"
-  if ! podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' mirror-gate \
-    | tr ' ' '\n' | grep -qx "${net}"; then
+  printf '%s\n' "${ws}" >"${MIRROR_DIR}/${slug}.ws"
+  if ! podman inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{$n}} {{end}}' mirror-gate |
+    tr ' ' '\n' | grep -qx "${net}"; then
     podman network connect --ip "$(mirror_ip "${ws}")" "${net}" mirror-gate
   fi
   mirror_registries "${ws}" >/dev/null
@@ -1114,7 +1131,7 @@ mirror_registries() {
   f="${MIRROR_DIR}/$(unit "$1").registries.conf"
   gate="$(mirror_ip "$1")"
   mkdir -p "${MIRROR_DIR}"
-  cat > "${f}" <<CONF
+  cat >"${f}" <<CONF
 # Written by host/workbench: pulls go through the package mirror's gate.
 [[registry]]
 prefix = "docker.io"
@@ -1144,10 +1161,10 @@ mirror_leave() {
 
 start_broker() {
   running gh-broker && return
-  podman secret exists "${GH_SECRET}" \
-    || die "no podman secret ${GH_SECRET}; create it: podman secret create ${GH_SECRET} <file holding the token>"
-  [ -n "${GH_OWNERS}" ] \
-    || die "set WORKBENCH_GH_OWNERS in ${CONFIG} to the GitHub owners (users or organizations) the broker may act on, comma separated"
+  podman secret exists "${GH_SECRET}" ||
+    die "no podman secret ${GH_SECRET}; create it: podman secret create ${GH_SECRET} <file holding the token>"
+  [ -n "${GH_OWNERS}" ] ||
+    die "set WORKBENCH_GH_OWNERS in ${CONFIG} to the GitHub owners (users or organizations) the broker may act on, comma separated"
   mkdir -p "${GH_DIR}"
   chmod 700 "${RUN}/workbench" "${GH_DIR}"
   podman rm -f gh-broker >/dev/null 2>&1 || true
@@ -1176,7 +1193,7 @@ start_ssh_agent() {
     # workbench can verify the host strictly.
     podman run --rm --network podman "${BASE}" \
       sh -c 'curl -fsS https://api.github.com/meta | jq -r ".ssh_keys[] | \"github.com \" + ."' \
-      > "${SSH_DIR}/known_hosts"
+      >"${SSH_DIR}/known_hosts"
   fi
   podman rm -f devcontainer-ssh-agent >/dev/null 2>&1 || true
   podman run -d --name devcontainer-ssh-agent \
@@ -1194,11 +1211,13 @@ start_engine() {
   running "${name}" && return
   for p in $(profiles "${ws}"); do
     case "${p}" in
-      nested-network)
-        extra+=(--device /dev/net/tun --security-opt unmask=/proc/sys)
-        extra+=(-e CONTAINERS_CONF_OVERRIDE=/usr/local/share/devcontainer/containers-bridge-network.conf) ;;
-      nested-devices)
-        extra+=(--device /dev/net/tun) ;;
+    nested-network)
+      extra+=(--device /dev/net/tun --security-opt unmask=/proc/sys)
+      extra+=(-e CONTAINERS_CONF_OVERRIDE=/usr/local/share/devcontainer/containers-bridge-network.conf)
+      ;;
+    nested-devices)
+      extra+=(--device /dev/net/tun)
+      ;;
     esac
   done
   mkdir -p "${dir}"
@@ -1231,9 +1250,9 @@ start_engine() {
 # Whether WORKBENCH_VOICE asks for voice mode. Off unless set.
 voice_on() {
   case "${WORKBENCH_VOICE:-}" in
-    1 | on | yes | true) return 0 ;;
-    '' | 0 | off | no | false) return 1 ;;
-    *) die "WORKBENCH_VOICE is '${WORKBENCH_VOICE}'; use 1 or 0" ;;
+  1 | on | yes | true) return 0 ;;
+  '' | 0 | off | no | false) return 1 ;;
+  *) die "WORKBENCH_VOICE is '${WORKBENCH_VOICE}'; use 1 or 0" ;;
   esac
 }
 
@@ -1295,8 +1314,8 @@ cmd_up() {
   profiles "${ws}" >/dev/null || exit 1
   egress_sets "${ws}" >/dev/null || exit 1
   case "${ws}/" in
-    "${ROOT}"/*) ;;
-    *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
+  "${ROOT}"/*) ;;
+  *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
   esac
   lock_state
   start_helpers
@@ -1353,7 +1372,7 @@ cmd_restart_broker() {
 cmd_install_units() {
   local dir="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
   mkdir -p "${dir}"
-  cat > "${dir}/workbench-helpers.service" <<UNIT
+  cat >"${dir}/workbench-helpers.service" <<UNIT
 # Written by ${HERE}/host/workbench install-units.
 [Unit]
 Description=Workbench helpers: egress proxy, gh broker, ssh-agent
@@ -1472,15 +1491,17 @@ voice_listen() {
       read -r -n 16 -u 3 word || continue
     fi
     case "${word}" in
-      start)
-        if [ -z "${loop}" ]; then
-          loop="$(pactl load-module module-loopback source=@DEFAULT_SOURCE@ sink="airlock_voice_${id}" latency_msec=20)" || loop=""
-        fi ;;
-      stop)
-        if [ -n "${loop}" ]; then
-          pactl unload-module "${loop}" 2>/dev/null || true
-          loop=""
-        fi ;;
+    start)
+      if [ -z "${loop}" ]; then
+        loop="$(pactl load-module module-loopback source=@DEFAULT_SOURCE@ sink="airlock_voice_${id}" latency_msec=20)" || loop=""
+      fi
+      ;;
+    stop)
+      if [ -n "${loop}" ]; then
+        pactl unload-module "${loop}" 2>/dev/null || true
+        loop=""
+      fi
+      ;;
     esac
   done
 }
@@ -1491,7 +1512,10 @@ voice_listen() {
 # Remote Control with it (measured 2026-10-01), as its documentation says.
 cmd_remote() {
   local agent="${1:-claude}" ws name cwd bin
-  valid_agent "${agent}" || { echo "workbench: which agent? host/workbench remote claude[-<account>] [WORKSPACE]" >&2; exit 2; }
+  valid_agent "${agent}" || {
+    echo "workbench: which agent? host/workbench remote claude[-<account>] [WORKSPACE]" >&2
+    exit 2
+  }
   bin="$(agent_of "${agent}")"
   [ "${bin}" = claude ] || die "${bin} has no remote control mode (Codex's own experimental 'codex remote-control' runs a daemon; use host/workbench shell ${agent} and run it by hand)"
   ws="$(workspace "${2:-}")"
@@ -1547,8 +1571,8 @@ ensure_l2_store() {
 # Whether engine $1 mounts the shared store; one started by an older
 # host/workbench does not, and gets its own copy, as before.
 engine_shares_store() {
-  podman inspect --format '{{range .Mounts}}{{.Name}} {{end}}' "$1" 2>/dev/null \
-    | tr ' ' '\n' | grep -qx "${L2_STORE}"
+  podman inspect --format '{{range .Mounts}}{{.Name}} {{end}}' "$1" 2>/dev/null |
+    tr ' ' '\n' | grep -qx "${L2_STORE}"
 }
 
 # Put the host's L2 images in the shared store when they are missing there or
@@ -1606,8 +1630,8 @@ cmd_down() {
   lock_state
   # Every workbench of the workspace, whatever agent or account, and
   # workbench-<name>, the single workbench from before the split.
-  podman ps -a --filter label=workbench.workspace="${ws}" --format '{{.Names}}' \
-    | xargs -r podman rm -f -t 5 >/dev/null 2>&1 || true
+  podman ps -a --filter label=workbench.workspace="${ws}" --format '{{.Names}}' |
+    xargs -r podman rm -f -t 5 >/dev/null 2>&1 || true
   # egress-proxy-<name>: the workspace's own proxy, from before it was shared.
   podman rm -f -t 5 "workbench-$(slug "${ws}")" "$(engine_name "${ws}")" "egress-proxy-$(slug "${ws}")" \
     >/dev/null 2>&1 || true
@@ -1659,7 +1683,10 @@ session_new_name() {
   read -ra b <<<"${SESSION_WORDS_B}"
   for _ in $(seq 1 50); do
     name="${a[RANDOM % ${#a[@]}]}-${b[RANDOM % ${#b[@]}]}"
-    [ -e "$(session_dir "${name}")" ] || { echo "${name}"; return; }
+    [ -e "$(session_dir "${name}")" ] || {
+      echo "${name}"
+      return
+    }
   done
   die "no free session name; host/workbench session prune"
 }
@@ -1673,11 +1700,11 @@ session_read() {
   S_AGENT="" S_WS="" S_ID=""
   while IFS='=' read -r key value; do
     case "${key}" in
-      agent) S_AGENT="${value}" ;;
-      workspace) S_WS="${value}" ;;
-      claude_id) S_ID="${value}" ;;
+    agent) S_AGENT="${value}" ;;
+    workspace) S_WS="${value}" ;;
+    claude_id) S_ID="${value}" ;;
     esac
-  done < "${f}"
+  done <"${f}"
 }
 
 session_names() {
@@ -1720,8 +1747,8 @@ session_up() {
 session_down() {
   local ws="$1"
   lock_state
-  podman ps -a --filter label=workbench.session="${SESSION}" --format '{{.Names}}' \
-    | xargs -r podman rm -f -t 5 >/dev/null 2>&1 || true
+  podman ps -a --filter label=workbench.session="${SESSION}" --format '{{.Names}}' |
+    xargs -r podman rm -f -t 5 >/dev/null 2>&1 || true
   podman rm -f -t 5 "$(engine_name "${ws}")" >/dev/null 2>&1 || true
   mirror_leave "${ws}"
   proxy_leave "${ws}"
@@ -1769,24 +1796,24 @@ cmd_session_start() {
   local agent="" remote="" ws="" a d
   for a in "$@"; do
     case "${a}" in
-      --remote) remote=1 ;;
-      -*) die "session start: unknown option ${a}" ;;
-      *) if [ -z "${agent}" ]; then agent="${a}"; else ws="${a}"; fi ;;
+    --remote) remote=1 ;;
+    -*) die "session start: unknown option ${a}" ;;
+    *) if [ -z "${agent}" ]; then agent="${a}"; else ws="${a}"; fi ;;
     esac
   done
   valid_agent "${agent:-none}" || die "which agent? host/workbench session start claude|codex[-<account>] [--remote] [WORKSPACE]"
   [ -z "${remote}" ] || [ "$(agent_of "${agent}")" = claude ] || die "only Claude Code has a remote control mode"
   ws="$(workspace "${ws}")"
   case "${ws}/" in
-    "${ROOT}"/*) ;;
-    *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
+  "${ROOT}"/*) ;;
+  *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
   esac
   SESSION="$(session_new_name)"
   d="$(session_dir "${SESSION}")"
   mkdir -p "${d}"
   chmod 700 "${d}"
   printf 'agent=%s\nworkspace=%s\nprofile=default\nclaude_id=%s\ncreated=%s\n' \
-    "${agent}" "${ws}" "$(cat /proc/sys/kernel/random/uuid)" "$(date -u +%FT%TZ)" > "${d}/session"
+    "${agent}" "${ws}" "$(cat /proc/sys/kernel/random/uuid)" "$(date -u +%FT%TZ)" >"${d}/session"
   session_read "${SESSION}"
   session_up "${S_WS}" "${S_AGENT}"
   session_run new "${remote}"
@@ -1796,9 +1823,9 @@ cmd_session_attach() {
   local remote="" a
   for a in "$@"; do
     case "${a}" in
-      --remote) remote=1 ;;
-      -*) die "session attach: unknown option ${a}" ;;
-      *) SESSION="${a}" ;;
+    --remote) remote=1 ;;
+    -*) die "session attach: unknown option ${a}" ;;
+    *) SESSION="${a}" ;;
     esac
   done
   [ -n "${SESSION:-}" ] || die "which session? host/workbench session attach NAME (host/workbench session list)"
@@ -1931,36 +1958,45 @@ cmd_session() {
   local sub="${1:-}"
   shift || true
   case "${sub}" in
-    start) cmd_session_start "$@" ;;
-    attach) cmd_session_attach "$@" ;;
-    shell) cmd_session_shell "$@" ;;
-    stop) cmd_session_stop "$@" ;;
-    list | ls) cmd_session_list ;;
-    names) session_names ;;
-    prune) cmd_session_prune "$@" ;;
-    *) die "host/workbench session start|attach|shell|stop|list|prune" ;;
+  start) cmd_session_start "$@" ;;
+  attach) cmd_session_attach "$@" ;;
+  shell) cmd_session_shell "$@" ;;
+  stop) cmd_session_stop "$@" ;;
+  list | ls) cmd_session_list ;;
+  names) session_names ;;
+  prune) cmd_session_prune "$@" ;;
+  *) die "host/workbench session start|attach|shell|stop|list|prune" ;;
   esac
 }
 
 case "${1:-}" in
-  build) cmd_build ;;
-  pull) cmd_pull ;;
-  init) cmd_init "${2:-}" ;;
-  up) cmd_up "${2:-}" ;;
-  unlock) cmd_unlock ;;
-  shell) shift; cmd_shell "$@" ;;
-  remote) cmd_remote "${2:-}" "${3:-}" ;;
-  claude | codex | claude-* | codex-*) cmd_shell "$1" "${2:-}" "$(agent_of "$1")" ;;
-  accounts) echo "${ACCOUNTS}" ;;
-  load-l2) cmd_load_l2 "${2:-}" ;;
-  status) cmd_status ;;
-  down) cmd_down "${2:-}" ;;
-  session) shift; cmd_session "$@" ;;
-  helpers) cmd_helpers ;;
-  helpers-down) cmd_helpers_down ;;
-  restart-broker) cmd_restart_broker ;;
-  restart-proxy) cmd_restart_proxy ;;
-  install-units) cmd_install_units ;;
-  -h | --help | help) sed -n '3,/^    2  usage error$/p' "$0" ;;
-  *) sed -n '3,/run it yourself)$/p' "$0" >&2; exit 2 ;;
+build) cmd_build ;;
+pull) cmd_pull ;;
+init) cmd_init "${2:-}" ;;
+up) cmd_up "${2:-}" ;;
+unlock) cmd_unlock ;;
+shell)
+  shift
+  cmd_shell "$@"
+  ;;
+remote) cmd_remote "${2:-}" "${3:-}" ;;
+claude | codex | claude-* | codex-*) cmd_shell "$1" "${2:-}" "$(agent_of "$1")" ;;
+accounts) echo "${ACCOUNTS}" ;;
+load-l2) cmd_load_l2 "${2:-}" ;;
+status) cmd_status ;;
+down) cmd_down "${2:-}" ;;
+session)
+  shift
+  cmd_session "$@"
+  ;;
+helpers) cmd_helpers ;;
+helpers-down) cmd_helpers_down ;;
+restart-broker) cmd_restart_broker ;;
+restart-proxy) cmd_restart_proxy ;;
+install-units) cmd_install_units ;;
+-h | --help | help) sed -n '3,/^    2  usage error$/p' "$0" ;;
+*)
+  sed -n '3,/run it yourself)$/p' "$0" >&2
+  exit 2
+  ;;
 esac

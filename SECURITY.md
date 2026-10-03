@@ -31,6 +31,7 @@ guaranteed response window.
 | --- | --- | --- |
 | `.github/workflows/*` | actionlint, zizmor | `checklist-github-actions`, every commit |
 | The image definitions (`images/*/Dockerfile`) | hadolint | `checklist-dev-docker`, every commit |
+| Shell | shellcheck, shfmt, shebang checks | `checklist-dev-shell`, every commit |
 | Everything | detect-secrets | `checklist-security-credentials`, every commit |
 | The built images | Trivy, critical and high vulnerabilities, reported to code scanning | `build-images.yml`, on pull requests and pushes to `main` that change the images, and weekly |
 | Everything SonarQube Cloud has an analyzer for: shell, Python, JavaScript, the Dockerfiles, YAML, `.github/workflows/*`, secrets | SonarQube Cloud, Sonar way quality gate, plus 100% coverage from `make coverage` | `sonarqube.yml`, every pull request from a branch of this repository and every push to `main` |

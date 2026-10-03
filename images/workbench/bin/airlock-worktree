@@ -12,7 +12,10 @@
 # in L2.
 set -euo pipefail
 
-die() { echo "airlock-worktree: $*" >&2; exit 1; }
+die() {
+  echo "airlock-worktree: $*" >&2
+  exit 1
+}
 
 [[ -n "${AIRLOCK_SESSION:-}" ]] || die "not in a session; host/workbench session start (make claude) starts one"
 repo="${1:-}"

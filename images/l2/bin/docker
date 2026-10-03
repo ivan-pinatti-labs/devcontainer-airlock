@@ -44,15 +44,27 @@ workdir=""
 mounts=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --rm | -i | -t | -it | --interactive | --tty | --init) shift ;;
-    -v | --volume) mounts+=("$2"); shift 2 ;;
-    --volume=*) mounts+=("${1#--volume=}"); shift ;;
-    -w | --workdir) workdir="$2"; shift 2 ;;
-    --workdir=*) workdir="${1#--workdir=}"; shift ;;
-    -u | --user | -e | --env | --network | --name | --entrypoint | --platform | --security-opt) shift 2 ;;
-    --*=*) shift ;;
-    -*) delegate "unsupported option $1" ;;
-    *) break ;;
+  --rm | -i | -t | -it | --interactive | --tty | --init) shift ;;
+  -v | --volume)
+    mounts+=("$2")
+    shift 2
+    ;;
+  --volume=*)
+    mounts+=("${1#--volume=}")
+    shift
+    ;;
+  -w | --workdir)
+    workdir="$2"
+    shift 2
+    ;;
+  --workdir=*)
+    workdir="${1#--workdir=}"
+    shift
+    ;;
+  -u | --user | -e | --env | --network | --name | --entrypoint | --platform | --security-opt) shift 2 ;;
+  --*=*) shift ;;
+  -*) delegate "unsupported option $1" ;;
+  *) break ;;
   esac
 done
 
@@ -62,8 +74,11 @@ shift
 
 name="${image%@*}"
 case "${name##*/}" in
-  *:*) tag="${name##*:}"; name="${name%:*}" ;;
-  *) tag="" ;;
+*:*)
+  tag="${name##*:}"
+  name="${name%:*}"
+  ;;
+*) tag="" ;;
 esac
 
 baked=""
@@ -87,8 +102,8 @@ if [[ -n "${workdir}" ]]; then
     rest="${m#*:}"
     dst="${rest%%:*}"
     case "${workdir}" in
-      "${dst}") host_dir="${src}" ;;
-      "${dst}"/*) host_dir="${src}${workdir#"${dst}"}" ;;
+    "${dst}") host_dir="${src}" ;;
+    "${dst}"/*) host_dir="${src}${workdir#"${dst}"}" ;;
     esac
   done
   [[ -n "${host_dir}" ]] || delegate "working directory ${workdir} is not inside a mounted volume"
@@ -96,8 +111,8 @@ if [[ -n "${workdir}" ]]; then
 fi
 
 case "${name##*/}" in
-  hadolint) exec "$@" ;;
-  actionlint) exec actionlint "$@" ;;
-  dotenv-linter) exec dotenv-linter "$@" ;;
+hadolint) exec "$@" ;;
+actionlint) exec actionlint "$@" ;;
+dotenv-linter) exec dotenv-linter "$@" ;;
 esac
 delegate "no command mapping for ${name}"

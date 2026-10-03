@@ -78,8 +78,8 @@ container() {
   mkdir -p "${d}/labels"
   for l in "$@"; do
     case "${l}" in
-      running) touch "${d}/running" ;;
-      *) printf '%s' "${l#*=}" >"${d}/labels/${l%%=*}" ;;
+    running) touch "${d}/running" ;;
+    *) printf '%s' "${l#*=}" >"${d}/labels/${l%%=*}" ;;
     esac
   done
 }

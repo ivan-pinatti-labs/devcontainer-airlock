@@ -32,7 +32,7 @@ if [[ ! -p "${mic}" ]] || [[ ! -p "${ctl}" ]]; then
   exit 1
 fi
 case "${1:-}" in
-  --version | -h | --help) exec "${sox}" "$@" ;;
+--version | -h | --help) exec "${sox}" "$@" ;;
 esac
 
 # One word to the host. Opened without waiting, so a host end that has gone

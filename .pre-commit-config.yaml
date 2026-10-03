@@ -2,9 +2,10 @@
 # Starter pre-commit config for a repo created from this template. Pulls
 # the language-agnostic checklists from ivan-pinatti-labs/pre-commit-checklists:
 # file hygiene, spelling, the common structured file types, credential
-# scanning, and the two git message/branch-name guards. Add a
-# language-specific checklist id (checklist-dev-python, checklist-dev-shell,
-# and so on) once you know what the new repo is actually written in; see
+# scanning, and the two git message/branch-name guards, plus the
+# language-specific checklists this repository is written in: Python
+# (checklist-dev-python), shell (checklist-dev-shell) and the image
+# definitions (checklist-dev-docker). See
 # https://github.com/ivan-pinatti-labs/pre-commit-checklists/blob/main/docs/hook-catalogue.md
 # for the full list.
 #
@@ -142,6 +143,16 @@ repos:
       # has not been through ruff yet.
       - id: checklist-dev-python
         files: ^(scripts|tests)/.*\.py$
+        stages: [pre-commit]
+
+      # check-executables-have-shebangs, check-shebang-scripts-are-executable,
+      # shellcheck --severity=error, shfmt --indent 2 --write. No selector:
+      # the shebang checks then see every file, and shellcheck and shfmt keep
+      # to identify's `shell` tag, which finds the scripts without an
+      # extension (host/workbench, the images' bin/ folders) by their
+      # shebang. That tag needs the executable bit as well, so every script
+      # here is committed executable.
+      - id: checklist-dev-shell
         stages: [pre-commit]
 
       # Lints the image definitions with hadolint. hadolint-docker runs in a
