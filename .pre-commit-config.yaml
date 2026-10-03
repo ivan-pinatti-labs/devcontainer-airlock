@@ -215,7 +215,9 @@ repos:
   # every pull request anyway, so this only saves a round trip. In a
   # workbench, push from where `l2 --engine --net` is available, or run
   # `l2 --engine --net -- make coverage` first. The files: pattern names the
-  # scripts without an extension by their directories.
+  # scripts without an extension by their directories, or by their paths
+  # where the directory holds nothing else that is measured.
+  # tests/test_coverage_hook.py holds it to every file the Makefile lists.
   - repo: local
     hooks:
       - id: coverage
@@ -223,5 +225,14 @@ repos:
         language: system
         entry: make coverage
         pass_filenames: false
-        files: '(\.(py|sh|js)$|/bin/|/backends/|^\.coveragerc$|^Makefile$|requirements\.txt$)'
+        files: |
+          (?x)(
+            \.(py|sh|js)$
+            | /bin/ | /backends/
+            | ^\.coveragerc$ | ^Makefile$ | requirements\.txt$
+            | ^host/workbench$
+            | ^images/l2/engine-bin/podman$
+            | ^images/l2-engine/containers/crun-without-masked-paths$
+            | ^images/workbench/share/git-hook$
+          )
         stages: [pre-push]
