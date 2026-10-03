@@ -4,7 +4,9 @@
 # docker), curl and jq are stubs: nothing is built, pulled, scanned or
 # pushed. The podman stub writes a digest for each push, named after the
 # image; curl answers the staging registry's probe once CURL_FAILS failures
-# have been used up.
+# have been used up. A container started with `--entrypoint sh` (the skopeo
+# copy) runs its script under dash, a POSIX sh without bash's extensions,
+# with the -e variables it was given and skopeo stubbed.
 # shellcheck source=tests/shell-test-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/shell-test-lib.sh"
 
@@ -18,6 +20,15 @@ left="$(cat "${CURL_FAILS}")"
 echo $((left - 1)) >"${CURL_FAILS}"
 exit 7'
 # shellcheck disable=SC2016
+run_sh='case "$*" in *"--entrypoint sh"*)
+      while [ "$1" != -c ]; do
+        case "$2" in *=*) [ "$1" = -e ] && export "$2" ;; esac
+        shift
+      done
+      shift
+      exec dash -c "$@" ;;
+    esac'
+# shellcheck disable=SC2016
 stub podman '
 case "$1" in
   push)
@@ -29,8 +40,10 @@ case "$1" in
     name="${last##*/airlock-}"
     printf "sha256:%s" "${name%:ci}" >"${file}" ;;
   run)
-    case "$*" in *"--scanners secret"*) [ -z "${SECRET_FOUND:-}" ] || exit 1 ;; esac ;;
+    case "$*" in *"--scanners secret"*) [ -z "${SECRET_FOUND:-}" ] || exit 1 ;; esac
+    '"${run_sh}"' ;;
 esac'
+stub skopeo
 # shellcheck disable=SC2016
 stub docker '
 case "$1 $2" in
@@ -39,6 +52,7 @@ case "$1 $2" in
       [ "$1" = --metadata-file ] && echo "{}" >"$2"
       shift
     done ;;
+  "run "*) '"${run_sh}"' ;;
 esac'
 # shellcheck disable=SC2016
 stub jq 'case "$1" in -r) echo sha256:from-buildx ;; *) echo "{}" ;; esac'
@@ -65,6 +79,9 @@ for name in "${images[@]}"; do
     "docker://localhost:5000/airlock-${name}@sha256:${name} docker://localhost:5000/rehearsal/airlock-${name}:latest"
 done
 check "as a rehearsal" 0 calls "-e REHEARSAL=true"
+check "which a POSIX sh copies without TLS" 0 calls \
+  "skopeo copy --all --preserve-digests --src-tls-verify=false --dest-tls-verify=false docker://localhost:5000/airlock-base@sha256:base"
+refute "and without logging in" "skopeo login --authfile /tmp/auth.json --username"
 check "the digests are listed" 0 out "mirror-gate=sha256:mirror-gate"
 assert "and kept" grep -qx "base=sha256:base" "${SARIF_DIR}/digests.txt"
 
@@ -83,7 +100,10 @@ check "with the credentials in the environment, not on the command line" 0 calls
   "-e REGISTRY_USER -e REGISTRY_TOKEN -e REHEARSAL=false -e REGISTRY_HOST=ghcr.io"
 check "and the copy run by skopeo in the container" 0 calls \
   "--entrypoint sh quay.io/skopeo/stable:"
-check "logged in from stdin" 0 calls "skopeo login --authfile /tmp/auth.json"
+check "logged in from stdin" 0 calls \
+  "skopeo login --authfile /tmp/auth.json --username u --password-stdin ghcr.io"
+check "and copied with that login" 0 calls \
+  "skopeo copy --all --preserve-digests --src-tls-verify=false --dest-authfile /tmp/auth.json docker://localhost:5000/airlock-l2@sha256:from-buildx"
 
 echo 99 >"${CURL_FAILS}"
 RUNTIME=podman run scripts/build-images.sh

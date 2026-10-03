@@ -129,13 +129,14 @@ scan() {
 # entrypoint. TO is the throwaway registry for a rehearsal, which is plain
 # http and has no credentials. The script the container runs is a here
 # document rather than a quoted argument, which kcov would count as lines of
-# this script that never run.
+# this script that never run. It is POSIX sh, not bash: the image's sh is
+# what runs it.
 publish() {
   local name="$1" digest="$2" to="$3" rehearsal=false tag copy
   [[ "${to}" = "${STAGING}/rehearsal" ]] && rehearsal=true
   IFS= read -r -d '' copy <<'SH' || true
 set -e
-if [[ "${REHEARSAL}" = true ]]; then
+if [ "${REHEARSAL}" = true ]; then
   set -- --dest-tls-verify=false "$@"
 else
   umask 077
