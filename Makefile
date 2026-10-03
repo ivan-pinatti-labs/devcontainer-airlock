@@ -162,7 +162,9 @@ coverage:
 				--test-reporter=spec --test-reporter-destination=stdout \
 				--test-reporter=lcov --test-reporter-destination=/tmp/lcov.info \
 				"tests/*.test.js" || status=$$?; \
-			sed "s|^SF:/tmp/w/|SF:|" /tmp/lcov.info > /out/lcov.info; \
+			if [ -f /tmp/lcov.info ]; then \
+				sed "s|^SF:/tmp/w/|SF:|" /tmp/lcov.info > /out/lcov.info || status=1; \
+			else echo "node wrote no lcov report; see its error above"; status=1; fi; \
 			exit $$status' || js=$$?; \
 	mkdir -p "$(COVERAGE_DIR)" && rm -f "$(COVERAGE_DIR)/coverage.xml" "$(COVERAGE_DIR)/shell.xml" "$(COVERAGE_DIR)/lcov.info" || exit 1; \
 	for report in "$$out/python/coverage.xml" "$$out/shell/shell.xml" "$$out/js/lcov.info"; do \
