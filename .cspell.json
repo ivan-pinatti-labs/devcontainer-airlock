@@ -231,6 +231,7 @@
     "setgid",
     "setpriv",
     "setsid",
+    "settimeout",
     "setuid",
     "shellcheck",
     "shfmt",
