@@ -169,3 +169,43 @@ def test_the_makefile_finds_the_shell_scripts():
         "$(SHELL_EXTRA))",
     ):
         assert part in rule, part
+
+
+def sonar_shell_patterns():
+    """sonar.lang.patterns.shell from sonar-project.properties, a comma
+    separated list continued over lines with a trailing backslash."""
+    text = (REPO_ROOT / "sonar-project.properties").read_text()
+    value = re.search(
+        r"^sonar\.lang\.patterns\.shell=((?:.*\\\n)*.*)$", text, re.MULTILINE
+    )
+    return [p.strip() for p in value.group(1).replace("\\\n", "").split(",")]
+
+
+def sonar_glob(pattern):
+    """Sonar's path pattern as a regex: `**/` is any number of folders, `**`
+    anything, `*` anything within one folder."""
+    out = ""
+    for part in re.split(r"(\*\*/|\*\*|\*)", pattern):
+        out += {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*"}.get(part, re.escape(part))
+    return re.compile(out + r"\Z")
+
+
+def test_sonar_glob():
+    assert sonar_glob("**/*.sh").match("scripts/build-images.sh")
+    assert sonar_glob("**/*.sh").match("top.sh")
+    assert not sonar_glob("**/*.sh").match("scripts/build-images.py")
+    assert sonar_glob("host/workbench").match("host/workbench")
+    assert not sonar_glob("host/workbench").match("host/workbench.mk")
+
+
+def test_sonar_analyzes_every_shell_script_as_shell():
+    """Sonar picks a file's language by its extension alone, so a script
+    without one that no pattern names is analyzed as nothing at all."""
+    patterns = [sonar_glob(p) for p in sonar_shell_patterns()]
+    assert len(patterns) > 2
+    missed = [
+        path
+        for path in shell_scripts()
+        if not any(pattern.match(path) for pattern in patterns)
+    ]
+    assert missed == []
