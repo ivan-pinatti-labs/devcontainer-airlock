@@ -1,0 +1,2 @@
+# tests/test_python_version_pin.py keeps this equal to the Python CI runs.
+target-version = "py314"

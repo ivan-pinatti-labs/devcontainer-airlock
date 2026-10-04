@@ -27,9 +27,7 @@ import osvdb
 
 BACKEND = "http://mirror-nexus:8081"
 OLD = "2020-01-01T00:00:00Z"
-YOUNG = (
-    datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
-).isoformat()
+YOUNG = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)).isoformat()
 
 
 @pytest.fixture

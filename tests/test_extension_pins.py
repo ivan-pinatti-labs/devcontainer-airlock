@@ -14,7 +14,7 @@ import pytest
 from conftest import load
 
 SCRIPT = "scripts/extension-pins.py"
-NOW = datetime.datetime.now(datetime.timezone.utc)
+NOW = datetime.datetime.now(datetime.UTC)
 
 
 def days_ago(n):

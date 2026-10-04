@@ -60,7 +60,7 @@ duplicated. On a change of fewer than 20 new lines, SonarQube Cloud skips
 the coverage and duplication conditions. This repository holds its own code
 above that floor: `make coverage`, run by the same job before the scan,
 requires 100% of the lines and branches of the Python and the JavaScript
-and 100% of the lines of the listed shell scripts, hands SonarQube the
+and 100% of the lines of every shell script it finds, hands SonarQube the
 reports, and fails the job otherwise, small change or not. Editing a line
 makes it new code, so an old finding on that line counts against the pull
 request. Fix what a rule asks for, or mark the single finding false

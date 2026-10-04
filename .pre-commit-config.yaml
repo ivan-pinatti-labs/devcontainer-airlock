@@ -219,7 +219,7 @@ repos:
         stages: [pre-commit]
 
   # This repository's own coverage gate: 100% of the Python (lines and
-  # branches), the JavaScript and the listed shell scripts (lines). `make
+  # branches), the JavaScript and the shell scripts it finds (lines). `make
   # coverage` runs each suite in a podman container that sees the source only
   # through a tar stream; see the Makefile. pre-push, not pre-commit: it
   # starts three containers, and SonarQube's CI job runs the same target on
@@ -228,11 +228,12 @@ repos:
   # `l2 --engine --net -- make coverage` first. The files: pattern names the
   # scripts without an extension by their directories, or by their paths
   # where the directory holds nothing else that is measured.
-  # tests/test_coverage_hook.py holds it to every file the Makefile lists.
+  # tests/test_coverage_hook.py holds it to every file the Makefile lists
+  # and every shell script the Makefile's rule finds.
   - repo: local
     hooks:
       - id: coverage
-        name: Coverage, 100% of the Python, the JavaScript and the listed shell
+        name: Coverage, 100% of the Python, the JavaScript and the shell
         language: system
         entry: make coverage
         pass_filenames: false

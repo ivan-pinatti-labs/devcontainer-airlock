@@ -50,7 +50,7 @@ simply drops.
 `SonarQube`, the job in `sonarqube.yml`, runs on every pull request and on
 every push to `main`, and fails when SonarQube Cloud's quality gate fails
 (`sonar.qualitygate.wait=true`) or when `make coverage` finds the Python, the
-JavaScript or a listed shell script below 100% (see the Makefile). It
+JavaScript or any shell script below 100% (see the Makefile). It
 replaced CodeQL; see [SECURITY.md](../SECURITY.md). On `merge_group` it
 passes without analyzing, because the pull request's head was already
 analyzed and gated and SonarQube Cloud has no pull request to attach a queue

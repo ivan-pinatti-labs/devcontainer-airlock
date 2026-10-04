@@ -101,9 +101,7 @@ def eligible(ext_id, pinned, now):
             return None, None
         if v.get("targetPlatform") not in PLATFORMS or is_pre_release(v):
             continue
-        released = datetime.datetime.fromisoformat(
-            v["lastUpdated"].replace("Z", "+00:00")
-        )
+        released = datetime.datetime.fromisoformat(v["lastUpdated"])
         if now - released >= MIN_AGE:
             return v["version"], released.date().isoformat()
     return None, None
@@ -116,7 +114,7 @@ def main(argv):
             file=sys.stderr,
         )
         return 2
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     pins = read_pins()
     due = {}
     try:

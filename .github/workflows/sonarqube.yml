@@ -18,8 +18,8 @@ name: SonarQube
 # `SonarQube` is a required context; see docs/MERGE_PIPELINE.md.
 #
 # Coverage comes from `make coverage` (see the Makefile), which holds the
-# Python, the JavaScript and the listed shell scripts at 100% and writes the
-# reports the scan reads.
+# Python, the JavaScript and every shell script it finds at 100% and writes
+# the reports the scan reads.
 #
 # Triggers:
 #   pull_request   the analysis a reviewer reads, decorated onto the pull
@@ -84,7 +84,7 @@ jobs:
           # are new code, and a shallow clone makes every line look new.
           fetch-depth: 0
 
-      # Coverage of the Python, the JavaScript and the listed shell scripts,
+      # Coverage of the Python, the JavaScript and the shell scripts found,
       # held at 100% (see the Makefile's `coverage` target). The quality gate
       # also requires 80% on new code, and with no report every new line
       # would count as uncovered. Each tool runs in a podman container that
