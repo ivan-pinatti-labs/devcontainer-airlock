@@ -157,8 +157,16 @@ call podman.
   extensions, workbench profiles) is a reviewed change of its own, never folded into something
   else. Extensions are pinned to a version at least seven days old.
 - Files the agents are held to (`images/workbench/claude/`,
-  `images/workbench/codex/`, `images/workbench/bin/route-to-l2`) are policy,
-  not a boundary; docs/LAYERS.md says what is. Do not describe them as more.
+  `images/workbench/codex/`, `images/workbench/agent-policy/`,
+  `images/workbench/bin/route-to-l2`) are policy, not a boundary;
+  docs/LAYERS.md says what is. Do not describe them as more.
+- What the agents may run (allow, ask and deny rules, the guard, the
+  sandbox path lists) is decided in ivan-pinatti-labs/agent-policy: a new
+  rule, a hardening or a fix to one is a pull request there, then a bump of
+  `AGENT_POLICY_REF`. `images/workbench/agent-policy/` is only the airlock's
+  overlay: what the workbench alone needs, or hardening on top. It cannot
+  loosen agent-policy, and a rule there that every agent environment would
+  want moves upstream.
 - An image is consumed by digest, never by a floating tag, so a rebuild
   cannot change what a repository builds against without a commit saying so.
 - Every published image is linted (hadolint, through the pre-commit hooks)
