@@ -27,7 +27,7 @@ sys.path.insert(0, str(REPO_ROOT / "images/mirror-gate/lib"))
 import filters
 import osvdb
 
-NOW = datetime.datetime(2026, 9, 29, tzinfo=datetime.timezone.utc)
+NOW = datetime.datetime(2026, 9, 29, tzinfo=datetime.UTC)
 WHOLE = {"ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}
 
 
