@@ -9,8 +9,8 @@ from another:
   Cloud's Python rules judge the code against.
 - every `python:3.X-...` image the Makefile pins, which is where
   `make coverage` runs the tests.
-- ruff's `target-version`, if a ruff configuration is ever added, which
-  decides which idioms ruff rewrites to and which rules fire.
+- ruff's `target-version` in ruff.toml, which decides which idioms ruff
+  rewrites to and which rules fire.
 
 Nothing watches these automatically. Renovate's github-actions manager would
 propose `uses-with` bumps of the workflow value, and .github/renovate.json5
@@ -30,9 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = REPO_ROOT / ".github/workflows/pull-request.yml"
 SONAR_PROPERTIES = REPO_ROOT / "sonar-project.properties"
 MAKEFILE = REPO_ROOT / "Makefile"
-RUFF_CONFIGS = [
-    REPO_ROOT / name for name in ("ruff.toml", ".ruff.toml", "pyproject.toml")
-]
+RUFF_CONFIG = REPO_ROOT / "ruff.toml"
 
 # `python-version: "3.14"`, quoted, as actions/setup-python is given it. The
 # quotes are not optional: YAML reads a bare 3.10 as the float 3.1, so an
@@ -52,7 +50,7 @@ MAKEFILE_PYTHON = re.compile(
     r"/python:(?P<major>\d+)\.(?P<minor>\d+)-[\w.-]+@sha256:[0-9a-f]{64}"
 )
 
-# `target-version = "py314"`, in a ruff.toml or a pyproject.toml.
+# `target-version = "py314"` in ruff.toml.
 RUFF_TARGET = re.compile(
     r'^target-version\s*=\s*"py(?P<major>\d)(?P<minor>\d+)"\s*$', re.MULTILINE
 )
@@ -101,18 +99,24 @@ def test_makefile_python_images_match_the_interpreter_ci_runs():
 
 
 def test_ruff_target_matches_the_interpreter_ci_runs():
-    """No ruff configuration exists today, so ruff runs on its defaults. The
-    moment one sets a target-version, it has to agree with CI."""
+    """ruff.toml has to exist and set target-version, or ruff would infer
+    one on its own; and it has to agree with CI."""
     ci = ci_python()
-    for config in RUFF_CONFIGS:
-        if not config.is_file():
-            continue
-        ruff = RUFF_TARGET.search(config.read_text())
-        if ruff is None:
-            continue
-        target = (ruff.group("major"), ruff.group("minor"))
-        assert target == ci, (
-            f"{config.name} targets py{''.join(target)} but {WORKFLOW.name} "
-            f"runs Python {'.'.join(ci)}. Both have to move together; "
-            "nothing derives one from the other."
-        )
+    assert RUFF_CONFIG.is_file(), f"no {RUFF_CONFIG.name} at the repository root"
+    ruff = RUFF_TARGET.search(RUFF_CONFIG.read_text())
+    assert ruff, f"no target-version found in {RUFF_CONFIG.name}"
+    target = (ruff.group("major"), ruff.group("minor"))
+    assert target == ci, (
+        f"{RUFF_CONFIG.name} targets py{''.join(target)} but {WORKFLOW.name} "
+        f"runs Python {'.'.join(ci)}. Both have to move together; "
+        "nothing derives one from the other."
+    )
+
+
+def test_ruff_reads_no_other_configuration():
+    """ruff prefers .ruff.toml over ruff.toml, and a pyproject.toml with a
+    [tool.ruff] table competes with both, so either would leave the checked
+    target unread."""
+    assert not (REPO_ROOT / ".ruff.toml").exists()
+    pyproject = REPO_ROOT / "pyproject.toml"
+    assert not pyproject.exists() or "[tool.ruff" not in pyproject.read_text()
