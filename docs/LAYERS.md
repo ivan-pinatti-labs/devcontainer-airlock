@@ -407,6 +407,41 @@ determined agent (`sh -c` inside a script, for instance); what actually
 protects the credentials is that the workbench does not hold the GitHub
 token or the ssh key, and that L2 holds nothing at all.
 
+### agent-policy
+
+The Claude Code workbench also carries
+[agent-policy](https://github.com/ivan-pinatti-labs/agent-policy), the
+organization's command policy for coding agents, rendered at a pinned
+release when the image is built (`AGENT_POLICY_REF` in
+`images/workbench/Dockerfile`, a tag and its commit, and the build refuses a
+tag that has moved). Codex gets it later.
+
+- **Its guard hook**, a second managed `PreToolUse` hook beside
+  `route-to-l2`, reads the whole command line: force pushes in any
+  spelling, hook bypasses (`--no-verify`, `SKIP=`, `HUSKY=0`,
+  `git -c core.hooksPath=...`), reads of credential files (here, the
+  agent's own login), and container runs that would reach too far
+  (`--privileged`, host namespaces, a mount of the home folder or of the
+  engine socket). It answers ask or deny, or nothing. Claude Code takes the
+  strictest answer of the two hooks, so it only ever tightens what
+  `route-to-l2` allows, and it judges the command as written, not as
+  `route-to-l2` rewrites it.
+- **Its ask and deny rules**, as a managed drop-in,
+  `/etc/claude-code/managed-settings.d/50-agent-policy.json`. Deny wins
+  over ask and ask over allow across every settings file, so a project
+  cannot lift them. Its allow rules are left out: they would lift prompts
+  the workbench keeps, and here it only tightens.
+- **Its sandbox path lists**, merged into the workbench's own
+  `managed-settings.json`: credential folders and files that no sandboxed
+  command may read, and PATH and startup folders that none may write. The
+  workbench keeps its own short list of commands that run outside the
+  sandbox (agent-policy's lets more out, such as `ssh` and `docker`).
+
+All of it is root owned, as the rest of `/etc/claude-code` is. It is still
+policy: the same caveat as above applies to every one of its rules. A new
+release reaches the workbench through a Renovate pull request that waits
+for a person, since a release can loosen as well as tighten.
+
 ### Remote Control
 
 Claude Code sends most of its HTTPS through the egress proxy as CONNECT

@@ -65,6 +65,45 @@ RUN set -eu; \
     chmod -R a-w,a+rX "${dir}"; \
   done
 
+# The organization's command policy for coding agents
+# (ivan-pinatti-labs/agent-policy), rendered at a pinned release in a stage
+# of its own, so only its output reaches an image. The release is checked
+# against its commit: a moved tag fails the build. docs/LAYERS.md,
+# "agent-policy".
+# hadolint ignore=DL3006
+FROM ${BASE_IMAGE} AS agent-policy
+# A build stage only; its output is copied out.
+# hadolint ignore=DL3002
+USER 0:0
+# renovate: datasource=git-tags depName=https://github.com/ivan-pinatti-labs/agent-policy
+ARG AGENT_POLICY_REF=v0.0.1@0000000000000000000000000000000000000000
+COPY claude/managed-settings.json /tmp/managed-settings.json
+# Out of it: the guard and its library; the guard's hook and the ask and
+# deny rules as agent-policy renders them, without its allow rules (they would
+# lift prompts the workbench keeps; it only tightens here) or the extra
+# folder it opens for its scratchpad (~/scratch), which has no place here;
+# and the workbench's own managed settings with agent-policy's sandbox path
+# lists merged in (credentials never readable, PATH and startup folders never
+# writable). The rest of its sandbox file stays out: the workbench's short
+# list of commands that run outside the sandbox is deliberate.
+RUN set -eu; \
+  version="${AGENT_POLICY_REF%@*}"; commit="${AGENT_POLICY_REF#*@}"; \
+  git clone --quiet --depth 1 --branch "${version}" \
+    https://github.com/ivan-pinatti-labs/agent-policy /src; \
+  test "$(git -C /src rev-parse HEAD)" = "${commit}" \
+    || { echo "agent-policy ${version} is not ${commit}" >&2; exit 1; }; \
+  cd /src; \
+  python3 tools/render.py --out /tmp/dist --libexec /usr/local/libexec/agent-policy; \
+  mkdir -p /out/lib; \
+  cp -r hooks/guard /out/; \
+  cp -r lib/agent_policy /out/lib/; \
+  jq 'del(.permissions.allow, .permissions.additionalDirectories)' \
+    /tmp/dist/claude/50-agent-policy.json > /out/50-agent-policy.json; \
+  jq --slurpfile t /tmp/dist/claude/sandbox-trial.json \
+    '.sandbox.filesystem = {denyRead: $t[0].sandbox.filesystem.denyRead, denyWrite: $t[0].sandbox.filesystem.denyWrite}' \
+    /tmp/managed-settings.json > /out/managed-settings.json; \
+  python3 -m py_compile /out/guard /out/lib/agent_policy/*.py
+
 # Everything both workbenches carry. Not an image of its own: each agent
 # stage builds on it and ends as the dev account.
 # hadolint ignore=DL3006
@@ -185,8 +224,17 @@ COPY bin/claude /usr/local/bin/claude
 COPY bin/airlock-relay /usr/local/libexec/workbench/airlock-relay
 RUN bash -n /usr/local/bin/claude && bash -n /usr/local/bin/rec \
   && node --check /usr/local/libexec/workbench/airlock-relay
-# The policies Claude Code cannot edit.
-COPY claude/managed-settings.json claude/CLAUDE.md /etc/claude-code/
+# The policies Claude Code cannot edit: the workbench's own (with
+# agent-policy's sandbox path lists merged in), and agent-policy's rules and
+# guard hook beside them as a managed drop-in. Codex gets agent-policy later.
+COPY claude/CLAUDE.md /etc/claude-code/
+COPY --from=agent-policy /out/managed-settings.json /etc/claude-code/
+COPY --from=agent-policy /out/50-agent-policy.json /etc/claude-code/managed-settings.d/
+COPY --from=agent-policy /out/guard /usr/local/libexec/agent-policy/guard
+COPY --from=agent-policy /out/lib/ /usr/local/libexec/agent-policy/lib/
+RUN chmod 0755 /usr/local/libexec/agent-policy/guard \
+  && printf '{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/"}' \
+     | /usr/local/libexec/agent-policy/guard --agent claude >/dev/null
 COPY --from=extensions /opt/vscode-extensions-claude /opt/vscode-extensions
 COPY vscode/claude-settings.json /tmp/agent-settings.json
 RUN install -d -o 1000 -g 1000 /home/dev/.claude \
