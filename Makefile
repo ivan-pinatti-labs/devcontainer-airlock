@@ -102,11 +102,15 @@ PYTHON_SOURCES := \
 # that use the list, not for every workbench target.
 SHELL_EXCLUDE :=
 SHELL_EXTRA :=
-SHELL_SCRIPTS = $(sort $(filter-out $(SHELL_EXCLUDE),$(shell \
+# A script name outside [A-Za-z0-9._/+-] would reach the recipes as shell text
+# (a committed `x;id;#.sh` would run `id`), so discovery marks it UNSAFE: and
+# make stops here instead.
+_shell_safe = $(if $(filter UNSAFE:,$(1)),$(error a shell script name holds a character outside A-Za-z0-9._/+-; rename it),$(1))
+SHELL_SCRIPTS = $(call _shell_safe,$(sort $(filter-out $(SHELL_EXCLUDE),$(shell \
 	git ls-files -z --cached --others --exclude-standard --deduplicate \
 	| xargs -0 -r sh -c 'for f do if [ -f "$$f" ]; then printf "%s\0" "$$f"; fi; done' sh \
-	| xargs -0 -r awk 'FNR == 1 { if (FILENAME ~ /\.(sh|bash)$$/ || $$0 ~ /^#![[:space:]]*([^[:space:]]*\/)?(env[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(ba|da)?sh([[:space:]]|$$)/) print FILENAME; nextfile }' \
-	| grep -v '^tests/')) $(SHELL_EXTRA))
+	| xargs -0 -r awk 'FNR == 1 { if (FILENAME ~ /\.(sh|bash)$$/ || $$0 ~ /^#![[:space:]]*([^[:space:]]*\/)?(env[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(ba|da)?sh([[:space:]]|$$)/) print (FILENAME ~ /^[A-Za-z0-9._\/+-]+$$/ ? FILENAME : "UNSAFE:"); nextfile }' \
+	| grep -v '^tests/')) $(SHELL_EXTRA)))
 JS_SOURCES := images/workbench/bin/airlock-relay
 # Lines kcov counts as code that bash never reports running, because they
 # hold no command of their own: an empty case arm, `fi ;;`, and the end of a

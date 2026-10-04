@@ -155,7 +155,7 @@ def test_the_makefile_finds_the_shell_scripts():
     """A hand list creeping back would stop new scripts being measured."""
     text = makefile()
     assert re.search(
-        r"^SHELL_SCRIPTS = \$\(sort \$\(filter-out \$\(SHELL_EXCLUDE\)",
+        r"^SHELL_SCRIPTS = \$\(call _shell_safe,\$\(sort \$\(filter-out \$\(SHELL_EXCLUDE\)",
         text,
         re.MULTILINE,
     )
@@ -209,3 +209,16 @@ def test_sonar_analyzes_every_shell_script_as_shell():
         if not any(pattern.match(path) for pattern in patterns)
     ]
     assert missed == []
+
+
+def test_discovery_refuses_unsafe_script_names():
+    """A script name reaches make's recipes as shell text, so discovery has to
+    refuse any name outside [A-Za-z0-9._/+-] (a committed `x;id;#.sh` would
+    otherwise run `id`)."""
+    here = Path(__file__).resolve().parent
+    while not (here / "Makefile").is_file():
+        here = here.parent
+    text = (here / "Makefile").read_text()
+    assert "_shell_safe = $(if $(filter UNSAFE:," in text
+    assert "$(call _shell_safe," in text
+    assert '? FILENAME : "UNSAFE:")' in text
