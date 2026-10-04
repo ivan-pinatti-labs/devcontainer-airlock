@@ -158,6 +158,7 @@
     "netprobe",
     "newgidmap",
     "newuidmap",
+    "nextfile",
     "nftables",
     "nocgroups",
     "nodeenv",

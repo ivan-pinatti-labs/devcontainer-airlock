@@ -29,12 +29,13 @@ the project created from this template has its own conventions.
 
    `make coverage` runs the tests under coverage.py, node's test runner and
    kcov, each in a podman container, and fails unless the Python (lines and
-   branches), the JavaScript and the shell scripts the Makefile lists (lines)
-   reach 100%. It needs podman on `PATH`, and it also runs as a pre-push
-   hook, so run `pre-commit install` again in an existing clone to pick up
-   that stage. A new script ships with tests that reach every line of it,
-   and a script without an extension is added to the Makefile's list for
-   its language.
+   branches), the JavaScript and the shell scripts (lines) reach 100%. It
+   needs podman on `PATH`, and it also runs as a pre-push hook, so run
+   `pre-commit install` again in an existing clone to pick up that stage. A
+   new script ships with tests that reach every line of it. Shell scripts
+   are found by their `.sh` or `.bash` extension or their shebang (`make
+   print-shell-scripts` lists them); a Python or JavaScript file without an
+   extension is added to the Makefile's list for its language.
 
 4. Commit using [Conventional Commits](https://www.conventionalcommits.org/),
    for example `fix: correct a typo in the README`. No ticket prefix is

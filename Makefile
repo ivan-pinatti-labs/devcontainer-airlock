@@ -4,7 +4,7 @@
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # every .PHONY here is written on one line.
-.PHONY: all help coverage
+.PHONY: all help coverage print-shell-scripts
 
 # Bare `make` shows the target list rather than doing something surprising.
 all: help
@@ -15,24 +15,26 @@ help:
 	@printf '%s\n' 'Usage:' '  make <target>' '' \
 		'Targets:' \
 		'  coverage                    Python, shell and JavaScript coverage in containers, 100% or fail.' \
+		'  print-shell-scripts         The shell scripts coverage measures, found by SHELL_SCRIPTS.' \
 		''
 	@$(MAKE) --no-print-directory workbench-help
 
 # Coverage of the code this repository writes, held at 100%: the Python
 # (lines and branches, .coveragerc) under coverage.py, the JavaScript (lines,
 # branches and functions) under node's own test runner, and the shell scripts
-# in SHELL_SCRIPTS (lines; kcov reports no branches for shell) under kcov.
+# SHELL_SCRIPTS finds (lines; kcov reports no branches for shell) under kcov.
 # Writes the reports SonarQube Cloud reads into $(COVERAGE_DIR):
 # coverage.xml (Python), lcov.info (JavaScript) and shell.xml (shell, in
 # SonarQube's generic format), and fails if any language is under 100%.
 # .github/workflows/sonarqube.yml runs this, and so does the `coverage`
 # pre-push hook.
 #
-# Every script without an extension is named here by its path: no tool finds
-# those on its own, and a script no test ran would otherwise be left out of
-# its report rather than counted as uncovered. scripts/kcov_to_sonar.py holds
-# the Python and shell lists to 100% of their lines; for JS_SOURCES, each
-# file must have its own SF: record in lcov.info.
+# Every Python and JavaScript source is named here by its path, and every
+# shell script is found by the rule at SHELL_SCRIPTS: a script no test ran
+# would otherwise be left out of its report rather than counted as
+# uncovered. scripts/kcov_to_sonar.py holds the Python and shell lists to
+# 100% of their lines; for JS_SOURCES, each file must have its own SF:
+# record in lcov.info.
 #
 # The tools run in containers that cannot see this checkout. The files git
 # would commit (tracked, plus new ones not ignored) go in on standard input
@@ -74,10 +76,17 @@ PYTHON_SOURCES := \
 	images/workbench/bin/route-to-l2 \
 	scripts/extension-pins.py \
 	scripts/kcov_to_sonar.py
-# The shell scripts, held at 100%. Each has tests/<name>.test.sh (its file
-# name less any .sh), or a folder tests/<name>/ of *.test.sh files (one per
-# command of host/workbench), which runs it. A shell script left out of this
-# list has no coverage gate at all, and SonarQube counts it as uncovered.
+# The shell scripts, held at 100%, found rather than listed: every file git
+# would commit (minus any deleted in the working tree) that ends in .sh or
+# .bash, or whose first line is a shebang running sh, bash or dash, outside
+# tests/ (those are the tests). SHELL_EXCLUDE takes out vendored or third
+# party scripts, each with its reason; SHELL_EXTRA adds a shell file neither
+# the extension nor a shebang identifies. Both are empty today. A new script
+# is therefore measured from the commit that adds it, and fails the gate
+# until its tests reach every line. tests/test_coverage_hook.py checks this
+# rule with a Python copy of it. Each script has tests/<name>.test.sh (its
+# file name less any .sh), or a folder tests/<name>/ of *.test.sh files (one
+# per command of host/workbench), which runs it.
 #
 # A script the image installs only after filling in a template (git-hook) is
 # tested in the form it is installed in: its test renders it into a
@@ -88,25 +97,16 @@ PYTHON_SOURCES := \
 # that was gone (with the test's scratch directory) by the time it merged. Rendering only
 # fills in placeholders within a line, so line N of one is line N of the
 # other, which the test checks.
-SHELL_SCRIPTS := \
-	host/workbench \
-	images/egress-proxy/bin/egress-proxy \
-	images/egress-proxy/bin/egress-reload \
-	images/l2-engine/containers/crun-without-masked-paths \
-	images/l2/bin/actionlint \
-	images/l2/bin/docker \
-	images/l2/engine-bin/podman \
-	images/workbench/bin/airlock-worktree \
-	images/workbench/bin/claude \
-	images/workbench/bin/finish-image \
-	images/workbench/bin/l2 \
-	images/workbench/bin/l2-hooks-install \
-	images/workbench/bin/l2-pre-commit \
-	images/workbench/bin/rec \
-	images/workbench/bin/status-line \
-	images/workbench/bin/workbench-init \
-	images/workbench/share/git-hook \
-	scripts/build-images.sh
+#
+# Recursive (=) rather than simple (:=), so git runs only for the targets
+# that use the list, not for every workbench target.
+SHELL_EXCLUDE :=
+SHELL_EXTRA :=
+SHELL_SCRIPTS = $(sort $(filter-out $(SHELL_EXCLUDE),$(shell \
+	git ls-files -z --cached --others --exclude-standard --deduplicate \
+	| xargs -0 -r sh -c 'for f do if [ -f "$$f" ]; then printf "%s\0" "$$f"; fi; done' sh \
+	| xargs -0 -r awk 'FNR == 1 { if (FILENAME ~ /\.(sh|bash)$$/ || $$0 ~ /^#![[:space:]]*([^[:space:]]*\/)?(env[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(ba|da)?sh([[:space:]]|$$)/) print FILENAME; nextfile }' \
+	| grep -v '^tests/')) $(SHELL_EXTRA))
 JS_SOURCES := images/workbench/bin/airlock-relay
 # Lines kcov counts as code that bash never reports running, because they
 # hold no command of their own: an empty case arm, `fi ;;`, and the end of a
@@ -177,3 +177,7 @@ coverage:
 	echo "coverage: python exit $$py, shell exit $$sh, javascript exit $$js"; \
 	test "$$py" -eq 0 && test "$$sh" -eq 0 && test "$$js" -eq 0 && \
 		test -s "$(COVERAGE_DIR)/coverage.xml" && test -s "$(COVERAGE_DIR)/shell.xml" && test -s "$(COVERAGE_DIR)/lcov.info"
+
+# The shell scripts `make coverage` measures, one per line.
+print-shell-scripts:
+	@printf '%s\n' $(SHELL_SCRIPTS)
