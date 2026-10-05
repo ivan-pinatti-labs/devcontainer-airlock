@@ -4,7 +4,9 @@
 # stub serves nothing: for `system service` it binds the unix socket it was
 # asked for (unless SOCKET_LATE is set, when a sleep binds it instead, or
 # NO_SOCKET, when nothing does) and then stays up, as the real
-# service would, writing its pid so a test can see it stopped. The ticker
+# service would, writing its pid so a test can see it stopped. For the
+# readiness probe (`podman --url ... version`) it answers unless API_DOWN is
+# set, a socket that is bound but not yet serving. The ticker
 # stub does the same.
 # shellcheck source=tests/shell-test-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/shell-test-lib.sh"
@@ -16,6 +18,7 @@ unset PODMAN_NESTED_SOCKET PODMAN_NESTED_WAIT
 bind='python3 -c "import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])"'
 # shellcheck disable=SC2016
 stub podman '
+if [ "$1" = --url ]; then [ -z "${API_DOWN:-}" ]; exit; fi
 echo $$ >"${STUB_LOG}.service"
 path="${4#unix://}"
 echo "${path}" >"${STUB_LOG}.socket"
@@ -68,6 +71,13 @@ check "after PODMAN_NESTED_WAIT seconds of tries" 1 calls "sleep 0.2"
 assert "five a second" test "$(grep -c '^sleep 0.2' "${STUB_LOG}")" -eq 5
 refute "and the command never runs" "job"
 assert "a stale socket is removed first" test ! -e "${XDG_RUNTIME_DIR}/podman/podman.sock"
+assert "the service is stopped all the same" stopped service
+
+# A bound socket whose API never answers is not ready either.
+API_DOWN=1 PODMAN_NESTED_WAIT=1 run "${entrypoint}" job
+check "a socket that never answers fails" 1 err "did not come up"
+check "after probing the API" 1 calls "podman --url unix://${XDG_RUNTIME_DIR}/podman/podman.sock version"
+refute "and the command never runs" "job"
 assert "the service is stopped all the same" stopped service
 
 # A signal reaches the command, whose own status is then the exit status.

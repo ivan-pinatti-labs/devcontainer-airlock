@@ -49,7 +49,8 @@ podman-health-ticker &
 pids+=($!)
 
 tries=$((${PODMAN_NESTED_WAIT:-30} * 5))
-until [[ -S "${socket}" ]]; do
+# A bound socket is not yet a listening one: wait until the API answers.
+until [[ -S "${socket}" ]] && podman --url "unix://${socket}" version >/dev/null 2>&1; do
   if [[ "${tries}" -le 0 ]]; then
     echo "podman-nested-entrypoint: the API socket ${socket} did not come up" >&2
     exit 1

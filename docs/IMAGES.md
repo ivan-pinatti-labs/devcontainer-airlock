@@ -200,8 +200,13 @@ on the machine runs in, access to every device node.
 `podman-nested` brings up a whole throwaway container stack, compose
 included, nested inside one container. The stack's containers, networks,
 volumes and images live in that container's own storage, and nothing talks
-to the engine socket of the machine it runs on, so a test suite cannot touch
-anything the host runs. It is not a layer of the workbench: a repository's
+to the engine socket of the machine it runs on, so a test suite cannot
+start, stop or change anything the host's engine runs. That is the whole
+guarantee: it is not network isolation from the host. Under rootless
+podman's default pasta networking the outer container can still reach a
+service listening on the host (through `host.containers.internal` and the
+host's own addresses), so a suite that must not reach host services needs a
+network policy of its own on top. It is not a layer of the workbench: a repository's
 CI (or a developer) starts it directly. The first user is
 docker-torrent-box-with-vpn's integration suite.
 
