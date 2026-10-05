@@ -420,8 +420,7 @@ its own because it serves more than the airlock (an agent on a host, say),
 but the airlock is its main use. The workbench renders it at a pinned
 release when the image is built (`AGENT_POLICY_REF` in
 `images/workbench/Dockerfile`, a tag and its commit; the build refuses a tag
-that has moved), together with the airlock's overlay. Claude Code has it
-now; Codex gets it later.
+that has moved), together with the airlock's overlay, for both agents.
 
 - **The rules**, agent-policy's and the overlay's, as one managed drop-in,
   `/etc/claude-code/managed-settings.d/50-agent-policy.json`. The workbench's
@@ -441,6 +440,14 @@ now; Codex gets it later.
   and startup folders that none may write. The workbench keeps its own
   short list of commands that run outside the sandbox (agent-policy's lets
   more out, such as `ssh` and `docker`).
+- **For Codex**, the rules as prefix rules, `agent-policy.rules` in Codex's
+  rules folder, put back from the image at every start beside
+  `workbench.rules` (Codex takes the strictest rule that matches), and the
+  guard as a second managed hook in `/etc/codex/requirements.toml`, where an
+  ask becomes a refusal that says approval is needed. Codex loads a managed
+  hook only with `[features] hooks = true` and the hook's script in
+  `[hooks] managed_dir`, so the guard is installed beside `route-to-l2` in
+  `/usr/local/libexec/workbench`, the folder named there.
 
 **The overlay**, `images/workbench/agent-policy/*.toml`, is what the
 airlock adds on top: rules in agent-policy's own format and severity scale,

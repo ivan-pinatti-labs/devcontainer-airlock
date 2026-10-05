@@ -12,13 +12,11 @@
 [[rule]]
 severity = "moderate"
 reason = "Run L2 in an image of the agent's choosing instead of the repository's"
-agents = ["claude"]
 prefix = [["l2", "--image"]]
 
 [[rule]]
 severity = "moderate"
 reason = "Stop a container: in the workbench, the session's own L2 containers; ask first, beyond agent-policy's allow"
-agents = ["claude"]
 prefix = [
   ["podman", "stop"],
   ["podman", "container", "stop"],

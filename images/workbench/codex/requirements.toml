@@ -6,6 +6,16 @@
 allowed_approval_policies = ["on-request", "untrusted"]
 allowed_sandbox_modes = ["read-only", "workspace-write"]
 
+# Hooks on, whatever a user's own configuration says, and loaded from
+# requirements only when their scripts live in managed_dir: the folder that
+# holds both of the workbench's (route-to-l2, and agent-policy's guard as
+# agent-policy-guard). Without these two, Codex leaves the hooks below out.
+[features]
+hooks = true
+
+[hooks]
+managed_dir = "/usr/local/libexec/workbench"
+
 # The same routing policy Claude Code gets, in its refusing form: Codex does
 # not take a rewritten command from a hook, so it is told the `l2` command
 # line to use instead.
@@ -15,4 +25,13 @@ matcher = "^Bash$"
 [[hooks.PreToolUse.hooks]]
 type = "command"
 command = "/usr/local/libexec/workbench/route-to-l2 --deny"
+timeout = 10
+
+# agent-policy's guard (docs/LAYERS.md, "agent-policy"): what its prefix rules
+# cannot see, a flag after the first word, a credential path, a container run
+# that reaches too far. For Codex, an ask becomes a refusal that says approval
+# is needed, since a hook cannot make Codex prompt.
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/usr/local/libexec/workbench/agent-policy-guard --agent codex"
 timeout = 10

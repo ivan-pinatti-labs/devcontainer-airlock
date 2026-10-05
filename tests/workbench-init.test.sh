@@ -25,6 +25,16 @@ run images/workbench/bin/workbench-init
 check "the Codex workbench waits too" 0 out "slept infinity"
 assert "and first puts the image copy of its rule back" \
   cmp -s "${WORKBENCH_SHARE}/codex-workbench.rules" "${CODEX_HOME}/rules/workbench.rules"
+assert "with no agent-policy rules in the image, none are written" \
+  test ! -e "${CODEX_HOME}/rules/agent-policy.rules"
+
+echo 'prefix_rule(pattern=["git", "reset"], decision="prompt")' >"${WORKBENCH_SHARE}/codex-agent-policy.rules"
+echo 'edited' >"${CODEX_HOME}/rules/agent-policy.rules"
+run images/workbench/bin/workbench-init
+assert "agent-policy's rules are put back from the image too" \
+  cmp -s "${WORKBENCH_SHARE}/codex-agent-policy.rules" "${CODEX_HOME}/rules/agent-policy.rules"
+assert "beside the workbench's own" \
+  cmp -s "${WORKBENCH_SHARE}/codex-workbench.rules" "${CODEX_HOME}/rules/workbench.rules"
 
 # SonarQube for IDE's JVM gets the egress proxy as options, written into
 # the machine settings when the file is there to write.
