@@ -38,6 +38,39 @@ asked to follow, and covers the daily routine.
 specification: there is no `devcontainer.json`. VS Code attaches to a
 running workbench (**Dev Containers: Attach to Running Container**).
 
+## The command policy: agent-policy
+
+[agent-policy](https://github.com/ivan-pinatti-labs/agent-policy) decides
+which commands a coding agent may run on its own, which it must ask about
+first, and which it must hand to you, for Claude Code and Codex alike. It
+lives in a repository of its own because it also works without the airlock,
+on any machine where an agent runs. The two are meant to be used together,
+and that is strongly recommended: each solves a different half of the same
+problem, running a coding agent and its development work more safely.
+
+| | devcontainer-airlock | agent-policy |
+| --- | --- | --- |
+| Decides | what a command can reach | whether a command runs at all |
+| How | containers: no credentials in the workbench, project code in L2 with no network, egress through an allowlist | rules and a guard hook the agent cannot edit: allow, ask, or refuse and hand to you |
+| Stops | a command that runs from reaching the token, the ssh key, the host, or anything on the internet the project does not name | a force push, a hook bypass, reading a login, `terraform destroy`, before it runs |
+| Kind of control | a boundary | policy |
+
+Neither replaces the other. The airlock limits the harm of a command the
+policy let through. The policy stops commands the airlock would let run
+because they stay inside the workspace: a force push of your branch,
+deleting a remote branch, a commit that skips the hooks.
+
+**In the airlock it is already on.** The workbench images render
+agent-policy at a pinned release and install it for both agents: its rules,
+its guard hook beside the L2 routing hook, and its sandbox path lists. A new
+release reaches the images through a Renovate pull request that waits for a
+person. The airlock's own additions, an overlay that can only add or harden,
+live in `images/workbench/agent-policy/`;
+[docs/LAYERS.md](docs/LAYERS.md), "agent-policy", has the details.
+
+**Outside the airlock**, on a machine where an agent runs directly, install
+agent-policy on its own; its README covers `make install`.
+
 ## Status
 
 The images are published to
