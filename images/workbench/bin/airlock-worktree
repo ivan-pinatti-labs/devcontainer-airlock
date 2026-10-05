@@ -33,15 +33,19 @@ dest="${repo}/.claude/worktrees/${AIRLOCK_SESSION}"
 url="$(git -C "${repo}" remote get-url origin)" || die "${repo} has no origin remote"
 git clone --quiet --no-hardlinks "${repo}" "${dest}"
 cd "${dest}"
+# The hooks go in first, from the main clone's checked out copy of the
+# configuration: the fetch below can fail (no network, a locked ssh agent),
+# and a clone left behind without them would commit with no checks at all.
+if command -v l2-hooks-install >/dev/null && [[ -f .pre-commit-config.yaml ]]; then
+  l2-hooks-install
+fi
 git remote set-url origin "${url}"
-git fetch --quiet origin
+git fetch --quiet origin ||
+  die "the clone is in ${dest}, with its hooks, but fetching ${url} failed; fix that and run git fetch there"
 head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
 if [[ -z "${head}" ]]; then
   git remote set-head origin --auto >/dev/null
   head="$(git symbolic-ref --short refs/remotes/origin/HEAD)"
 fi
 git switch --quiet -c "${branch}" --no-track "${head}"
-if command -v l2-hooks-install >/dev/null && [[ -f .pre-commit-config.yaml ]]; then
-  l2-hooks-install
-fi
 echo "airlock-worktree: ${dest} on ${branch}, from ${head}"

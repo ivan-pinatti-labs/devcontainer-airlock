@@ -80,4 +80,21 @@ check "a branch of its own name, from a default branch found now" 0 out \
 check "asking origin for it" 0 calls "git remote set-head origin --auto"
 check "the hooks installed, to run in L2" 0 calls "l2-hooks-install"
 
+# A fetch that fails (no network, a locked ssh agent) leaves the clone behind,
+# and it has its hooks already: they go in before the fetch.
+rm -r "${dest}"
+mkdir -p "${dest}"
+# shellcheck disable=SC2016
+stub git '
+if [ "$1" = -C ]; then shift 2; fi
+case "$*" in
+  "remote get-url origin") echo https://example.com/app.git ;;
+  "clone "*) mkdir -p "${5}/.git"; cp "${CONFIG}" "${5}/.pre-commit-config.yaml" ;;
+  "fetch --quiet origin") exit 128 ;;
+esac'
+CONFIG="${__scratch}/config" run images/workbench/bin/airlock-worktree "${app}"
+check "a failed fetch says where the clone is" 1 err \
+  "airlock-worktree: the clone is in ${dest}, with its hooks, but fetching https://example.com/app.git failed; fix that and run git fetch there"
+check "and its hooks were installed first" 1 calls "l2-hooks-install"
+
 finish
