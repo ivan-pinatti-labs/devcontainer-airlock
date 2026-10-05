@@ -76,15 +76,16 @@ FROM ${BASE_IMAGE} AS agent-policy
 # hadolint ignore=DL3002
 USER 0:0
 # renovate: datasource=github-tags depName=ivan-pinatti-labs/agent-policy
-ARG AGENT_POLICY_REF=v0.0.1@449ee328e2ee1b44a1180d456f535968d124886e
+ARG AGENT_POLICY_REF=v0.2.0@661e7aa245f76dc66e404f54900dee645d0e9961
 COPY claude/managed-settings.json /tmp/managed-settings.json
 COPY agent-policy/ /tmp/overlay/
 # The overlay's rule files join agent-policy's own before the render (which
 # only reads policy from inside its checkout); a name that would replace one
-# of agent-policy's fails the build. Out of it: the guard and its library;
-# every allow, ask and deny rule and the guard's hook, without the extra
-# folder agent-policy opens for its scratchpad (~/scratch), which has no
-# place here; and the workbench's own managed settings with agent-policy's
+# of agent-policy's fails the build. Rendered without its scratchpad
+# (--no-scratch): the workbench runs containers through its own L2 engine.
+# Out of it: the guard and its library; every allow, ask and deny rule and the
+# guard's hook, for Claude Code; the prefix rules, for Codex; and the
+# workbench's own managed settings with agent-policy's
 # sandbox path lists merged in (credentials never readable, PATH and startup
 # folders never writable). The rest of its sandbox file stays out: the
 # workbench's short list of commands that run outside the sandbox is
@@ -101,12 +102,11 @@ RUN set -eu; \
     cp "${f}" /src/policy/; \
   done; \
   python3 /src/tools/render.py --policy /src/policy --out /tmp/dist \
-    --libexec /usr/local/libexec/agent-policy; \
+    --libexec /usr/local/libexec/agent-policy --no-scratch; \
   mkdir -p /out/lib; \
   cp /src/hooks/guard /out/; \
   cp -r /src/lib/agent_policy /out/lib/; \
-  jq 'del(.permissions.additionalDirectories)' \
-    /tmp/dist/claude/50-agent-policy.json > /out/50-agent-policy.json; \
+  cp /tmp/dist/claude/50-agent-policy.json /out/; \
   mkdir -p /out/codex; \
   cp /tmp/dist/codex/agent-policy.rules /out/codex/; \
   jq --slurpfile t /tmp/dist/claude/sandbox-trial.json \

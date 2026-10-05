@@ -457,10 +457,12 @@ resolves deny over ask over allow across every rule, so the overlay can
 only add or harden, never loosen: a rule that should be looser belongs in
 agent-policy, and so does any rule here that every agent environment would
 want. Today it holds what only the workbench has (`l2 --image`, a podman
-global flag that could point at another engine), a hardening (`podman stop`
-asks, where agent-policy allows it), and two upstream candidates (asking on
-the podman subcommands agent-policy does not list one by one, and refusing
-Claude Code's own file tools on the agent's login).
+global flag that could point at another engine) and a hardening
+(`podman stop` asks, where agent-policy allows it). Two rules that started
+here moved upstream in agent-policy v0.2.0: asking on the last podman
+subcommands it did not list, and refusing Claude Code's own file tools on
+the agents' logins. The workbench renders it with `--no-scratch`, since its
+agents run containers through the L2 engine, not agent-policy's scratchpad.
 
 All of it is root owned, as the rest of `/etc/claude-code` is. It is still
 policy: the same caveat as above applies to every one of its rules. A new
