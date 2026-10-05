@@ -6,6 +6,6 @@
 # with the command in its header (see CONTRIBUTING.md), never edit it by
 # hand. pyyaml is what images/l2/bin/l2-prepare-hooks imports (the L2 image
 # installs it with apt); coverage measures the suite (`make coverage`).
-coverage==7.16.1
+coverage==7.16.2
 pytest==9.1.1
 pyyaml==6.0.3
