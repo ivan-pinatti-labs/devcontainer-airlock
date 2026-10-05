@@ -134,14 +134,17 @@
       // tag and that tag's commit in one build argument, so the tag and the
       // commit move together (the build refuses a tag that is not the
       // commit):
-      //   # renovate: datasource=git-tags depName=<repository URL>
+      //   # renovate: datasource=github-tags depName=<owner>/<repository>
       //   ARG NAME_REF=<tag>@<commit>
       // Named _REF, not _VERSION, so customManagers:dockerfileVersions does
-      // not also read it and move the tag alone.
+      // not also read it and move the tag alone. github-tags rather than
+      // git-tags: git-tags carries no dates, so minimumReleaseAge (with
+      // internalChecksFilter strict) would never let a bump open; github-tags
+      // dates a tag by its commit, and carries the commit for the digest.
       customType: "regex",
       managerFilePatterns: ["/^images/workbench/Dockerfile$/"],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>git-tags) depName=(?<depName>\\S+)\\nARG [A-Z_]+_REF=(?<currentValue>[^@\\s]+)@(?<currentDigest>[0-9a-f]{40})",
+        "# renovate: datasource=(?<datasource>github-tags) depName=(?<depName>\\S+)\\nARG [A-Z_]+_REF=(?<currentValue>[^@\\s]+)@(?<currentDigest>[0-9a-f]{40})",
       ],
     },
   ],
@@ -343,7 +346,7 @@
     // releases are reviewed in their own repository, and a new one still
     // waits for a person here: it can loosen as well as tighten.
     {
-      matchDepNames: ["https://github.com/ivan-pinatti-labs/agent-policy"],
+      matchDepNames: ["ivan-pinatti-labs/agent-policy"],
       automerge: false,
       addLabels: ["agent-policy"],
     },
