@@ -28,6 +28,7 @@ exec "${REAL_SLEEP}" 30'
 stub podman-health-ticker 'echo $$ >"${STUB_LOG}.ticker"; exec "${REAL_SLEEP}" 30'
 # shellcheck disable=SC2016
 stub sleep '
+[ -z "${API_DOWN:-}" ] || "${REAL_SLEEP}" 0.1
 path="$(cat "${STUB_LOG}.socket" 2>/dev/null || true)"
 [ -z "${SOCKET_LATE:-}" ] || [ -z "${path}" ] || [ -S "${path}" ] || '"${bind}"' "${path}"'
 # shellcheck disable=SC2016
@@ -74,7 +75,9 @@ assert "a stale socket is removed first" test ! -e "${XDG_RUNTIME_DIR}/podman/po
 assert "the service is stopped all the same" stopped service
 
 # A bound socket whose API never answers is not ready either.
-API_DOWN=1 PODMAN_NESTED_WAIT=1 run "${entrypoint}" job
+# Its sleeps are real here, so the service has bound the socket well before
+# the tries run out and the probe is what keeps failing.
+API_DOWN=1 PODMAN_NESTED_WAIT=2 run "${entrypoint}" job
 check "a socket that never answers fails" 1 err "did not come up"
 check "after probing the API" 1 calls "podman --url unix://${XDG_RUNTIME_DIR}/podman/podman.sock version"
 refute "and the command never runs" "job"
