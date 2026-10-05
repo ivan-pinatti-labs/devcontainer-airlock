@@ -183,7 +183,11 @@ of agents and accounts, and cannot reach each other's processes, files or
 containers. A session reads the workspace's clones read only and writes
 only in its own folder in each repository, `<repo>/.claude/worktrees/<name>`.
 Other sessions' folders are inside the read only clone, so a session can
-read them but not write them.
+read them but not write them. The workspace folder's own `.claude` is a
+folder of the session's state with each of its entries mounted read only,
+because Claude Code's command sandbox creates placeholders there (`skills/`,
+`hooks/` and more) before running anything; those stay with the session and
+never reach the real folder.
 `airlock-worktree <repo> [<branch>]`, run in the session, clones the
 repository there, independent of the main clone. Transcripts, history and
 memory stay shared: every session starts in the workspace's root, so it

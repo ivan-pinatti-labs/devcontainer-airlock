@@ -468,9 +468,14 @@ ws_mounts() {
     fi
   done < <(group_repos "${ws}")
   if [ "${n}" -gt 0 ]; then printf '%s\n' -e "GIT_CONFIG_COUNT=${n}"; fi
-  for f in CLAUDE.md AGENTS.md CLAUDE.local.md .claude; do
+  for f in CLAUDE.md AGENTS.md CLAUDE.local.md; do
     if [ -e "${ws}/${f}" ]; then printf '%s\n' -v "${ws}/${f}:${ws}/${f}:$(rw_opts)"; fi
   done
+  if [ -n "${SESSION:-}" ] && [ -d "${ws}/.claude" ]; then
+    session_claude_dir "${ws}"
+  elif [ -e "${ws}/.claude" ]; then
+    printf '%s\n' -v "${ws}/.claude:${ws}/.claude:$(rw_opts)"
+  fi
   # Claude Code's command sandbox guards <workdir>/.mcp.json by binding over
   # it, so the file has to exist, and the group folder itself is not a mount
   # (only the clones in it are): nothing can be created there, and without
@@ -533,6 +538,28 @@ unit() {
 }
 # How a workspace's clones are mounted: read write, or read only in a
 # session, which writes only in folders of its own (session_folder).
+# A session's view of the group folder's own .claude: a folder kept with the
+# session's state (inside its root, which is already mounted at the folder),
+# with each entry of the real .claude mounted into it read only. Claude Code's
+# command sandbox creates a placeholder for every path it guards under the
+# project's .claude (skills/, hooks/ and more) before binding over it, and the
+# real folder is read only in a session, so with it mounted whole every
+# sandboxed command failed to start. The placeholders land in the session's
+# state; nothing is created in the real folder. An entry added to the real
+# folder later reaches the next session, not a running one.
+session_claude_dir() {
+  local ws="$1" e
+  mkdir -p "$(state_dir "${ws}")/root/.claude"
+  for e in "${ws}/.claude"/* "${ws}/.claude"/.[!.]* "${ws}/.claude"/..?*; do
+    [ -e "${e}" ] || [ -L "${e}" ] || continue
+    # Not mounted: sessions' own folders (worktrees; the group folder has
+    # none, but a clone might), and Claude Code's write scratch folder
+    # (.cc-writes), which each session keeps for itself.
+    case "$(basename "${e}")" in worktrees | .cc-writes) continue ;; esac
+    printf '%s\n' -v "${e}:${ws}/.claude/$(basename "${e}"):ro,Z"
+  done
+}
+
 rw_opts() {
   if [ -n "${SESSION:-}" ]; then echo "ro,Z"; else echo "Z"; fi
 }
