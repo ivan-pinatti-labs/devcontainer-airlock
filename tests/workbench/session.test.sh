@@ -190,6 +190,8 @@ clone "${org}/one"
 clone "${org}/two"
 mkdir -p "${org}/two/.devcontainer"
 touch "${org}/two/.devcontainer/workbench-worktree-only" "${org}/AGENTS.md"
+mkdir -p "${org}/.claude/agents" "${org}/.claude/.cc-writes" "${org}/.claude/worktrees"
+touch "${org}/.claude/settings.json" "${org}/.claude/.hidden"
 run "${wb}" session start claude "${org}"
 g="$(session_name)"
 check "a group session" 0 out "workbench: session ${g} (claude, ${org})"
@@ -199,6 +201,16 @@ check "each clone read only, with the session's folder" 0 calls \
 check "a worktree only clone's git directory too, and only that folder" 0 calls \
   "-v ${org}/two/.git:${org}/two/.git:ro,Z -v ${org}/two/.claude/worktrees/${g}:${org}/two/.claude/worktrees/${g}:Z -e GIT_CONFIG_KEY_0=safe.directory"
 check "the folder's own agent files, read only" 0 calls "-v ${org}/AGENTS.md:${org}/AGENTS.md:ro,Z"
+# Its .claude: a folder of the session's state, so Claude Code's sandbox can
+# make its placeholders there, with each real entry mounted in read only.
+assert "the folder's .claude is kept with the session" test -d "${sessions}/${g}/root/.claude"
+check "each entry of the real .claude, read only" 0 calls \
+  "-v ${org}/.claude/agents:${org}/.claude/agents:ro,Z"
+check "dotfiles too" 0 calls "-v ${org}/.claude/.hidden:${org}/.claude/.hidden:ro,Z"
+check "and files" 0 calls "-v ${org}/.claude/settings.json:${org}/.claude/settings.json:ro,Z"
+assert "never the real folder whole" sh -c "! grep -q -- '-v ${org}/.claude:' '${STUB_LOG}'"
+assert "nor its write scratch folder, which each session keeps" sh -c "! grep -q -- '.claude/.cc-writes:' '${STUB_LOG}'"
+assert "nor worktrees" sh -c "! grep -q -- '-v ${org}/.claude/worktrees:' '${STUB_LOG}'"
 clone "${org}/two/.claude/worktrees/${g}"
 echo main >"${org}/two/.claude/worktrees/${g}/.git/branch"
 run "${wb}" session list
