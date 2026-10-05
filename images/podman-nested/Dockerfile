@@ -59,7 +59,7 @@ COPY --chown=1000:1000 containers.conf /home/podman/.config/containers/container
 COPY bin/podman-nested-entrypoint bin/podman-health-ticker /usr/local/bin/
 RUN install -d -m 0700 -o podman -g podman /run/user/1000
 
-USER podman
+USER 1000:1000
 ENV XDG_RUNTIME_DIR=/run/user/1000 \
     DOCKER_HOST=unix:///run/user/1000/podman/podman.sock
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
