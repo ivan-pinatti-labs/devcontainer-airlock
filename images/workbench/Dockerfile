@@ -100,11 +100,11 @@ RUN set -eu; \
       || { echo "overlay ${f##*/} would replace agent-policy's" >&2; exit 1; }; \
     cp "${f}" /src/policy/; \
   done; \
-  cd /src; \
-  python3 tools/render.py --out /tmp/dist --libexec /usr/local/libexec/agent-policy; \
+  python3 /src/tools/render.py --policy /src/policy --out /tmp/dist \
+    --libexec /usr/local/libexec/agent-policy; \
   mkdir -p /out/lib; \
-  cp -r hooks/guard /out/; \
-  cp -r lib/agent_policy /out/lib/; \
+  cp /src/hooks/guard /out/; \
+  cp -r /src/lib/agent_policy /out/lib/; \
   jq 'del(.permissions.additionalDirectories)' \
     /tmp/dist/claude/50-agent-policy.json > /out/50-agent-policy.json; \
   jq --slurpfile t /tmp/dist/claude/sandbox-trial.json \
@@ -242,8 +242,9 @@ COPY --from=agent-policy /out/50-agent-policy.json /etc/claude-code/managed-sett
 COPY --from=agent-policy /out/guard /usr/local/libexec/agent-policy/guard
 COPY --from=agent-policy /out/lib/ /usr/local/libexec/agent-policy/lib/
 RUN chmod 0755 /usr/local/libexec/agent-policy/guard \
-  && printf '{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/"}' \
-     | /usr/local/libexec/agent-policy/guard --agent claude >/dev/null
+  && printf '{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/"}' > /tmp/guard-probe.json \
+  && /usr/local/libexec/agent-policy/guard --agent claude < /tmp/guard-probe.json >/dev/null \
+  && rm /tmp/guard-probe.json
 COPY --from=extensions /opt/vscode-extensions-claude /opt/vscode-extensions
 COPY vscode/claude-settings.json /tmp/agent-settings.json
 RUN install -d -o 1000 -g 1000 /home/dev/.claude \

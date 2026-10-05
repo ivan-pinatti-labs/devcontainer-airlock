@@ -21,13 +21,7 @@
   "sandbox": {
     "enabled": true,
     "enableWeakerNestedSandbox": true,
-    "excludedCommands": [
-      "l2 *",
-      "git *",
-      "podman *",
-      "gh *",
-      "ssh-add -l"
-    ]
+    "excludedCommands": ["l2 *", "git *", "podman *", "gh *", "ssh-add -l"]
   },
   "env": {
     "DISABLE_AUTOUPDATER": "1"
