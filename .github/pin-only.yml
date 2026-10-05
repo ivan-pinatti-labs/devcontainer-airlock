@@ -23,6 +23,7 @@ allowed_paths:
   - images/gh-broker/Dockerfile
   - images/egress-proxy/Dockerfile
   - images/mirror-gate/Dockerfile
+  - images/podman-nested/Dockerfile
   - tests/requirements.in
   - tests/requirements.txt
   - Makefile

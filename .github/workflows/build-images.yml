@@ -2,7 +2,8 @@
 name: Images
 
 # Builds, scans and publishes every image: base first, then the workbench,
-# L2, the L2 engine and the two helpers on top of that exact base build.
+# L2, the L2 engine and the helpers on top of that exact base build, and the
+# nested test runner (podman-nested) on its own pinned upstream image.
 #
 # The work is scripts/build-images.sh, which runs the same way on a developer
 # machine with rootless podman (docs/IMAGES.md, "What the build does"), so the
@@ -26,11 +27,12 @@ on:
       - images/**
       - scripts/build-images.sh
       - .github/workflows/build-images.yml
-  # Upstream security fixes land in Ubuntu's own packages, not in this
-  # repository, so nothing here would ever rebuild to pick them up without a
-  # schedule. Weekly rather than daily: the apt upgrade in the base Dockerfile
-  # is what collects them, and a daily rebuild would republish near identical
-  # digests six extra times a week for nothing.
+  # Upstream security fixes land in Ubuntu's (and Fedora's) own packages, not
+  # in this repository, so nothing here would ever rebuild to pick them up
+  # without a schedule. Weekly rather than daily: the apt upgrade in the base
+  # Dockerfile (and the dnf upgrade in podman-nested's) is what collects them,
+  # and a daily rebuild would republish near identical digests six extra
+  # times a week for nothing.
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:
@@ -84,7 +86,7 @@ jobs:
           REGISTRY_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.GITHUB_TOKEN || '' }}
         run: scripts/build-images.sh
 
-      # One SARIF file per image, each carrying its own category, so the six
+      # One SARIF file per image, each carrying its own category, so the
       # reports sit side by side in code scanning.
       - name: Upload the vulnerability reports to code scanning
         if: always()

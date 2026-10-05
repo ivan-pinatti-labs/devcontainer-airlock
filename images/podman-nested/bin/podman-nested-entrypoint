@@ -1,0 +1,74 @@
+#!/bin/bash
+# The podman-nested image's entrypoint: serve the nested engine's API socket,
+# run the health ticker, then run the command it was given and exit with its
+# status, stopping both on the way out.
+#
+# The socket is for clients that speak the Docker or Podman API (a test
+# library, `podman --url`); the podman command itself needs neither. The
+# command runs as a child rather than through exec, so the two background
+# processes are stopped when it ends even where this is not the container's
+# last process, and a TERM, INT or HUP this receives is passed on to it.
+#
+# Usage:
+#   podman-nested-entrypoint COMMAND [ARGS...]
+#
+# Environment:
+#   PODMAN_NESTED_SOCKET  where to serve the API.
+#                         Default: ${XDG_RUNTIME_DIR}/podman/podman.sock
+#   PODMAN_NESTED_WAIT    seconds to wait for the socket. Default: 30
+#
+# Exit status codes:
+#   the command's own, or
+#   1    the API socket did not come up
+#   2    usage error
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+if [[ $# -eq 0 ]]; then
+  echo "usage: podman-nested-entrypoint COMMAND [ARGS...]" >&2
+  exit 2
+fi
+
+socket="${PODMAN_NESTED_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock}"
+# A socket left from an earlier run of this container (a restart keeps /run)
+# would pass the wait below before the new service is listening.
+mkdir -p "$(dirname "${socket}")"
+rm -f "${socket}"
+
+pids=()
+stop() {
+  kill "${pids[@]}" 2>/dev/null || true
+}
+trap stop EXIT
+
+podman system service --time=0 "unix://${socket}" &
+pids+=($!)
+podman-health-ticker &
+pids+=($!)
+
+tries=$((${PODMAN_NESTED_WAIT:-30} * 5))
+until [[ -S "${socket}" ]]; do
+  if [[ "${tries}" -le 0 ]]; then
+    echo "podman-nested-entrypoint: the API socket ${socket} did not come up" >&2
+    exit 1
+  fi
+  tries=$((tries - 1))
+  sleep 0.2
+done
+
+# A command started with & would read /dev/null rather than this standard
+# input, so it is passed on explicitly.
+"$@" <&0 &
+child=$!
+for signal in TERM INT HUP; do
+  # shellcheck disable=SC2064 # the signal is fixed now, the pid read later
+  trap "kill -s ${signal} \"\${child}\" 2>/dev/null || true" "${signal}"
+done
+# A forwarded signal ends the first wait early; the second one returns the
+# command's own status either way, since bash keeps it once it has exited.
+wait "${child}" || true
+status=0
+wait "${child}" || status=$?
+exit "${status}"

@@ -57,7 +57,7 @@ esac'
 # shellcheck disable=SC2016
 stub jq 'case "$1" in -r) echo sha256:from-buildx ;; *) echo "{}" ;; esac'
 stub sleep
-images=(base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate)
+images=(base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate podman-nested)
 
 echo 0 >"${CURL_FAILS}"
 RUNTIME=podman run scripts/build-images.sh
@@ -66,6 +66,8 @@ check "then each image on that exact base" 0 calls \
   "podman build --tls-verify=false --build-arg BASE_IMAGE=localhost:5000/airlock-base@sha256:base -t localhost:5000/airlock-l2:ci ${__repo}/images/l2"
 check "a workbench is a target of the workbench Dockerfile" 0 calls \
   "--target codex -t localhost:5000/airlock-workbench-codex:ci ${__repo}/images/workbench"
+check "a standalone image builds on its own upstream image, not on base" 0 calls \
+  "podman build --tls-verify=false -t localhost:5000/airlock-podman-nested:ci ${__repo}/images/podman-nested"
 check "the staging registry already up is used" 0 calls "curl -fsS http://localhost:5000/v2/"
 refute "not started again" "build-images-staging"
 for name in "${images[@]}"; do

@@ -137,6 +137,7 @@ credentials and agents in the workbench, project tooling in L2.
 | bubblewrap, socat, ripgrep, openssh-client | Ubuntu | distribution repository signature | workbench |
 | sox | Ubuntu | distribution repository signature | Claude workbench (voice mode records with SoX) |
 | squid | Ubuntu | distribution repository signature | egress proxy |
+| podman, catatonit, podman-compose, make, jq, yq, xmlstarlet, python3-pip, acl, openssl, procps-ng, which, iproute | Fedora, on `quay.io/podman/stable` pinned by digest | distribution repository signature | podman-nested, the nested test runner |
 | github-cli | `cli.github.com/packages stable main` | repository signature | gh broker only; the workbench's `gh` is a shim that asks the broker |
 | nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | workbench (the agent CLIs run on it) and L2 (node hooks) |
 | terraform | `apt.releases.hashicorp.com resolute main` | repository signature | the L2 image of the repository that uses it |
