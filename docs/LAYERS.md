@@ -377,19 +377,18 @@ files they cannot edit (root owned, read only):
   `git *` at all (measured with Claude Code 2.1.283). Whatever stays inside
   cannot reach the sockets and fails. Excluded commands still go through
   the permission prompts.
-- In the same file, `podman` (a client of the engine) runs without asking
-  when it only reads (`ps`, `images`, `inspect`, `logs` and the like) or
-  adds something harmless (`pull`, `network create`, `volume create`), and
-  so do `run`, `exec`, `build`, `start` and `cp`. Those last ones are a way
-  around `l2`'s protections: a container started by hand gets whatever it
-  mounts read write, `.git/config` included, which `l2` keeps read only.
-  That is accepted, since what protects the credentials is that the engine
-  holds none. It always asks before anything that removes or stops
-  something (`rm`, `rmi`, `prune`, `kill`, `stop`, `network rm`), and
-  before the rarer commands that load, push or reconfigure (`load`, `push`,
-  `login`, `system service`, a global flag). A managed `ask` rule wins over
-  an `allow` rule in any other settings file, so a project cannot lift
-  those; it can still allow commands the managed rules do not name.
+- Which commands run without asking, which ask and which are refused comes
+  from agent-policy and the airlock's overlay on it (below). For `podman`
+  (a client of the engine) that means reads (`ps`, `images`, `inspect`,
+  `logs` and the like), harmless additions (`pull`, `network create`,
+  `volume create`) and `run`, `exec`, `build`, `start` and `cp` run without
+  asking. Those last ones are a way around `l2`'s protections: a container
+  started by hand gets whatever it mounts read write, `.git/config`
+  included, which `l2` keeps read only. That is accepted, since what
+  protects the credentials is that the engine holds none, and the guard
+  asks before a run that would reach further (below). Anything that
+  removes, stops, loads, pushes or reconfigures asks, as does a global
+  flag, which could point the client at another engine.
 - Also there, the status line names the workbench the session runs in
   (`AIRLOCK_WORKBENCH`, the container name), then the folder (`~` for
   your home folder on the host, `...` for `.claude/worktrees`), its branch in a
@@ -406,6 +405,56 @@ This is policy, not a boundary. Command matching can be defeated by a
 determined agent (`sh -c` inside a script, for instance); what actually
 protects the credentials is that the workbench does not hold the GitHub
 token or the ssh key, and that L2 holds nothing at all.
+
+### agent-policy
+
+[agent-policy](https://github.com/ivan-pinatti-labs/agent-policy) is the
+source of truth for what the agents may run: every allow, ask and deny rule,
+the guard hook and the sandbox path lists live there, so a new rule, a
+hardening or a fix to a rule is a pull request there. It is a repository of
+its own because it serves more than the airlock (an agent on a host, say),
+but the airlock is its main use. The workbench renders it at a pinned
+release when the image is built (`AGENT_POLICY_REF` in
+`images/workbench/Dockerfile`, a tag and its commit; the build refuses a tag
+that has moved), together with the airlock's overlay. Claude Code has it
+now; Codex gets it later.
+
+- **The rules**, agent-policy's and the overlay's, as one managed drop-in,
+  `/etc/claude-code/managed-settings.d/50-agent-policy.json`. The workbench's
+  own `managed-settings.json` keeps no rules, only its mechanics.
+- **The guard hook**, a second managed `PreToolUse` hook beside
+  `route-to-l2`, reads the whole command line: force pushes in any
+  spelling, hook bypasses (`--no-verify`, `SKIP=`, `HUSKY=0`,
+  `git -c core.hooksPath=...`), reads of credential files (here, the
+  agent's own login), and container runs that would reach too far
+  (`--privileged`, host namespaces, a mount of the home folder or of the
+  engine socket). It answers ask or deny, or nothing. Claude Code takes the
+  strictest answer of the two hooks, so it only ever tightens what
+  `route-to-l2` allows, and it judges the command as written, not as
+  `route-to-l2` rewrites it.
+- **The sandbox path lists**, merged into `managed-settings.json`:
+  credential folders and files that no sandboxed command may read, and PATH
+  and startup folders that none may write. The workbench keeps its own
+  short list of commands that run outside the sandbox (agent-policy's lets
+  more out, such as `ssh` and `docker`).
+
+**The overlay**, `images/workbench/agent-policy/*.toml`, is what the
+airlock adds on top: rules in agent-policy's own format and severity scale,
+copied into its policy before the render, so its validator checks them and
+a file named like one of agent-policy's fails the build. Claude Code
+resolves deny over ask over allow across every rule, so the overlay can
+only add or harden, never loosen: a rule that should be looser belongs in
+agent-policy, and so does any rule here that every agent environment would
+want. Today it holds what only the workbench has (`l2 --image`, a podman
+global flag that could point at another engine), a hardening (`podman stop`
+asks, where agent-policy allows it), and two upstream candidates (asking on
+the podman subcommands agent-policy does not list one by one, and refusing
+Claude Code's own file tools on the agent's login).
+
+All of it is root owned, as the rest of `/etc/claude-code` is. It is still
+policy: the same caveat as above applies to every one of its rules. A new
+release reaches the workbench through a Renovate pull request that waits
+for a person, since a release can loosen as well as tighten.
 
 ### Remote Control
 

@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The airlock's overlay on agent-policy (docs/LAYERS.md, "agent-policy").
+# agent-policy is the source of truth for what the agents may run; this file
+# only adds what is specific to the workbench, or hardens on top of it. It is
+# rendered together with agent-policy's own rules by agent-policy's render,
+# so the same schema and validator apply. Claude Code resolves deny over ask
+# over allow, so nothing here can loosen agent-policy: a rule that should be
+# looser belongs there. A rule here that every agent environment would want
+# is a candidate to move there.
+
+[[rule]]
+severity = "moderate"
+reason = "Run L2 in an image of the agent's choosing instead of the repository's"
+agents = ["claude"]
+prefix = [["l2", "--image"]]
+
+[[rule]]
+severity = "moderate"
+reason = "Stop a container: in the workbench, the session's own L2 containers; ask first, beyond agent-policy's allow"
+agents = ["claude"]
+prefix = [
+  ["podman", "stop"],
+  ["podman", "container", "stop"],
+]
+
+[[rule]]
+severity = "moderate"
+reason = "podman subcommands agent-policy does not list one by one; the workbench asks for anything else they do (upstream candidate)"
+agents = ["claude"]
+prefix = [
+  ["podman", ["compose", "pod", "secret", "manifest", "healthcheck"]],
+  ["podman", "container", "init"],
+]
+
+[[rule]]
+severity = "critical"
+reason = "The agent's own login; the sandbox and the guard cover shell reads, this covers Claude Code's own file tools (upstream candidate)"
+agents = ["claude"]
+claude = [
+  "Read(/home/dev/.claude/.credentials.json)",
+  "Edit(/home/dev/.claude/.credentials.json)",
+]
+
+[[rule]]
+severity = "moderate"
+reason = "A podman global flag (--url, --connection, --remote and the like) can point the client at another engine than the session's"
+agents = ["claude"]
+claude = ["Bash(podman -*)"]
