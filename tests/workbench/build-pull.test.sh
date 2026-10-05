@@ -14,6 +14,8 @@ for i in l2 l2-engine gh-broker egress-proxy mirror-gate; do
   check "and ${i}" 0 calls \
     "podman build --build-arg BASE_IMAGE=localhost/airlock-base:local -t localhost/airlock-${i}:local ${__repo}/images/${i}"
 done
+check "and the nested test runner, on its own upstream image" 0 calls \
+  "podman build -t localhost/airlock-podman-nested:local ${__repo}/images/podman-nested"
 WORKBENCH_TAG=next run "${wb}" build
 check "under WORKBENCH_TAG" 0 calls "-t localhost/airlock-l2:next"
 rule 'build *images/base' 'exit 1'
@@ -28,7 +30,7 @@ reg=ghcr.io/ivan-pinatti-labs
 rule 'image inspect --format {{range .RepoDigests}}*' \
   'r="${*: -1}"; r="${r%:*}"; printf "%s\n" "${r}@sha256:mine" "${r}@sha256:index" "other/x@sha256:y"'
 run "${wb}" pull
-for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate; do
+for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate podman-nested; do
   check "pull takes ${i}, pinned by its index digest" 0 out "workbench: ${i} ${reg}/airlock-${i}@sha256:index"
 done
 check "from the registry" 0 calls "podman pull --quiet ${reg}/airlock-l2:latest"

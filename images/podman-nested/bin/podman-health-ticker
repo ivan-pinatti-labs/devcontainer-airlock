@@ -1,0 +1,35 @@
+#!/bin/bash
+# Runs the healthchecks of the nested containers, which nothing else would.
+#
+# Podman schedules a container's healthcheck with a systemd timer. The
+# podman-nested image has no systemd (and cgroupfs rather than systemd's
+# cgroup manager), so a nested container with a healthcheck would stay
+# "starting" for ever, and a compose stack whose services wait on
+# `condition: service_healthy` would never come up. This stands in for the
+# timers: every few seconds it runs the healthcheck of every running
+# container that has one, all at once, so a slow check holds up no other.
+#
+# Every container is checked on this one tick rather than on its own
+# interval, so a check runs at most every HEALTH_TICK seconds (and its
+# retries are counted on that tick too).
+#
+# Usage:
+#   podman-health-ticker
+#
+# Environment:
+#   HEALTH_TICK  seconds between rounds. Default: 10
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# A container without a healthcheck matches none of the three states.
+filters=(--filter health=starting --filter health=healthy --filter health=unhealthy)
+
+while true; do
+  for id in $(podman ps --quiet "${filters[@]}" 2>/dev/null || true); do
+    podman healthcheck run "${id}" >/dev/null 2>&1 &
+  done
+  wait
+  sleep "${HEALTH_TICK:-10}"
+done

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build, scan and (on request) publish every image, base first and the rest
-# on top of that exact base build. The CI workflow runs this, and so can you,
+# on top of that exact base build, except the few that build on an upstream
+# image of their own (STANDALONE). The CI workflow runs this, and so can you,
 # with rootless podman, which is how its logic is tested before CI ever sees
 # it.
 #
@@ -42,6 +43,10 @@ set -o pipefail
 # workbench-<agent> is a target of images/workbench/Dockerfile; the two share
 # every layer below their agent stage, so the second build reuses the first.
 IMAGES=(workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate)
+# Built on their own pinned upstream image rather than on base, so they are
+# given no BASE_IMAGE: podman-nested is quay.io/podman/stable with a test
+# runner's tools on top.
+STANDALONE=(podman-nested)
 PREFIX=airlock
 
 # Pinned by digest; Renovate keeps them current.
@@ -179,6 +184,11 @@ main() {
   for name in "${IMAGES[@]}"; do
     log "building ${name} on ${base_ref}"
     digests+=("${name}=$(build "${name}" "${base_ref}")")
+  done
+
+  for name in "${STANDALONE[@]}"; do
+    log "building ${name}"
+    digests+=("${name}=$(build "${name}")")
   done
 
   for entry in "${digests[@]}"; do

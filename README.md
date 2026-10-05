@@ -78,7 +78,8 @@ cannot change what a repository builds against until someone bumps the pin.
 ## How images are built
 
 `scripts/build-images.sh`, in CI and locally alike: base first, then every
-other image on that exact base, each scanned before anything is published,
+other image on that exact base (the nested test runner on its own pinned
+upstream image), each scanned before anything is published,
 and what is published is the scanned manifest itself. A secret found in a
 layer blocks the publish. Vulnerabilities are reported rather than blocking,
 with one exception: a critical one carrying a fix blocks. Scheduled rebuilds

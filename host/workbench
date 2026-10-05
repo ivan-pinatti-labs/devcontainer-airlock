@@ -780,6 +780,8 @@ cmd_build() {
   for i in l2 l2-engine gh-broker egress-proxy mirror-gate; do
     podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/airlock-${i}:${TAG}" "${HERE}/images/${i}"
   done
+  # The nested test runner builds on its own upstream image, not on base.
+  podman build -t "localhost/airlock-podman-nested:${TAG}" "${HERE}/images/podman-nested"
 }
 
 # The published images, tagged as the local ones, for anyone who would rather
@@ -787,7 +789,7 @@ cmd_build() {
 # digest, the one to pin by, rather than this platform's manifest.
 cmd_pull() {
   local i ref
-  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate; do
+  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate podman-nested; do
     ref="$(pull_published "${i}")" || die "could not pull ${REGISTRY}/airlock-${i}"
     echo "workbench: ${i} ${ref}"
   done

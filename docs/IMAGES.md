@@ -2,10 +2,12 @@
 
 ## What is here
 
-Seven images, each built from `images/<name>/Dockerfile` (the two workbenches
+Nine images, each built from `images/<name>/Dockerfile` (the two workbenches
 from `images/workbench/Dockerfile`) and published as
 `ghcr.io/ivan-pinatti-labs/airlock-<name>`. What each one is trusted
-with, and why they are split this way, is in [LAYERS.md](LAYERS.md).
+with, and why they are split this way, is in [LAYERS.md](LAYERS.md). The
+last one, `podman-nested`, is not a layer of the workbench but a test runner
+of its own; see "The nested test runner" below.
 
 | Image | Built on | Carries |
 | --- | --- | --- |
@@ -17,10 +19,12 @@ with, and why they are split this way, is in [LAYERS.md](LAYERS.md).
 | `gh-broker` | base | gh and the broker |
 | `egress-proxy` | base | squid, the egress sets and the program that refreshes them |
 | `mirror-gate` | base | the package mirror's gate (OSV malicious package filter, backend routes) and the provisioning of its backend; the backend itself is the official Nexus Repository CE image, pinned by digest in `host/workbench` |
+| `podman-nested` | `quay.io/podman/stable`, by digest | rootless podman serving its API socket, podman-compose, a health ticker, and the tools a test suite drives a stack with (make, jq, yq, xmlstarlet, pip) |
 
 There is **no version manager** in any of them. Tools come from signed
-package repositories, installed with apt; `TOOL_SOURCES.md` is the reference
-for where each one comes from and what vouches for it.
+package repositories, installed with apt (dnf in `podman-nested`);
+`TOOL_SOURCES.md` is the reference for where each one comes from and what
+vouches for it.
 
 The base deliberately carries none of github-cli, pre-commit, nodejs or
 terraform. It carries their signing keys instead, which is the part that is
@@ -191,11 +195,99 @@ sudo semodule -i devcontainer_nested_devices.pp
 container domain, including the ordinary `container_t` every other container
 on the machine runs in, access to every device node.
 
+## The nested test runner
+
+`podman-nested` brings up a whole throwaway container stack, compose
+included, nested inside one container. The stack's containers, networks,
+volumes and images live in that container's own storage, and nothing talks
+to the engine socket of the machine it runs on, so a test suite cannot
+start, stop or change anything the host's engine runs. That is the whole
+guarantee: it is not network isolation from the host. Under rootless
+podman's default pasta networking the outer container can still reach a
+service listening on the host (through `host.containers.internal` and the
+host's own addresses), so a suite that must not reach host services needs a
+network policy of its own on top. It is not a layer of the workbench: a repository's
+CI (or a developer) starts it directly. The first user is
+docker-torrent-box-with-vpn's integration suite.
+
+It builds on `quay.io/podman/stable`, podman's own image for running podman
+in a container, pinned by digest, with the tools a suite drives a stack with
+on top. Its entrypoint serves the nested engine's API at
+`/run/user/1000/podman/podman.sock` (`DOCKER_HOST` points there, for test
+libraries that speak the Docker API), starts the health ticker, then runs the
+command it was given and exits with its status.
+
+```shell
+podman run --rm --user podman \
+  --device /dev/fuse --device /dev/net/tun \
+  --security-opt label=type:container_engine_t --security-opt unmask=ALL \
+  --memory 3g --memory-swap 3g \
+  -v <repository>-nested-storage:/home/podman/.local/share/containers \
+  -v <a copy of the checkout>:/work:Z -w /work \
+  ghcr.io/ivan-pinatti-labs/airlock-podman-nested@sha256:<digest> make test
+```
+
+What each flag is for:
+
+- **`--user podman`**: the nested engine runs rootless as the image's
+  `podman` account, which has the subordinate ids nested containers need.
+- **`--device /dev/fuse`**: fuse-overlayfs, the nested storage driver.
+- **`--device /dev/net/tun`**: pasta, which a nested network of its own (a
+  compose stack's default network) needs.
+- **`--security-opt unmask=ALL`**: the runtime masks parts of `/proc` and
+  `/sys`, and while it does, a nested container cannot mount a `/proc` of its
+  own. The upstream image works around that by bind mounting its own `/proc`
+  into every nested container, which hands each of them the outer PID
+  namespace (a program reading `/proc/self/exe` or `/proc/1` finds a process
+  that is not its own). This image drops that bind mount
+  (`images/podman-nested/containers.conf`), so it needs the masks removed
+  instead. The container stays rootless, unprivileged and without added
+  capabilities, so the kernel still refuses anything its user namespace
+  does not own.
+- **`--security-opt label=type:container_engine_t`**: on an SELinux host,
+  the domain meant for a container engine inside a container, the same one
+  the L2 engine runs in. SELinux stays enforcing; `label=disable` is not
+  needed. Where SELinux is off the option does nothing. A stack that passes
+  a device on to a nested container (a VPN client's TUN device) also needs
+  the host policy module in "Devices for nested containers" above.
+- **`--memory` and `--memory-swap`**: one cap for the whole stack, which is
+  otherwise bounded only by the host.
+- **A named volume on `/home/podman/.local/share/containers`**: the nested
+  storage, kept between runs so images are not pulled again. The upstream
+  image declares it (and `/var/lib/containers`) a `VOLUME`, so without a
+  name each run gets an anonymous volume: `--rm` removes it, but a container
+  removed later needs `podman rm -v`, or the volume is left behind.
+
+Not needed: `--init` (catatonit is already the first process, and reaps the
+nested containers' conmon processes), `--privileged`, any `--cap-add`, and
+any host socket.
+
+Podman schedules healthchecks with systemd timers, and there is no systemd
+in here, so a nested container's healthcheck would never run and a compose
+service waiting on `condition: service_healthy` would never start. The
+health ticker (`podman-health-ticker`) stands in for the timers: every
+`HEALTH_TICK` seconds (10 by default) it runs the healthcheck of every
+container that has one. A check therefore runs on that tick rather than on
+its own interval. `PODMAN_NESTED_SOCKET` moves the API socket and
+`PODMAN_NESTED_WAIT` is how long the entrypoint waits for it (30 seconds).
+
+Measured 2026-10-05 on an SELinux enforcing host, with a 512 MiB cap and
+each of `label=type:container_engine_t` and `label=disable`: the API socket
+answered (`podman --url unix:///run/user/1000/podman/podman.sock info`), a
+nested container ran and saw its own `/proc`, a container with a
+healthcheck on a nested bridge network turned healthy in about seven
+seconds with nothing but the ticker running it, a second container reached
+it by name over that network, and a podman-compose stack whose service
+waits on `condition: service_healthy` came up. The outer container used about
+80 MB of its cap. A `TERM` sent to the container reached the command, and the
+command's exit status was the container's.
+
 ## What the build does
 
 `.github/workflows/build-images.yml` runs `scripts/build-images.sh` on a pull request touching
 `images/**`, on a push to `main`, weekly on a schedule, and on demand. It
-builds the base first and every other image on top of that exact build, then
+builds the base first and every other image on top of that exact build
+(except `podman-nested`, which builds on its own pinned upstream image), then
 takes each image through the same steps:
 
 1. Builds it for `linux/amd64`, loading it locally rather than pushing.
@@ -216,7 +308,7 @@ The weekly rebuild exists because step 4's "a rebuild away" has to actually
 happen. It publishes new digests and cuts no release, so nothing consumes
 them until a repository bumps its pin.
 
-Locally, `host/workbench build` builds all six as `localhost/*:local`,
+Locally, `host/workbench build` builds all of them as `localhost/*:local`,
 without scanning or publishing.
 
 ## Changing a signing key

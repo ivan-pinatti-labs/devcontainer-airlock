@@ -145,6 +145,7 @@ and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 | gh-broker | `images/gh-broker/` | holds the GitHub token; runs allowlisted gh commands |
 | egress-proxy | `images/egress-proxy/` | one per host, the only way out to the network, by each workspace's egress sets |
 | mirror-gate | `images/mirror-gate/` | the package mirror's front (on by default) and its backend's provisioning; the backend (Nexus CE) is used by digest, never baked |
+| podman-nested | `images/podman-nested/` | not a layer: a test runner a repository starts directly, rootless podman in podman for a throwaway container stack, never the host's engine socket (docs/IMAGES.md) |
 
 `host/workbench` starts them; it runs on the host and does nothing there but
 call podman.

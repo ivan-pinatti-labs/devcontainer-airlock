@@ -89,7 +89,9 @@
   // The four pin surfaces this repository actually has. github-actions
   // covers every uses: SHA pin under .github/workflows/; pre-commit covers
   // .pre-commit-config.yaml's rev:; dockerfile covers the base image tag and
-  // digest on images/base/Dockerfile's FROM line; custom.regex covers the
+  // digest on images/base/Dockerfile's FROM line, and every other FROM line
+  // pinned to an upstream image (the linters l2 copies out, and
+  // quay.io/podman/stable under images/podman-nested); custom.regex covers the
   // two annotated ARG lines pinning the coding agent CLI versions in that
   // same file. The first three are also
   // configured, disabled, in dependabot.yml; see the file header above.
@@ -263,7 +265,12 @@
     // Which Ubuntu release line the base image sits on is a decision, not a
     // version bump, and the patch-and-minor automerge rule above would
     // otherwise take it unattended: Renovate grades 26.04 to 26.10 a minor
-    // update, and 26.10 is a nine month release rather than an LTS.
+    // update, and 26.10 is a nine month release rather than an LTS. The same
+    // rule holds a new podman minor for podman-nested (v5.8 to v5.9) for a
+    // person, since a test stack's behavior can change with it. That image
+    // sits on an immutable tag, which upstream never rebuilds, so it gets no
+    // digest updates; its security fixes come from the dnf upgrade in its
+    // Dockerfile on the scheduled rebuild.
     {
       matchManagers: ["dockerfile"],
       matchUpdateTypes: ["minor", "major"],
