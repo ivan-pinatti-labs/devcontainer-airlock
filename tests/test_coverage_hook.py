@@ -36,6 +36,7 @@ KNOWN_SHELL = (
     "images/l2/engine-bin/podman",
     "images/podman-nested/bin/podman-health-ticker",
     "images/podman-nested/bin/podman-nested-entrypoint",
+    "images/podman-nested/bin/podman-nested-init",
     "images/workbench/bin/airlock-worktree",
     "images/workbench/bin/claude",
     "images/workbench/bin/finish-image",
