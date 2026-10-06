@@ -36,6 +36,17 @@ assert "agent-policy's rules are put back from the image too" \
 assert "beside the workbench's own" \
   cmp -s "${WORKBENCH_SHARE}/codex-workbench.rules" "${CODEX_HOME}/rules/workbench.rules"
 
+rm "${WORKBENCH_SHARE}/codex-agent-policy.rules"
+run images/workbench/bin/workbench-init
+assert "an image without agent-policy's rules removes the old copy" \
+  test ! -e "${CODEX_HOME}/rules/agent-policy.rules"
+assert "and keeps the workbench's own" \
+  cmp -s "${WORKBENCH_SHARE}/codex-workbench.rules" "${CODEX_HOME}/rules/workbench.rules"
+
+mkdir "${__scratch}/claude-share"
+WORKBENCH_SHARE="${__scratch}/claude-share" CODEX_HOME= run images/workbench/bin/workbench-init
+check "with no CODEX_HOME (the Claude image) there is nothing to remove" 0 out "slept infinity"
+
 # SonarQube for IDE's JVM gets the egress proxy as options, written into
 # the machine settings when the file is there to write.
 export HTTPS_PROXY=http://10.203.1.2:8888/
