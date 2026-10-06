@@ -38,6 +38,40 @@ asked to follow, and covers the daily routine.
 specification: there is no `devcontainer.json`. VS Code attaches to a
 running workbench (**Dev Containers: Attach to Running Container**).
 
+## The command policy: agent-policy
+
+[agent-policy](https://github.com/ivan-pinatti-labs/agent-policy) decides
+which commands a coding agent may run on its own, which it must ask about
+first, and which it must hand to you, for Claude Code and Codex alike. It
+lives in a repository of its own because it also works without the airlock,
+on any machine where an agent runs. The two are meant to be used together,
+and that is strongly recommended: each solves a different half of the same
+problem, running a coding agent and its development work more safely.
+
+| | devcontainer-airlock | agent-policy |
+| --- | --- | --- |
+| Decides | what a command can reach | whether a command runs at all |
+| How | containers: no credentials in the workbench, project code in L2 with no network, egress through an allowlist | rules and a guard hook the agent cannot edit: allow, ask, or refuse and hand to you |
+| Stops | a command that runs from reaching the token, the ssh key, the host, or anything on the internet the project does not name | a force push, a hook bypass, reading a login, `terraform destroy`, before it runs |
+| Kind of control | a boundary | policy |
+
+Neither replaces the other. The airlock limits the harm of a command the
+policy let through. The policy stops commands the airlock would let run
+because they stay inside the workspace: a force push of your branch,
+deleting a remote branch, a commit that skips the hooks.
+
+**In the airlock it is already on.** The workbench images render
+agent-policy at a pinned release and install its rules and its guard hook
+(beside the L2 routing hook) for both agents, and its sandbox path lists for
+Claude Code, the one of the two with a sandbox that takes them. A new
+release reaches the images through a Renovate pull request that waits for a
+person. The airlock's own additions, an overlay that can only add or harden,
+live in `images/workbench/agent-policy/`;
+[docs/LAYERS.md](docs/LAYERS.md), "agent-policy", has the details.
+
+**Outside the airlock**, on a machine where an agent runs directly, install
+agent-policy on its own; its README covers `make install`.
+
 ## Status
 
 The images are published to
@@ -88,10 +122,149 @@ release.
 
 ## License
 
-See [LICENSE.md](LICENSE.md) for full details.
+[![license](https://img.shields.io/github/license/ivan-pinatti-labs/devcontainer-airlock?style=plastic)](https://github.com/ivan-pinatti-labs/devcontainer-airlock/blob/main/LICENSE.md)
+
+See [LICENSE](LICENSE.md) for the full terms, and [NOTICE](NOTICE.md) for
+third party notices.
+
+From the Apache License 2.0, sections 7 and 8:
+
+> Unless required by applicable law or agreed to in writing, Licensor provides
+> the Work (and each Contributor provides its Contributions) on an "AS IS"
+> BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+> implied, including, without limitation, any warranties or conditions of TITLE,
+> NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You
+> are solely responsible for determining the appropriateness of using or
+> redistributing the Work and assume any risks associated with Your exercise of
+> permissions under this License.
+>
+> In no event and under no legal theory, whether in tort (including
+> negligence), contract, or otherwise, unless required by applicable law (such
+> as deliberate and grossly negligent acts) or agreed to in writing, shall any
+> Contributor be liable to You for damages, including any direct, indirect,
+> special, incidental, or consequential damages of any character arising as a
+> result of this License or out of the use or inability to use the Work (…),
+> even if such Contributor has been advised of the possibility of such damages.
+
+---
 
 ## Contribute / Donate
 
-If you use this project, entirely or partially, or get inspired by it,
-consider buying me a coffee or a beer, I would really appreciate it:
-[buymeacoffee.com/ivan.pinatti](https://www.buymeacoffee.com/ivan.pinatti).
+Contributions, bug reports, and feature requests are welcome; see
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+If you are using this code, forking it, or getting ideas from it, sponsorships
+and donations help keep the project maintained.
+
+<!-- markdownlint-disable MD013 MD033 -->
+<!-- The badges and QR codes are HTML for their layout, and their URLs and the
+     networks footnote below cannot be wrapped without breaking it. -->
+
+<div align="center">
+
+<a href="https://github.com/sponsors/ivan-pinatti">
+  <img
+  src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-fe8e86?logo=github&style=for-the-badge"
+  alt="GitHub Sponsor">
+</a>
+<a href="https://www.buymeacoffee.com/ivan.pinatti">
+  <img
+  src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black&style=for-the-badge"
+  alt="Buy Me a Coffee">
+</a>
+<a href="https://www.paypal.com/paypalme/ivanrpinatti">
+  <img
+  src="https://img.shields.io/badge/PayPal-Donate-003087?logo=paypal&style=for-the-badge"
+  alt="PayPal">
+</a>
+
+</div>
+
+<table>
+  <tr>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/btc.png"
+        alt="BTC donation QR code" width="85">
+      <br><code>&nbsp;BTC&nbsp;&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/eth.png"
+        alt="ETH donation QR code" width="85">
+      <br><code>ERC&#8209;20</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/xmr.png"
+        alt="XMR donation QR code" width="85">
+      <br><code>&nbsp;XMR&nbsp;&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/xrp.png"
+        alt="XRP donation QR code" width="85">
+      <br><code>&nbsp;XRP&nbsp;&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/ada.png"
+        alt="ADA donation QR code" width="85">
+      <br><code>&nbsp;ADA&nbsp;&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/atom.png"
+        alt="ATOM donation QR code" width="85">
+      <br><code>&nbsp;ATOM&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/bch.png"
+        alt="BCH donation QR code" width="85">
+      <br><code>&nbsp;BCH&nbsp;&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/bnb.png"
+        alt="BNB donation QR code" width="85">
+      <br><code>BEP&#8209;20</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/doge.png"
+        alt="DOGE donation QR code" width="85">
+      <br><code>&nbsp;DOGE&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/kava.png"
+        alt="KAVA donation QR code" width="85">
+      <br><code>&nbsp;KAVA&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/ltc.png"
+        alt="LTC donation QR code" width="85">
+      <br><code>&nbsp;LTC&nbsp;&nbsp;</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/trx.png"
+        alt="TRX donation QR code" width="85">
+      <br><code>TRC&#8209;20</code>
+    </td>
+    <td align="center">
+      <img
+src="https://raw.githubusercontent.com/ivan-pinatti-labs/.github/main/docs/crypto/qr-codes/zec.png"
+        alt="ZEC donation QR code" width="85">
+      <br><code>&nbsp;ZEC&nbsp;&nbsp;</code>
+    </td>
+  </tr>
+</table>
+
+_\* ERC-20 accepts ETH, USDT, and USDC · BEP-20 accepts BNB, USDT, and USDC ·
+TRC-20 accepts TRX, USDT, and USDC. See the
+[full list](https://github.com/ivan-pinatti-labs/.github/blob/main/docs/crypto/addresses.md)_
+
+<!-- markdownlint-enable MD013 MD033 -->
