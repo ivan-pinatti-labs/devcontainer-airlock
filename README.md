@@ -61,8 +61,9 @@ because they stay inside the workspace: a force push of your branch,
 deleting a remote branch, a commit that skips the hooks.
 
 **In the airlock it is already on.** The workbench images render
-agent-policy at a pinned release and install it for both agents: its rules,
-its guard hook beside the L2 routing hook, and its sandbox path lists. A new
+agent-policy at a pinned release and install its rules and its guard hook
+(beside the L2 routing hook) for both agents, and its sandbox path lists for
+Claude Code, the one of the two with a sandbox that takes them. A new
 release reaches the images through a Renovate pull request that waits for a
 person. The airlock's own additions, an overlay that can only add or harden,
 live in `images/workbench/agent-policy/`;
@@ -122,15 +123,27 @@ release.
 
 [![license](https://img.shields.io/github/license/ivan-pinatti-labs/devcontainer-airlock?style=plastic)](https://github.com/ivan-pinatti-labs/devcontainer-airlock/blob/main/LICENSE.md)
 
-See [LICENSE](LICENSE.md) for full details, and [NOTICE](NOTICE.md) for what
-the license does and doesn't cover.
+See [LICENSE](LICENSE.md) for the full terms, and [NOTICE](NOTICE.md) for
+third party notices.
 
-> Licensor provides the Work on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-> CONDITIONS OF ANY KIND, either express or implied, including, without
-> limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT,
-> MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. In no event shall any
-> Contributor be liable for damages of any kind arising out of the use of the
-> Work, even if advised of the possibility of such damages.
+From the Apache License 2.0, sections 7 and 8:
+
+> Unless required by applicable law or agreed to in writing, Licensor provides
+> the Work (and each Contributor provides its Contributions) on an "AS IS"
+> BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+> implied, including, without limitation, any warranties or conditions of TITLE,
+> NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You
+> are solely responsible for determining the appropriateness of using or
+> redistributing the Work and assume any risks associated with Your exercise of
+> permissions under this License.
+>
+> In no event and under no legal theory, whether in tort (including
+> negligence), contract, or otherwise, unless required by applicable law (such
+> as deliberate and grossly negligent acts) or agreed to in writing, shall any
+> Contributor be liable to You for damages, including any direct, indirect,
+> special, incidental, or consequential damages of any character arising as a
+> result of this License or out of the use or inability to use the Work (…),
+> even if such Contributor has been advised of the possibility of such damages.
 
 ---
 
