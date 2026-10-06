@@ -43,6 +43,7 @@ assert "enables the four controllers it uses" test "$(cat "${cg}/cgroup.subtree_
 check "gives the podman account its subtree" 0 calls "chown -R podman:podman ${cg}/user"
 assert "with the same controllers" test "$(cat "${cg}/user/cgroup.subtree_control")" = "+cpu +io +memory +pids"
 assert "and moves itself into user/session" test -s "${cg}/user/session/cgroup.procs"
+
 assert "turns the nested engine's cgroups on" grep -q '^cgroups = "enabled"' "${conf}"
 assert "in a namespace of their own" grep -q '^cgroupns = "private"' "${conf}"
 assert "under cgroupfs" grep -q '^cgroup_manager = "cgroupfs"' "${conf}"
@@ -54,6 +55,13 @@ tree "cpu memory"
 run "${init}" job
 check "enables only the controllers available" 0 err "nested cgroups on (cpu memory)"
 assert "at the root" test "$(cat "${cg}/cgroup.subtree_control")" = "+cpu +memory"
+
+# A root already empty (nothing left to move) still carves.
+tree
+: >"${cg}/cgroup.procs"
+run "${init}" job
+check "an empty root is carved as well" 0 err "podman-nested: nested cgroups on (cpu io memory pids)"
+assert "with nothing moved into init" test ! -s "${cg}/init/cgroup.procs"
 
 # A process that cannot be moved (it exited) is passed over.
 tree

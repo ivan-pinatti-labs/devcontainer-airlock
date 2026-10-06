@@ -57,10 +57,16 @@ carve() {
   mkdir -p "${cg}/init" 2>/dev/null || return 1
   # The list is read whole first: read while processes leave it, the file
   # skips some. A process that exits meanwhile cannot be moved, and need not
-  # be.
-  mapfile -t pids <"${cg}/cgroup.procs"
-  for pid in "${pids[@]}"; do
-    echo "${pid}" 2>/dev/null >"${cg}/init/cgroup.procs" || true
+  # be. A process can also fork after the read, leaving its child at the
+  # root, so the move repeats until nothing is left there (a few passes at
+  # most; anything still left makes the controller write below fail, and
+  # cgroups stay off).
+  for _ in 1 2 3 4 5; do
+    mapfile -t pids <"${cg}/cgroup.procs"
+    [[ "${#pids[@]}" -gt 0 ]] || break
+    for pid in "${pids[@]}"; do
+      echo "${pid}" 2>/dev/null >"${cg}/init/cgroup.procs" || true
+    done
   done
   local enable="${controllers[*]/#/+}"
   echo "${enable}" 2>/dev/null >"${cg}/cgroup.subtree_control" || return 1
