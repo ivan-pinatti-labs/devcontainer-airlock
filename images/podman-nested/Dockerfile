@@ -26,6 +26,9 @@ USER 0:0
 #   podman-compose                 the stack itself
 #   acl, openssl                   permissions and certificates a suite sets up
 #   procps-ng, which, iproute      ps, which and ip, for scripts that probe
+#   util-linux                     setpriv, which podman-nested-init drops to
+#                                  the podman account with; in the base image
+#                                  today, named so a slimmer one cannot drop it
 #   diffutils, git-core, kmod      in the base image today; named so a slimmer
 #                                  base cannot drop them unnoticed
 #
@@ -46,6 +49,7 @@ RUN dnf -y upgrade \
     podman-compose \
     procps-ng \
     python3-pip \
+    util-linux \
     which \
     xmlstarlet \
     yq \
@@ -53,13 +57,21 @@ RUN dnf -y upgrade \
   && rm -rf /var/cache/dnf /var/cache/libdnf5
 
 # The nested runtime's user configuration (the file explains itself), the
-# runtime directory the API socket is served from, and the two programs the
-# entrypoint runs.
+# runtime directory the API socket is served from, the program that sets up
+# cgroups and drops to the podman account, the entrypoint, and the ticker it
+# runs.
 COPY --chown=1000:1000 containers.conf /home/podman/.config/containers/containers.conf
-COPY bin/podman-nested-entrypoint bin/podman-health-ticker /usr/local/bin/
+COPY bin/podman-nested-init bin/podman-nested-entrypoint bin/podman-health-ticker /usr/local/bin/
 RUN install -d -m 0700 -o podman -g podman /run/user/1000
 
-USER 1000:1000
+# The image starts as root and podman-nested-init drops to the podman account
+# (uid 1000, no capabilities) before the entrypoint or any command runs. Root
+# is needed for that one step only: it alone can move the container's
+# processes out of its cgroup root and hand the podman account a subtree,
+# which is what gives nested containers cgroups of their own. Under rootless
+# podman that root is the invoking user in a user namespace of its own.
+# hadolint ignore=DL3002
+USER 0:0
 ENV XDG_RUNTIME_DIR=/run/user/1000 \
     DOCKER_HOST=unix:///run/user/1000/podman/podman.sock
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
@@ -67,5 +79,5 @@ LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devc
       org.opencontainers.image.licenses="Apache-2.0"
 # catatonit as the first process reaps the nested containers' conmon
 # processes, which are handed to it, whether or not the run passes --init.
-ENTRYPOINT ["/usr/libexec/catatonit/catatonit", "--", "podman-nested-entrypoint"]
+ENTRYPOINT ["/usr/libexec/catatonit/catatonit", "--", "podman-nested-init"]
 CMD ["bash"]

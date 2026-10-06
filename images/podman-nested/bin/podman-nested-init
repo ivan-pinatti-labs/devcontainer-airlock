@@ -1,0 +1,107 @@
+#!/bin/bash
+# The podman-nested image's first program, run as the container's root: give
+# the nested engine a cgroup subtree of its own where the host delegates one,
+# then drop to the 'podman' account and run podman-nested-entrypoint.
+#
+# Container root is the invoking host user, in a user namespace of its own,
+# and holds the cgroup v2 tree of a private cgroup namespace when the host
+# delegated one to it. Rootless podman cannot use that tree as it comes: the
+# processes sit in its root, and a cgroup that holds processes cannot hand
+# controllers down to children. So, best effort, this:
+#
+#   1. moves every process in the root into a child cgroup, 'init';
+#   2. enables cpu, memory, and io and pids where available, for children;
+#   3. makes 'user/session', gives 'user' to the podman account with the same
+#      controllers enabled, and moves itself into 'user/session';
+#   4. writes the nested engine's drop in that turns its cgroups on.
+#
+# If any step fails (no cgroup v2, no delegation, no cpu or memory
+# controller, not started as root), the drop in is removed instead and the
+# nested engine keeps cgroups disabled, as the image ran before. Turning
+# them on without the subtree would be wrong rather than merely off: nested
+# containers would land in the root and report the outer container's usage.
+# Either way it prints one line saying which, then drops to uid and gid 1000
+# with no capabilities left and executes the entrypoint, so no command runs
+# as root.
+#
+# Usage:
+#   podman-nested-init COMMAND [ARGS...]
+#
+# Environment (both for tests):
+#   PODMAN_NESTED_CGROUP_ROOT  the cgroup v2 mount. Default: /sys/fs/cgroup
+#   PODMAN_NESTED_HOME         the podman account's home. Default: /home/podman
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+cg="${PODMAN_NESTED_CGROUP_ROOT:-/sys/fs/cgroup}"
+home="${PODMAN_NESTED_HOME:-/home/podman}"
+conf_dir="${home}/.config/containers/containers.conf.d"
+conf="${conf_dir}/50-cgroups.conf"
+controllers=()
+
+# carve: steps 1 to 3 above. errexit does not apply inside a function called
+# as a condition, so every step returns on failure itself.
+carve() {
+  local available=() name pid pids=()
+  [[ -r "${cg}/cgroup.controllers" ]] || return 1
+  read -r -a available <"${cg}/cgroup.controllers" || true
+  for name in cpu io memory pids; do
+    if [[ " ${available[*]} " == *" ${name} "* ]]; then
+      controllers+=("${name}")
+    fi
+  done
+  # A stack's cpus and memory limits need these two.
+  [[ " ${controllers[*]} " == *" cpu "* && " ${controllers[*]} " == *" memory "* ]] || return 1
+  mkdir -p "${cg}/init" 2>/dev/null || return 1
+  # The list is read whole first: read while processes leave it, the file
+  # skips some. A process that exits meanwhile cannot be moved, and need not
+  # be. A process can also fork after the read, leaving its child at the
+  # root, so the move repeats until nothing is left there (a few passes at
+  # most; anything still left makes the controller write below fail, and
+  # cgroups stay off).
+  for _ in 1 2 3 4 5; do
+    mapfile -t pids <"${cg}/cgroup.procs"
+    [[ "${#pids[@]}" -gt 0 ]] || break
+    for pid in "${pids[@]}"; do
+      echo "${pid}" 2>/dev/null >"${cg}/init/cgroup.procs" || true
+    done
+  done
+  local enable="${controllers[*]/#/+}"
+  echo "${enable}" 2>/dev/null >"${cg}/cgroup.subtree_control" || return 1
+  mkdir -p "${cg}/user/session" 2>/dev/null || return 1
+  chown -R podman:podman "${cg}/user" 2>/dev/null || return 1
+  echo "${enable}" 2>/dev/null >"${cg}/user/cgroup.subtree_control" || return 1
+  echo "$$" 2>/dev/null >"${cg}/user/session/cgroup.procs" || return 1
+}
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  rm -f "${conf}"
+  echo "podman-nested: nested cgroups off (not started as root), so no container stats or resource limits" >&2
+  exec podman-nested-entrypoint "$@"
+fi
+
+if carve; then
+  mkdir -p "${conf_dir}"
+  cat >"${conf}" <<'EOF'
+# Written by podman-nested-init, which carved this account a cgroup subtree.
+[containers]
+cgroups = "enabled"
+cgroupns = "private"
+
+[engine]
+cgroup_manager = "cgroupfs"
+EOF
+  chown podman:podman "${conf_dir}" "${conf}"
+  echo "podman-nested: nested cgroups on (${controllers[*]})" >&2
+else
+  rm -f "${conf}"
+  echo "podman-nested: nested cgroups off (no delegated cgroup v2 tree), so no container stats or resource limits" >&2
+fi
+
+# The bounding set stays: newuidmap and newgidmap need their file
+# capabilities, which it limits. Leaving root drops every other capability.
+exec setpriv --reuid=1000 --regid=1000 --init-groups --inh-caps=-all \
+  env HOME="${home}" USER=podman LOGNAME=podman \
+  podman-nested-entrypoint "$@"

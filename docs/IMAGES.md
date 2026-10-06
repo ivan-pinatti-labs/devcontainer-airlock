@@ -212,13 +212,16 @@ docker-torrent-box-with-vpn's integration suite.
 
 It builds on `quay.io/podman/stable`, podman's own image for running podman
 in a container, pinned by digest, with the tools a suite drives a stack with
-on top. Its entrypoint serves the nested engine's API at
-`/run/user/1000/podman/podman.sock` (`DOCKER_HOST` points there, for test
-libraries that speak the Docker API), starts the health ticker, then runs the
-command it was given and exits with its status.
+on top. It starts as root, and its first program (`podman-nested-init`)
+gives the nested engine cgroups where the host allows it (see "Cgroups for
+the nested containers" below), then drops to the image's `podman` account
+before anything else runs. The entrypoint then serves the nested engine's
+API at `/run/user/1000/podman/podman.sock` (`DOCKER_HOST` points there, for
+test libraries that speak the Docker API), starts the health ticker, then
+runs the command it was given and exits with its status.
 
 ```shell
-podman run --rm --user podman \
+podman run --rm \
   --device /dev/fuse --device /dev/net/tun \
   --security-opt label=type:container_engine_t --security-opt unmask=ALL \
   --memory 3g --memory-swap 3g \
@@ -229,8 +232,10 @@ podman run --rm --user podman \
 
 What each flag is for:
 
-- **`--user podman`**: the nested engine runs rootless as the image's
+- **No `--user`**: the image starts as root so `podman-nested-init` can
+  set up cgroups, and the nested engine then runs rootless as the image's
   `podman` account, which has the subordinate ids nested containers need.
+  `--user podman` still works, with the nested containers' cgroups off.
 - **`--device /dev/fuse`**: fuse-overlayfs, the nested storage driver.
 - **`--device /dev/net/tun`**: pasta, which a nested network of its own (a
   compose stack's default network) needs.
@@ -251,7 +256,8 @@ What each flag is for:
   a device on to a nested container (a VPN client's TUN device) also needs
   the host policy module in "Devices for nested containers" above.
 - **`--memory` and `--memory-swap`**: one cap for the whole stack, which is
-  otherwise bounded only by the host.
+  otherwise bounded only by the host. With nested cgroups on, the limits a
+  stack sets on its own services are enforced inside that cap as well.
 - **A named volume on `/home/podman/.local/share/containers`**: the nested
   storage, kept between runs so images are not pulled again. The upstream
   image declares it (and `/var/lib/containers`) a `VOLUME`, so without a
@@ -261,6 +267,9 @@ What each flag is for:
 Not needed: `--init` (catatonit is already the first process, and reaps the
 nested containers' conmon processes), `--privileged`, any `--cap-add`, and
 any host socket.
+
+A `podman exec` into the running container is root by default, as the
+image's user is; pass `--user podman` to reach the nested engine.
 
 Podman schedules healthchecks with systemd timers, and there is no systemd
 in here, so a nested container's healthcheck would never run and a compose
@@ -281,6 +290,65 @@ it by name over that network, and a podman-compose stack whose service
 waits on `condition: service_healthy` came up. The outer container used about
 80 MB of its cap. A `TERM` sent to the container reached the command, and the
 command's exit status was the container's.
+
+### Cgroups for the nested containers
+
+Without cgroups, the nested engine can neither report a nested container's
+usage (`podman stats`) nor enforce the limits a stack sets on it (`--memory`,
+`--cpus`, compose's `mem_limit` and `cpus`): they are accepted and ignored.
+Where the host delegates a cgroup v2 tree to the outer container, which
+rootless podman does on a systemd host with cgroup v2 (the outer container
+gets a private cgroup namespace whose root it owns), `podman-nested-init`
+makes that tree usable for the nested engine. As container root, it:
+
+1. moves every process out of the tree's root into a child cgroup, `init`,
+   since a cgroup that holds processes cannot hand controllers down;
+2. enables the cpu and memory controllers, and io and pids where the host
+   delegates them, for the root's children;
+3. creates `user/session`, gives `user` to the `podman` account with the same
+   controllers enabled, and moves itself into `user/session`;
+4. writes `~/.config/containers/containers.conf.d/50-cgroups.conf` for the
+   `podman` account, which sets `cgroups = "enabled"`, `cgroupns =
+   "private"` and the `cgroupfs` cgroup manager.
+
+It then drops to uid and gid 1000 with `setpriv`, which leaves no
+capabilities in effect, and runs the entrypoint, so no command runs as
+root. That root was never the host's: under rootless podman it is the
+invoking host user, in a user namespace of its own, and only the outer
+container's own cgroup tree is changed.
+
+It prints one line saying which way it went:
+
+```text
+podman-nested: nested cgroups on (cpu io memory pids)
+podman-nested: nested cgroups off (no delegated cgroup v2 tree), so no container stats or resource limits
+podman-nested: nested cgroups off (not started as root), so no container stats or resource limits
+```
+
+Off means the host delegated nothing usable (cgroup v1, a read only cgroup
+tree, a host cgroup namespace, no cpu or memory controller) or the container
+was started with `--user`. The drop in is then removed, the nested engine
+keeps cgroups disabled as before, and everything else works: containers,
+networks, compose and healthchecks. Turning cgroups on without the steps
+above would be wrong rather than merely off, as nested containers would land
+in the outer container's root and report its usage as their own.
+
+On a CI runner, rootless podman started from a job's shell inherits that
+shell's cgroup, which on a hosted runner is owned by root, so it is given no
+delegation and the line says off. A job that wants the limits enforced
+starts the outer container in a delegated scope of its own:
+
+```shell
+sudo systemd-run --scope --uid="$(id -u)" --gid="$(id -g)" -p Delegate=yes \
+  podman run --rm ... ghcr.io/ivan-pinatti-labs/airlock-podman-nested@sha256:<digest> make test
+```
+
+Measured 2026-10-05 on an SELinux enforcing host with a 512 MiB cap: started
+without `--user`, the line said on, a nested busybox started with
+`--memory 64m --cpus 0.5` running a busy loop showed about 50% CPU and a
+64 MiB limit in `podman stats --no-stream`, and the shell ran as `podman`
+with no capabilities. Started with `--user podman`, or with
+`--cgroupns=host`, the line said off and a nested container still ran.
 
 ## What the build does
 
