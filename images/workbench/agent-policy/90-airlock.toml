@@ -12,34 +12,14 @@
 [[rule]]
 severity = "moderate"
 reason = "Run L2 in an image of the agent's choosing instead of the repository's"
-agents = ["claude"]
 prefix = [["l2", "--image"]]
 
 [[rule]]
 severity = "moderate"
 reason = "Stop a container: in the workbench, the session's own L2 containers; ask first, beyond agent-policy's allow"
-agents = ["claude"]
 prefix = [
   ["podman", "stop"],
   ["podman", "container", "stop"],
-]
-
-[[rule]]
-severity = "moderate"
-reason = "podman subcommands agent-policy does not list one by one; the workbench asks for anything else they do (upstream candidate)"
-agents = ["claude"]
-prefix = [
-  ["podman", ["compose", "pod", "secret", "manifest", "healthcheck"]],
-  ["podman", "container", "init"],
-]
-
-[[rule]]
-severity = "critical"
-reason = "The agent's own login; the sandbox and the guard cover shell reads, this covers Claude Code's own file tools (upstream candidate)"
-agents = ["claude"]
-claude = [
-  "Read(/home/dev/.claude/.credentials.json)",
-  "Edit(/home/dev/.claude/.credentials.json)",
 ]
 
 [[rule]]

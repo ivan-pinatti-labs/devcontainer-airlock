@@ -420,8 +420,7 @@ its own because it serves more than the airlock (an agent on a host, say),
 but the airlock is its main use. The workbench renders it at a pinned
 release when the image is built (`AGENT_POLICY_REF` in
 `images/workbench/Dockerfile`, a tag and its commit; the build refuses a tag
-that has moved), together with the airlock's overlay. Claude Code has it
-now; Codex gets it later.
+that has moved), together with the airlock's overlay, for both agents.
 
 - **The rules**, agent-policy's and the overlay's, as one managed drop-in,
   `/etc/claude-code/managed-settings.d/50-agent-policy.json`. The workbench's
@@ -441,6 +440,14 @@ now; Codex gets it later.
   and startup folders that none may write. The workbench keeps its own
   short list of commands that run outside the sandbox (agent-policy's lets
   more out, such as `ssh` and `docker`).
+- **For Codex**, the rules as prefix rules, `agent-policy.rules` in Codex's
+  rules folder, put back from the image at every start beside
+  `workbench.rules` (Codex takes the strictest rule that matches), and the
+  guard as a second managed hook in `/etc/codex/requirements.toml`, where an
+  ask becomes a refusal that says approval is needed. Codex loads a managed
+  hook only with `[features] hooks = true` and the hook's script in
+  `[hooks] managed_dir`, so the guard is installed beside `route-to-l2` in
+  `/usr/local/libexec/workbench`, the folder named there.
 
 **The overlay**, `images/workbench/agent-policy/*.toml`, is what the
 airlock adds on top: rules in agent-policy's own format and severity scale,
@@ -450,10 +457,12 @@ resolves deny over ask over allow across every rule, so the overlay can
 only add or harden, never loosen: a rule that should be looser belongs in
 agent-policy, and so does any rule here that every agent environment would
 want. Today it holds what only the workbench has (`l2 --image`, a podman
-global flag that could point at another engine), a hardening (`podman stop`
-asks, where agent-policy allows it), and two upstream candidates (asking on
-the podman subcommands agent-policy does not list one by one, and refusing
-Claude Code's own file tools on the agent's login).
+global flag that could point at another engine) and a hardening
+(`podman stop` asks, where agent-policy allows it). Two rules that started
+here moved upstream in agent-policy v0.2.0: asking on the last podman
+subcommands it did not list, and refusing Claude Code's own file tools on
+the agents' logins. The workbench renders it with `--no-scratch`, since its
+agents run containers through the L2 engine, not agent-policy's scratchpad.
 
 All of it is root owned, as the rest of `/etc/claude-code` is. It is still
 policy: the same caveat as above applies to every one of its rules. A new

@@ -1,18 +1,27 @@
 #!/bin/sh
 # What each workbench container runs as its main process. In the Codex
-# workbench, puts the rule that lives in Codex own writable rules folder back
-# to the image copy. Then waits; the terminal and the editor attach to the
+# workbench, puts the rules that live in Codex own writable rules folder back
+# to the image copies. Then waits; the terminal and the editor attach to the
 # running container.
 #
 # WORKBENCH_SHARE stands in for /usr/local/share/workbench, and
 # WORKBENCH_VSCODE_SETTINGS for VS Code's machine settings file, for the
 # tests.
 set -eu
-rules="${WORKBENCH_SHARE:-/usr/local/share/workbench}/codex-workbench.rules"
-if [ -f "${rules}" ]; then
-  mkdir -p "${CODEX_HOME}/rules"
-  cp "${rules}" "${CODEX_HOME}/rules/workbench.rules"
-fi
+share="${WORKBENCH_SHARE:-/usr/local/share/workbench}"
+# The workbench's own rules and agent-policy's (docs/LAYERS.md,
+# "agent-policy"), each under its own name. The rules folder outlives the
+# container, so a file the image no longer carries is removed, or Codex would
+# keep loading an old copy. CODEX_HOME is set in the Codex image only.
+for name in workbench agent-policy; do
+  rules="${share}/codex-${name}.rules"
+  if [ -f "${rules}" ]; then
+    mkdir -p "${CODEX_HOME}/rules"
+    cp "${rules}" "${CODEX_HOME}/rules/${name}.rules"
+  elif [ -n "${CODEX_HOME:-}" ]; then
+    rm -f "${CODEX_HOME}/rules/${name}.rules"
+  fi
+done
 # SonarQube for IDE runs its analysis in a JVM that ignores HTTPS_PROXY and
 # that VS Code proxy settings never reach, so it gets the egress proxy as JVM
 # options. The address differs per workspace, hence here and not in the
