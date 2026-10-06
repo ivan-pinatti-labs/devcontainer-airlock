@@ -41,3 +41,127 @@ reviews:
   #     enabled: false
   #   markdownlint:
   #     enabled: false
+
+  # How hard to look. assertive raises more than chill does; this
+  # repository decides what coding agents can reach on a machine (network,
+  # credentials, the host), so a missed edge case costs more than an extra
+  # comment.
+  profile: assertive
+
+  # Review guidance. The first two entries are the organization's rules,
+  # kept the same in every ivan-pinatti-labs repository; the rest are
+  # specific to devcontainer-airlock and come from AGENTS.md and
+  # docs/LAYERS.md. Pre-commit already runs the linters, so these ask for
+  # judgment the hooks cannot make.
+  path_instructions:
+    - path: "**"
+      instructions: |
+        This repository is public. Flag, as a blocking issue, anything in the
+        diff that should not be published:
+        - secrets, tokens, keys, passwords, session cookies, connection
+          strings, or anything that looks like one, even in tests or docs;
+        - personal data: names other than the maintainer's public handle,
+          email addresses other than a users.noreply.github.com one, phone
+          numbers, physical addresses;
+        - machine specific details: absolute home paths (/home/<user>,
+          /Users/<user>), host names, LAN or private IP addresses, internal
+          domains, cloud account IDs, ARNs, AWS profile names, cluster
+          contexts, and details of anyone's own deployment;
+        - AI attribution in any file, commit message or the pull request
+          text: a Co-Authored-By trailer naming an AI agent, a "Generated
+          with" line, an agent session link, or any other line that names
+          or links the agent that wrote the change.
+        Also check that every behavior change comes with tests that would
+        fail without it, and that the docs describe the new behavior. The
+        organization's rule is 100% test coverage of the code it ships:
+        flag, as a blocking issue, any new or changed line or branch of code
+        (not docs or configuration) that no test exercises, and name the
+        test that would cover it. Do not comment on formatting the
+        pre-commit hooks already enforce.
+    - path: "**/*.md"
+      instructions: |
+        Prose does not use a hyphen, em dash or en dash as punctuation; use
+        commas, parentheses or separate sentences (hyphens inside compound
+        words, code, paths and flags are fine). Point out claims the code in
+        this pull request does not back up.
+    - path: "{images,host}/**"
+      instructions: |
+        Each layer keeps to its role (docs/LAYERS.md). Credentials go nowhere
+        but the gh-broker and the ssh-agent, project code runs nowhere but
+        L2, and the workbench carries nothing that executes project code.
+        Flag, as a blocking issue, a change that moves one of those lines
+        without saying so in the pull request with the measurement behind
+        it. Flag label=disable, a crun-without-masked-paths wrapper loosened
+        beyond removing masked paths, and anything that assumes a daemon, a
+        privileged container or a Docker socket. Flag anything specific to
+        one organization or one machine; it belongs in the host settings.
+    - path: "**/{sets/*.toml,allowlist.json,extensions.txt,egress-sets}"
+      instructions: |
+        Widening an allowlist (an egress set or a new one, gh commands,
+        extensions) is a reviewed change of its own. Flag one folded into a
+        pull request about something else. An extension must be pinned to
+        an exact version released at least seven days earlier.
+    - path: "{images/workbench/claude,images/workbench/codex,images/workbench/agent-policy}/**"
+      instructions: |
+        These files are policy the agents are held to, not a security
+        boundary; flag text that describes them as more (docs/LAYERS.md
+        says what is). images/workbench/agent-policy/ is only the airlock's
+        overlay on ivan-pinatti-labs/agent-policy: flag anything that
+        loosens an agent-policy rule, and a rule every agent environment
+        would want, which belongs upstream followed by an AGENT_POLICY_REF
+        bump.
+    - path: "{images/base/**,host/selinux/**}"
+      instructions: |
+        The base image carries only what every image needs; flag a tool
+        that only one layer or one repository needs (it is installed with
+        apt in that layer), an apt repository enabled in the base, or any
+        version manager. Images are consumed by digest, never by a floating
+        tag. The SELinux module under host/selinux/ is an opt in that grants
+        mounton and nothing more: flag any wider permission, and any
+        suggestion of the container_use_devices boolean.
+
+  # Pull request checks shown in the walkthrough. Warnings, not errors: the
+  # merge pipeline already gates on CodeRabbit's review through Review
+  # Verified (docs/MERGE_PIPELINE.md).
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commits: type(optional scope): imperative subject,
+        lowercase, no trailing period, at most 72 characters.
+    description:
+      mode: warning
+    custom_checks:
+      - name: Public repository hygiene
+        mode: warning
+        instructions: >-
+          Fail if the diff, commit messages or pull request text add a
+          secret or something that looks like one, an email address other
+          than a users.noreply.github.com one, an absolute home path, a host
+          name, a private IP address, a cloud account ID or ARN, or details
+          of a personal deployment. Pass otherwise.
+      - name: No AI attribution
+        mode: warning
+        instructions: >-
+          Fail if any commit message, the pull request title or description,
+          or any file in the diff contains a Co-Authored-By trailer naming an
+          AI agent, a "Generated with" line, an agent session link, or any
+          other line that names or links the AI agent that made the change.
+          Pass otherwise.
+
+# Tone of review comments and chat.
+tone_instructions: >-
+  Direct and specific: lead with the defect and a concrete fix, in plain
+  words. No praise, no emoji, no hype. Skip style points a linter already
+  reports.
+
+# The repository's own rules, read as coding guidelines for every review.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - AGENTS.md
+      - docs/LAYERS.md
+      - docs/ARCHITECTURE.md
+      - docs/IMAGES.md
+      - docs/TOOL_SOURCES.md
