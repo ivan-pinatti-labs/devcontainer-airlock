@@ -32,7 +32,7 @@ tree() {
 }
 
 # off: the drop in is gone.
-off() { test ! -e "${conf}"; }
+off() { [[ ! -e "${conf}" ]]; }
 
 tree
 run "${init}" job with args
