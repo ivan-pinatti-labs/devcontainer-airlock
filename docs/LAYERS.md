@@ -374,7 +374,9 @@ files they cannot edit (root owned, read only):
   inside the workbench. It blocks every unix socket on Linux (its per path
   socket list is macOS only) and sends traffic through a proxy of its own,
   so the commands that need the broker, the ssh-agent or the engine are in
-  its `excludedCommands`: `l2`, `git`, `podman`, `gh` and `ssh-add -l`.
+  its `excludedCommands`: `l2`, `git`, `podman`, `gh`, `ssh-add -l`, and
+  `airlock-worktree`, whose clone fetches through the ssh-agent and whose
+  hooks install through `l2`.
   A call leaves the sandbox only when every part of it matches an
   exclusion: `cd ... && git push` and `gh ... | head` stay inside, since
   `cd` and `head` are not excluded. `git -C` and `git -c` do not match
