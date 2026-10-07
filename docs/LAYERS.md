@@ -576,7 +576,12 @@ and `view`) and `gh api` GETs under `repos/` may name a repository outside
 them when GitHub says it is public, so an upstream issue can be followed.
 The broker asks GitHub (`repos/<owner>/<repo>`, with the token) and keeps
 the answer for ten minutes; anything private, missing, or not plain
-`owner/name` stays refused, and so does every write. Interactive prompts are not
+`owner/name` stays refused, and so does every write. GraphQL queries are
+not held to any repository by the broker; the token holds them. Being fine
+grained for the organization, it reads the organization's private
+repositories and public ones elsewhere, nothing else. That boundary is the
+token's: a classic token, which reaches every repository its user can,
+would remove it, so keep the token fine grained. Interactive prompts are not
 available, so pass the flags a prompt would ask for. The broker never reads
 a file named on the command line, since it would read it beside the token;
 the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the
