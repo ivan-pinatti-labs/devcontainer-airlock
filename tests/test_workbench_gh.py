@@ -224,12 +224,34 @@ def test_a_sandboxed_call_says_so(monkeypatch, capsys, sock):
     monkeypatch.setattr(socket, "socket", blocked_socket(errno.EPERM))
     assert run_gh(monkeypatch, ["pr", "list"]) == 127
     err = capsys.readouterr().err
-    assert "ran inside the agent's command sandbox" in err
+    assert "most likely ran inside the agent's command sandbox" in err
     assert "host/workbench up" not in err
 
 
-def test_a_socket_it_may_not_use_is_not_the_sandbox(monkeypatch, capsys, sock):
+def test_another_socket_error_is_not_the_sandbox(monkeypatch, capsys, sock):
     monkeypatch.setattr(socket, "socket", blocked_socket(errno.EACCES))
+    assert run_gh(monkeypatch, ["pr", "list"]) == 127
+    err = capsys.readouterr().err
+    assert "cannot open a unix socket" in err
+    assert "sandbox" not in err
+
+
+class RefusingSocket:
+    """Opens, then refuses the connection with EPERM."""
+
+    def __init__(self, *_args):
+        pass
+
+    def settimeout(self, _seconds):
+        pass
+
+    def connect(self, _path):
+        raise OSError(errno.EPERM, os.strerror(errno.EPERM))
+
+
+def test_a_refused_connection_is_not_the_sandbox(monkeypatch, capsys, sock):
+    # Only failing to open a socket at all points at the sandbox.
+    monkeypatch.setattr(socket, "socket", RefusingSocket)
     assert run_gh(monkeypatch, ["pr", "list"]) == 127
     err = capsys.readouterr().err
     assert "not reachable" in err

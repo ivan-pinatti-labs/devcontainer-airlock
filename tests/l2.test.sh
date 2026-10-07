@@ -143,9 +143,13 @@ stub python3 'echo "PermissionError: [Errno 1] Operation not permitted" >&2; exi
 mkdir -p "${repo}/.devcontainer/l2"
 echo "FROM l2" >"${repo}/.devcontainer/l2/Dockerfile"
 run "${l2}" true
-check "a sandboxed call says so" 4 err "l2: this call ran inside the agent's command sandbox"
+check "a sandboxed call says so" 4 err "this call most likely ran inside the agent's command sandbox"
 check "and how to run it instead" 4 err "l2: run l2 as a command of its own"
 refute "rather than sending you to the host" "podman"
+# EACCES is a PermissionError too, but not the sandbox: l2 goes on.
+stub python3 'echo "PermissionError: [Errno 13] Permission denied" >&2; exit 1'
+run "${l2}" true
+check "another permission error is not taken for the sandbox" 0 calls "podman run"
 rm -r "${repo}/.devcontainer/l2"
 
 finish
