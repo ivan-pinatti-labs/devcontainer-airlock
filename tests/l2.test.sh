@@ -137,4 +137,19 @@ check "outside a repository, the current directory is the tree" 6 calls \
 GIT_TOP="" L2_IMAGE="" run "${l2}" ls
 check "and with no image anywhere it says so" 1 err "l2: no image, set L2_IMAGE or .devcontainer/l2-image"
 
+# In the agent's command sandbox no unix socket can be opened (EPERM). The
+# real probe runs in every case above; here python3 answers as it would there.
+stub python3 'echo "PermissionError: [Errno 1] Operation not permitted" >&2; exit 1'
+mkdir -p "${repo}/.devcontainer/l2"
+echo "FROM l2" >"${repo}/.devcontainer/l2/Dockerfile"
+run "${l2}" true
+check "a sandboxed call says so" 4 err "this call most likely ran inside the agent's command sandbox"
+check "and how to run it instead" 4 err "l2: run l2 as a command of its own"
+refute "rather than sending you to the host" "podman"
+# EACCES is a PermissionError too, but not the sandbox: l2 goes on.
+stub python3 'echo "PermissionError: [Errno 13] Permission denied" >&2; exit 1'
+run "${l2}" true
+check "another permission error is not taken for the sandbox" 0 calls "podman run"
+rm -r "${repo}/.devcontainer/l2"
+
 finish
