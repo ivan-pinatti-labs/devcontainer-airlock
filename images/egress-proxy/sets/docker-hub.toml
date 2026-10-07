@@ -1,5 +1,7 @@
-description = "Docker Hub, for pulling images: the registry, its token service and its download CDNs."
+# cspell:words dualstack
+description = "Docker Hub, for pulling images: the registry, its token service and its download hosts. Blob downloads redirect to an S3 bucket (measured 2026-10-07: every config and layer blob of busybox, golang and debian, amd64 and arm64, went to docker-images-prod.s3.dualstack.us-east-1.amazonaws.com); without it a pull resolves the manifest and then fails with \"fetching blob: unauthorized\", which is the mirror reporting the refused redirect."
 domains = [
   "registry-1.docker.io", "auth.docker.io",
   "production.cloudflare.docker.com", "production.cloudfront.docker.com",
+  "docker-images-prod.s3.dualstack.us-east-1.amazonaws.com",
 ]
