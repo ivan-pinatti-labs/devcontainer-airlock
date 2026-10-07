@@ -9,7 +9,9 @@ devcontainer-airlock has the full picture):
   managed hook to run in L2: a throwaway container with no network, no
   credentials, and only the working tree mounted. When a tool is "not found"
   there, the repository's L2 image lacks it (`.devcontainer/l2/Dockerfile`);
-  it says nothing about the host or the workbench.
+  it says nothing about the host or the workbench. The whole command moves,
+  so one that also needs the network or the workbench (`curl ... | python3`,
+  `pytest && git push`) is refused: run the two parts as separate commands.
 - `l2 --net -- ...` gives an L2 run the egress proxy, for installs.
   `l2 --engine -- ...` is for test suites that build or start containers.
 - `gh` works through a broker that holds the token and runs an allowlist of
