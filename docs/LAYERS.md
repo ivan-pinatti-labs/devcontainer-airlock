@@ -380,8 +380,11 @@ files they cannot edit (root owned, read only):
   `cd` and `head` are not excluded. `git -C` and `git -c` do not match
   `git *` at all (measured with Claude Code 2.1.283). Other shapes that
   stay inside: a loop (`for n in 1 2; do gh issue view $n; done`), a
-  redirect (`l2 -- sh x.sh > out.txt`), and a single `gh` call with a long
-  multi line `--body` holding backticks and quotes (use `--body-file`).
+  redirect (`l2 -- sh x.sh > out.txt`), and any argument holding backticks
+  or `$(` even in single quotes, where the shell takes them literally
+  (measured with Claude Code 2.1.284: ``l2 -- echo 'a `b` c'`` ran inside,
+  while a multi line argument and `sh -c 'a; b'` ran outside). Markdown in
+  a `gh --body` is the usual case: use `--body-file`.
   Whatever stays inside cannot reach the sockets and fails. `gh` and `l2`
   recognize that (the socket cannot even be opened, `EPERM`) and say the
   call ran in the sandbox; `podman` and `git` give their own errors.

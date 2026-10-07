@@ -100,7 +100,7 @@ except OSError as e:
             "gh: this call ran inside the agent's command sandbox, which blocks the "
             "gh broker's socket; the broker is fine.\n"
             "gh: run gh as a command of its own: no loop, pipe, redirect, `&&` or `cd` "
-            "around it, and --body-file rather than a long --body (docs/LAYERS.md, "
+            "around it, and --body-file rather than a --body holding backticks (docs/LAYERS.md, "
             "\"The coding agents\").\n")
     else:
         sys.stderr.write(
