@@ -33,7 +33,10 @@ export AIRLOCK_SESSION=brave-otter
 run images/workbench/bin/airlock-worktree
 check "a repository is needed" 1 err "airlock-worktree: usage: airlock-worktree REPO [BRANCH]"
 run images/workbench/bin/airlock-worktree nowhere
-check "one that exists" 1 err "airlock-worktree: no repository nowhere"
+check "one that exists" 1 err "airlock-worktree: no repository nowhere (looked for ${src}/nowhere)"
+AIRLOCK_WORKSPACE="${__scratch}/ws" run images/workbench/bin/airlock-worktree nowhere
+check "here and in the workspace" 1 err \
+  "airlock-worktree: no repository nowhere (looked for ${src}/nowhere ${__scratch}/ws/nowhere)"
 mkdir -p "${src}/notes"
 run images/workbench/bin/airlock-worktree notes
 check "and is a git repository" 1 err "airlock-worktree: ${src}/notes is not a git repository"
@@ -56,6 +59,23 @@ check "origin the main clone's remote" 0 calls "git remote set-url origin https:
 check "fetched" 0 calls "git fetch --quiet origin"
 check "the session's branch from origin's default branch" 0 calls "git switch --quiet -c brave-otter --no-track origin/main"
 refute "with no hooks to install" "l2-hooks-install"
+refute "and a remote that is not GitHub over https keeps its push URL" "set-url --push"
+
+# A name not found where the shell is, from inside another clone, is looked
+# up in the workspace.
+rm -r "${dest}"
+mkdir -p "${dest}"
+cd "${src}/other"
+AIRLOCK_WORKSPACE="${src}" run images/workbench/bin/airlock-worktree app
+check "a name is found in the workspace" 0 out "airlock-worktree: ${dest} on brave-otter, from origin/main"
+# A folder of that name that is not a repository does not hide it.
+mkdir "${src}/other/app"
+rm -r "${dest}"
+mkdir -p "${dest}"
+AIRLOCK_WORKSPACE="${src}" run images/workbench/bin/airlock-worktree app
+check "a repository wins over a plain folder" 0 out "airlock-worktree: ${dest} on brave-otter, from origin/main"
+rmdir "${src}/other/app"
+cd "${src}"
 
 run images/workbench/bin/airlock-worktree app
 check "a second time, the clone is there" 1 err "airlock-worktree: ${dest} already holds a clone (branch taken)"
@@ -79,6 +99,25 @@ check "a branch of its own name, from a default branch found now" 0 out \
   "airlock-worktree: ${dest} on feat/x, from origin/trunk"
 check "asking origin for it" 0 calls "git remote set-head origin --auto"
 check "the hooks installed, to run in L2" 0 calls "l2-hooks-install"
+
+# A GitHub https remote fetches over https and pushes over ssh.
+for remote in https://github.com/acme/app.git https://github.com/acme/app; do
+  rm -r "${dest}"
+  mkdir -p "${dest}"
+  # shellcheck disable=SC2016
+  stub git '
+if [ "$1" = -C ]; then shift 2; fi
+case "$*" in
+  "remote get-url origin") echo "${REMOTE}" ;;
+  "clone "*) mkdir -p "${5}/.git" ;;
+  "symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/main ;;
+esac'
+  REMOTE="${remote}" run images/workbench/bin/airlock-worktree "${app}"
+  check "${remote} keeps fetching over https" 0 calls "git remote set-url origin ${remote}"
+  check "${remote} pushes over ssh" 0 calls "git remote set-url --push origin git@github.com:acme/app.git"
+  check "${remote} says so" 0 out \
+    "airlock-worktree: origin fetches from ${remote} and pushes to git@github.com:acme/app.git"
+done
 
 # A fetch that fails (no network, a locked ssh agent) leaves the clone behind,
 # and it has its hooks already: they go in before the fetch.

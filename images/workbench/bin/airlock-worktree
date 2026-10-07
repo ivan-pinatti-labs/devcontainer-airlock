@@ -2,14 +2,15 @@
 # airlock-worktree REPO [BRANCH]
 #
 # In a session (docs/SESSIONS.md): clone REPO (a path, or the name of a
-# clone in the folder you are in) into the folder of the session in it,
-# REPO/.claude/worktrees/$AIRLOCK_SESSION, the only place the session can
-# write in that repository. The clone is independent: its own objects,
-# branches, config and hooks, nothing shared with the main clone, which is
-# read only here. origin is set to the remote of the main clone and fetched,
-# and BRANCH (default: the name of the session) is made from the default
-# branch of origin. Then the hooks of the repository are installed, to run
-# in L2.
+# clone in the folder you are in or in the workspace, $AIRLOCK_WORKSPACE)
+# into the folder of the session in it, REPO/.claude/worktrees/$AIRLOCK_SESSION,
+# the only place the session can write in that repository. The clone is
+# independent: its own objects, branches, config and hooks, nothing shared
+# with the main clone, which is read only here. origin is set to the remote
+# of the main clone and fetched, with pushes to a GitHub https remote going
+# over ssh, the way the workbench pushes. BRANCH (default: the name of the
+# session) is made from the default branch of origin. Then the hooks of the
+# repository are installed, to run in L2.
 set -euo pipefail
 
 die() {
@@ -18,10 +19,29 @@ die() {
 }
 
 [[ -n "${AIRLOCK_SESSION:-}" ]] || die "not in a session; host/workbench session start (make claude) starts one"
-repo="${1:-}"
-[[ -n "${repo}" ]] || die "usage: airlock-worktree REPO [BRANCH]"
-[[ -d "${repo}" ]] || repo="${PWD}/${repo}"
-repo="$(cd "${repo}" 2>/dev/null && pwd)" || die "no repository $1"
+[[ -n "${1:-}" ]] || die "usage: airlock-worktree REPO [BRANCH]"
+# A name is looked up in the folder you are in, then in the workspace: the
+# agent's shell may have moved into another clone. The first git repository
+# wins; failing that, the first folder, so the error names it.
+tried=("$1")
+if [[ "$1" != /* ]]; then
+  tried=("${PWD}/$1")
+  [[ -z "${AIRLOCK_WORKSPACE:-}" ]] || tried+=("${AIRLOCK_WORKSPACE}/$1")
+fi
+repo=""
+for path in "${tried[@]}"; do
+  if [[ -e "${path}/.git" ]]; then
+    repo="${path}"
+    break
+  fi
+done
+for path in "${tried[@]}"; do
+  if [[ -z "${repo}" && -d "${path}" ]]; then
+    repo="${path}"
+  fi
+done
+[[ -n "${repo}" ]] || die "no repository $1 (looked for ${tried[*]})"
+repo="$(cd "${repo}" && pwd)"
 [[ -e "${repo}/.git" ]] || die "${repo} is not a git repository"
 branch="${2:-${AIRLOCK_SESSION}}"
 dest="${repo}/.claude/worktrees/${AIRLOCK_SESSION}"
@@ -40,6 +60,13 @@ if command -v l2-hooks-install >/dev/null && [[ -f .pre-commit-config.yaml ]]; t
   l2-hooks-install
 fi
 git remote set-url origin "${url}"
+# The workbench pushes over ssh, through the agent, and has no https
+# credentials; fetching stays on https, which needs no key.
+if [[ "${url}" =~ ^https://github\.com/([^/]+)/([^/]+)$ ]]; then
+  push="git@github.com:${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}.git"
+  git remote set-url --push origin "${push}"
+  echo "airlock-worktree: origin fetches from ${url} and pushes to ${push}"
+fi
 git fetch --quiet origin ||
   die "the clone is in ${dest}, with its hooks, but fetching ${url} failed; fix that and run git fetch there"
 head="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"

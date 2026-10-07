@@ -1326,6 +1326,7 @@ start_workbench() {
     "${gitdir[@]}" \
     -v "${DATA}/${agent}:/home/dev/.$(agent_of "${agent}"):Z" "${history[@]}" \
     -e AIRLOCK_SESSION="${SESSION:-}" -e AIRLOCK_WORKBENCH="${name}" -e AIRLOCK_HOST_HOME="${HOME}" \
+    -e AIRLOCK_WORKSPACE="${ws}" \
     --hostname "${name:0:63}" \
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \

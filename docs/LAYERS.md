@@ -189,7 +189,10 @@ because Claude Code's command sandbox creates placeholders there (`skills/`,
 `hooks/` and more) before running anything; those stay with the session and
 never reach the real folder.
 `airlock-worktree <repo> [<branch>]`, run in the session, clones the
-repository there, independent of the main clone. Transcripts, history and
+repository there, independent of the main clone. A bare `<repo>` name is
+looked up in the current folder, then in the workspace's root
+(`AIRLOCK_WORKSPACE`). A GitHub `https` origin keeps fetching over `https`
+and gets an ssh push URL, since pushes go through the ssh-agent. Transcripts, history and
 memory stay shared: every session starts in the workspace's root, so it
 writes under the same project. So does the account's agent folder, login
 and settings with it: Claude Code saves its login by renaming a file over it
