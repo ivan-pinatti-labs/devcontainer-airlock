@@ -628,12 +628,12 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `github` (always) | github.com, the API, codeload, ssh over 443, release and raw downloads | GitHub's ranges from `api.github.com/meta`, enforced |
 | `ghcr` (always) | GitHub's container registry, where these images are published | GitHub's ranges, enforced |
 | `python`, `node` | PyPI, npm | |
-| `golang` | the Go module proxy, and every Cloud Storage bucket (below) | |
+| `golang` | the Go module proxy and vulnerability database, and every Cloud Storage bucket (below) | |
 | `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
-| `docker-hub`, `quay` | those registries and their CDNs | |
+| `docker-hub`, `quay` | those registries and their download hosts (Docker Hub's blobs come from an S3 bucket) | |
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
-| `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages, trivy's database, sigstore's trust root | |
-| `aws` | AWS service APIs | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
+| `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages (and Alpine's GitLab, for aports issues), trivy's database, sigstore's trust root | |
+| `aws` | AWS service APIs, and ECR Public with its CloudFront download host | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
 | `sonarqube-cloud` | SonarQube for IDE in connected mode: SonarQube Cloud (EU region), its scanner and events hosts, SonarSource's analyzer downloads | |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh

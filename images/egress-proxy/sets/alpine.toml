@@ -1,2 +1,2 @@
-description = "Alpine's package CDN, for building Alpine based images."
-domains = ["dl-cdn.alpinelinux.org"]
+description = "Alpine: its package CDN, for building Alpine based images, and its GitLab (gitlab.alpinelinux.org), where the aports issues are filed, so an upstream-blocked issue that tracks one can be followed."
+domains = ["dl-cdn.alpinelinux.org", "gitlab.alpinelinux.org"]

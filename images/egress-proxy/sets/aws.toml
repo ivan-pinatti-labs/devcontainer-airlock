@@ -1,5 +1,6 @@
-description = "AWS service APIs, any service and region. AWS publishes its address ranges at ip-ranges.amazonaws.com, and they are enforced: an amazonaws.com name has to resolve inside them."
-domains = ["*.amazonaws.com", "*.api.aws"]
+# cspell:words glxqk uabbnd
+description = "AWS service APIs, any service and region, and ECR Public (public.ecr.aws) for pulling images. ECR Public redirects blob downloads to one CloudFront distribution (measured 2026-10-07: d2glxqk2uabbnd.cloudfront.net). AWS publishes its address ranges at ip-ranges.amazonaws.com, and they are enforced: a name in this set has to resolve inside them."
+domains = ["*.amazonaws.com", "*.api.aws", "public.ecr.aws", "d2glxqk2uabbnd.cloudfront.net"]
 
 [provider]
 name = "aws-ip-ranges"
