@@ -139,7 +139,7 @@ check "and with no image anywhere it says so" 1 err "l2: no image, set L2_IMAGE 
 
 # In the agent's command sandbox no unix socket can be opened (EPERM). The
 # real probe runs in every case above; here python3 answers as it would there.
-stub python3 'exit 4'
+stub python3 'echo "PermissionError: [Errno 1] Operation not permitted" >&2; exit 1'
 mkdir -p "${repo}/.devcontainer/l2"
 echo "FROM l2" >"${repo}/.devcontainer/l2/Dockerfile"
 run "${l2}" true
