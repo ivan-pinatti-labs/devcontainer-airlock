@@ -194,6 +194,62 @@
     }
   },
   {
+    "format": "apt",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "apt-debian",
+      "proxy": {
+        "remoteUrl": "http://deb.debian.org/debian/",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 60
+      },
+      "apt": {
+        "distribution": "trixie",
+        "flat": false
+      }
+    }
+  },
+  {
+    "format": "apt",
+    "spec": {
+      "online": true,
+      "storage": {
+        "blobStoreName": "default",
+        "strictContentTypeValidation": true
+      },
+      "negativeCache": {
+        "enabled": true,
+        "timeToLive": 60
+      },
+      "httpClient": {
+        "blocked": false,
+        "autoBlock": true
+      },
+      "name": "apt-debian-security",
+      "proxy": {
+        "remoteUrl": "http://deb.debian.org/debian-security/",
+        "contentMaxAge": -1,
+        "metadataMaxAge": 60
+      },
+      "apt": {
+        "distribution": "trixie-security",
+        "flat": false
+      }
+    }
+  },
+  {
     "format": "yum",
     "spec": {
       "online": true,

@@ -225,6 +225,31 @@ def test_forwarded_plain_http(mg, backend):
 
 
 @pytest.mark.parametrize(
+    ("url", "repository"),
+    [
+        ("http://deb.debian.org/debian/dists/trixie/InRelease", "apt-debian"),
+        (
+            "http://deb.debian.org/debian-security/dists/trixie-security/InRelease",
+            "apt-debian-security",
+        ),
+        (
+            "http://security.debian.org/debian-security/dists/trixie-security/InRelease",
+            "apt-debian-security",
+        ),
+    ],
+)
+def test_debian_is_served_from_the_mirror(mg, backend, url, repository):
+    path = url.split("/dists/", 1)[1]
+    backend.table = {
+        f"/repository/{repository}/dists/{path}": Resp(
+            200, b"ok", {"Content-Length": "2"}
+        )
+    }
+    r = ask(mg, "GET", url)
+    assert (r.status, r.body) == (200, b"ok")
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "/apt/ubuntu/../../repository/npm/evil/-/evil-1.0.0.tgz",

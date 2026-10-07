@@ -630,6 +630,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `python`, `node` | PyPI, npm | |
 | `golang` | the Go module proxy, and every Cloud Storage bucket (below) | |
 | `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
+| `debian` | Debian's apt archive. Plain http apt gets it from the package mirror without this set; list it to reach Debian itself (https sources, or the mirror off) | |
 | `docker-hub`, `quay` | those registries and their CDNs | |
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
 | `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages, trivy's database, sigstore's trust root | |
@@ -762,6 +763,7 @@ workbench says where it is):
 | npm (and pre-commit's node hooks) | `NPM_CONFIG_REGISTRY` | `/npm/` |
 | Go | `GOPROXY`; `GOSUMDB` stays on, the gate serves `sum.golang.org` too | `/go/` |
 | apt (Ubuntu, main and security) | the gate as the plain http proxy | `/apt/ubuntu/`, `/apt/ubuntu-security/` |
+| apt (Debian, main and security) | the gate as the plain http proxy | `/apt/debian/`, `/apt/debian-security/` |
 | Alpine apk | a repositories line pointing at the gate | `/apk/alpine/` |
 | yum and dnf (Fedora) | a baseurl pointing at the gate | `/yum/fedora/` |
 | docker.io, ghcr.io | the engine's registries.conf, mirrors on ports 5000 and 5001 | `/v2/` |

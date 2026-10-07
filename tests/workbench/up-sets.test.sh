@@ -47,7 +47,7 @@ refute "before anything starts" "podman run"
 echo 'rust' >"${app}/.devcontainer/egress-sets"
 up_again
 check "a set the proxy does not know stops it too" 1 err \
-  "workbench: ${app} asks for egress set 'rust', which the proxy does not know; known sets: python node golang docker-hub ghcr ubuntu nodesource alpine fedora hashicorp"
+  "workbench: ${app} asks for egress set 'rust', which the proxy does not know; known sets: python node golang docker-hub ghcr ubuntu debian nodesource alpine fedora hashicorp"
 assert "and the registration is kept as it was" grep -qx "sets=python" "${conf}"
 
 rule '*egress-refresh --list*' 'exit 1'
