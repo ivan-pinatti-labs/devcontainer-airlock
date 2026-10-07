@@ -33,9 +33,27 @@ def load_broker(monkeypatch, owners="example-org"):
     return load("images/gh-broker/broker.py", "gh_broker", open=tree_open)
 
 
+# What GitHub answers for `gh api repos/<repo> --jq .visibility`, by repo; a
+# repository missing here is one the lookup fails for (absent, or no access).
+VISIBILITY = {"upstream/project": "public", "upstream/hidden": "private"}
+
+
+def fake_visibility(asked):
+    def run(argv, **kwargs):
+        asked.append(argv)
+        repo = argv[2].removeprefix("repos/")
+        if repo in VISIBILITY:
+            return subprocess.CompletedProcess(argv, 0, VISIBILITY[repo] + "\n", "")
+        return subprocess.CompletedProcess(argv, 1, "", "HTTP 404: Not Found\n")
+
+    return run
+
+
 @pytest.fixture
 def broker(monkeypatch):
-    return load_broker(monkeypatch)
+    loaded = load_broker(monkeypatch)
+    monkeypatch.setattr(loaded.subprocess, "run", fake_visibility([]))
+    return loaded
 
 
 CASES = [
@@ -163,6 +181,33 @@ CASES = [
     (True, "pr create -t t --notes-file=-"),
     (True, "pr create -t t -F-"),
     (True, "search issues owner:example-org"),
+    # Reads of a public repository outside the owners; writes stay refused,
+    # and so does anything private, unknown or not plain owner/name.
+    (True, "issue view 1035 -R upstream/project"),
+    (True, "issue list --repo=upstream/project --state open"),
+    (True, "pr view https://github.com/upstream/project/pull/3"),
+    (True, "release list -R upstream/project"),
+    (True, "release view v1 -R UPSTREAM/project"),
+    (True, "issue view 1 -R example-org/x"),
+    (False, "issue comment 1035 -R upstream/project --body spam"),
+    (False, "pr comment https://github.com/upstream/project/pull/3 --body spam"),
+    (False, "issue view 1 -R upstream/hidden"),
+    (False, "issue view 1 -R upstream/gone"),
+    (False, "issue view 1 -R github.com/upstream/project"),
+    (False, "issue view 1 -R upstream/.."),
+    (False, "pr view https://github.com/upstream/hidden/pull/3"),
+    (False, "search issues repo:upstream/project"),
+    (True, "api repos/upstream/project/issues/1035"),
+    (True, "api repos/upstream/project/releases?per_page=5"),
+    (False, "api repos/upstream/hidden/issues/1"),
+    (False, "api repos/upstream/gone"),
+    (False, "api repos/upstream"),
+    (False, "api users/upstream"),
+    (False, "api -X POST repos/upstream/project/issues"),
+    (False, "api repos/upstream/project/issues -f title=t"),
+    (False, "api repos/upstream/project/../secret"),
+    (False, "api repos/example-org/x/../../upstream/hidden"),
+    (False, "api repos/example-org/x/%2E%2E/y"),
 ]
 
 SPACED = ["api", "graphql", "-f"]
@@ -261,6 +306,7 @@ def test_allowed_argv(broker, expected, argv):
 def test_owners_come_from_the_environment(monkeypatch, owners, count):
     """Nothing is allowed without owners."""
     fresh = load_broker(monkeypatch, owners)
+    monkeypatch.setattr(fresh.subprocess, "run", fake_visibility([]))
     assert len(fresh.OWNERS) == count
     assert fresh.allowed(["pr", "view", "1", "-R", "example-org/x"]) is bool(count)
 
@@ -275,10 +321,43 @@ def test_owners_come_from_the_environment(monkeypatch, owners, count):
         ("pr merge 25 --admin", "merge queue"),
         ("api -X DELETE repos/example-org/x", "gh api call"),
         ("", "no command"),
+        ("issue view 1 -R upstream/hidden", "allowed owner, and not public"),
     ],
 )
 def test_refusal_says_why(broker, command, why):
     assert why in broker.refusal(command.split())
+
+
+def test_visibility_is_asked_once_then_again_when_stale(broker, monkeypatch):
+    asked = []
+    monkeypatch.setattr(broker.subprocess, "run", fake_visibility(asked))
+    now = [1000.0]
+    monkeypatch.setattr(broker.time, "monotonic", lambda: now[0])
+    assert broker.is_public("Upstream/Project")
+    assert broker.is_public("upstream/project")
+    assert asked == [["gh", "api", "repos/upstream/project", "--jq", ".visibility"]]
+    now[0] += broker.PUBLIC_TTL
+    assert broker.is_public("upstream/project")
+    assert len(asked) == 2
+
+
+def test_a_failed_lookup_is_not_kept(broker, monkeypatch):
+    asked = []
+    monkeypatch.setattr(broker.subprocess, "run", fake_visibility(asked))
+    assert not broker.is_public("upstream/gone")
+    assert not broker.is_public("upstream/gone")
+    assert len(asked) == 2
+
+
+@pytest.mark.parametrize(
+    "error", [subprocess.TimeoutExpired("gh", 30), FileNotFoundError("gh")]
+)
+def test_a_lookup_that_cannot_answer_is_not_public(broker, monkeypatch, error):
+    def run(argv, **kwargs):
+        raise error
+
+    monkeypatch.setattr(broker.subprocess, "run", run)
+    assert not broker.is_public("upstream/project")
 
 
 @pytest.mark.parametrize(

@@ -570,7 +570,13 @@ delete`, `secret`), repositories and owners outside `WORKBENCH_GH_OWNERS`
 (named by `-R`, `--repo`, `--owner`, a URL, or a `repo:`, `org:` or `user:`
 qualifier in a search), `gh api` with a method other than GET, and GraphQL
 mutations, except the two writes `allowlist.json` names (a reply to a review
-comment, and `resolveReviewThread`). Interactive prompts are not
+comment, and `resolveReviewThread`). Reads are the exception to the owners:
+the commands under `public_reads` (issue, pull request and release `list`
+and `view`) and `gh api` GETs under `repos/` may name a repository outside
+them when GitHub says it is public, so an upstream issue can be followed.
+The broker asks GitHub (`repos/<owner>/<repo>`, with the token) and keeps
+the answer for ten minutes; anything private, missing, or not plain
+`owner/name` stays refused, and so does every write. Interactive prompts are not
 available, so pass the flags a prompt would ask for. The broker never reads
 a file named on the command line, since it would read it beside the token;
 the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the

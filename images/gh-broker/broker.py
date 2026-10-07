@@ -10,7 +10,9 @@ passes as a podman secret and which never leaves this container. Refused:
 anything not in /etc/gh-broker/allowlist.json, any repository or owner
 outside the allowed owners (-R, --owner, a URL, a search qualifier), flags that read a file, `pr merge --admin`, and every
 `gh api` write except replying to a review comment and the GraphQL mutations
-the allowlist names (resolving a review thread).
+the allowlist names (resolving a review thread). The exception: the read
+only commands under public_reads, and `gh api` GETs under repos/, may name a
+repository outside the owners when GitHub says it is public.
 """
 import json
 import os
@@ -19,6 +21,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 
 ALLOW = json.load(open("/etc/gh-broker/allowlist.json"))
 COMMANDS = set(ALLOW["commands"])
@@ -79,6 +82,59 @@ def repos_ok(argv):
                 elif value + "/" not in OWNERS:
                     return False
     return True
+
+
+# Read only commands that may also name a public repository outside the
+# owners: following an upstream issue means reading someone else's
+# repository. Writes stay held to the owners.
+PUBLIC_READS = frozenset(ALLOW.get("public_reads", []))
+REPO_NAME = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
+URL_REPO = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s#?]+)", re.I)
+# How long an answer to "is it public" is kept. A repository made private
+# meanwhile stays readable for at most this long, with a token that could
+# read it anyway.
+PUBLIC_TTL = 600
+_public = {}
+_public_lock = threading.Lock()
+
+
+def is_public(repo):
+    """Whether GitHub says `repo` (owner/name) is public, asked with the
+    token. Only an answer is kept; a failed lookup is asked again."""
+    key = repo.lower()
+    now = time.monotonic()
+    with _public_lock:
+        hit = _public.get(key)
+    if hit and now - hit[1] < PUBLIC_TTL:
+        return hit[0]
+    try:
+        p = subprocess.run(
+            ["gh", "api", f"repos/{key}", "--jq", ".visibility"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    if p.returncode != 0:
+        return False
+    public = p.stdout.strip() == "public"
+    with _public_lock:
+        _public[key] = (public, now)
+    return public
+
+
+def plain_repo(repo):
+    """`repo` is owner/name and nothing else: no host, no `.` or `..`."""
+    return bool(REPO_NAME.match(repo)) and repo.split("/")[1] not in (".", "..")
+
+
+def public_read_ok(argv):
+    """A read only command whose repositories outside the owners (named by
+    -R or a URL) are all public."""
+    if " ".join(argv[:2]) not in PUBLIC_READS or flag_values(argv, OWNER_FLAGS):
+        return False
+    named = flag_values(argv, REPO_FLAGS) + ["/".join(m) for a in argv for m in URL_REPO.findall(a)]
+    outside = [r for r in named if not r.lower().startswith(OWNERS)]
+    return all(plain_repo(r) and is_public(r) for r in outside)
 
 
 REPLY = re.compile(r"^repos/([^/]+)/[^/]+/pulls/\d+/comments/\d+/replies$", re.I)
@@ -199,12 +255,18 @@ def api_ok(argv):
             and all(f.startswith("body=") for f in fields)
         )
     # Everything else is read only: GET, and no fields, since gh turns any
-    # request with fields into a POST.
-    return (
-        method in (None, "GET")
-        and not fields
-        and path.lower().startswith(tuple("repos/" + o for o in OWNERS))
-    )
+    # request with fields into a POST. A `.` or `..` segment would climb out
+    # of the repository the path names, so none is taken.
+    if method not in (None, "GET") or fields:
+        return False
+    segments = path.split("?", 1)[0].split("/")
+    if any(s in (".", "..") or "%2e" in s.lower() for s in segments):
+        return False
+    if path.lower().startswith(tuple("repos/" + o for o in OWNERS)):
+        return True
+    # Any other repository: when it is public.
+    return segments[0] == "repos" and len(segments) > 2 and plain_repo(
+        "/".join(segments[1:3])) and is_public("/".join(segments[1:3]))
 
 
 # Flags that make gh read (or write) a file named by the caller. The file
@@ -248,10 +310,13 @@ def refusal(argv):
     if argv[0] == "api":
         return None if api_ok(argv) else (
             "this gh api call is not allowed: only reads, review comment replies"
-            " and the listed GraphQL mutations, on the allowed owners")
+            " and the listed GraphQL mutations, on the allowed owners (reads of a"
+            " public repository too)")
     if " ".join(argv[:2]) not in COMMANDS:
         return f"'gh {' '.join(argv[:2])}' is not on the allowlist"
-    if not repos_ok(argv):
+    if not repos_ok(argv) and not public_read_ok(argv):
+        if " ".join(argv[:2]) in PUBLIC_READS:
+            return "the repository is not under an allowed owner, and not public"
         return "the repository is not under an allowed owner"
     if not files_ok(argv):
         return ("a file named on the command line would be read here, beside the"

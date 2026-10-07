@@ -7,7 +7,14 @@ os.environ["GH_BROKER_OWNERS"] = "example-org"
 src = open("/usr/local/libexec/gh-broker/broker.py").read()
 ns = {"__name__": "broker"}; exec(compile(src, "broker.py", "exec"), ns)
 allowed = ns["allowed"]
+# GitHub's answer to "is it public", without asking it from the build.
+ns["is_public"] = lambda repo: repo.lower() == "upstream/project"
 cases = [
+  (True,  "issue view 1035 -R upstream/project"), (True, "api repos/upstream/project/issues/1"),
+  (True,  "pr view https://github.com/upstream/project/pull/3"),
+  (False, "issue comment 1035 -R upstream/project --body spam"), (False, "issue view 1 -R upstream/hidden"),
+  (False, "api -X POST repos/upstream/project/issues"), (False, "api repos/upstream/hidden"),
+  (False, "api repos/example-org/x/../../upstream/hidden"), (False, "issue view 1 -R upstream/.."),
   (True,  "pr list"), (True, "pr view 25 -R example-org/devcontainer-airlock"),
   (True,  "pr comment https://github.com/example-org/gh-actions/pull/1 --body hi"),
   (True,  "api repos/example-org/gh-actions"), (True, "api graphql -f query={viewer{login}}"),
@@ -76,6 +83,7 @@ bad = [(exp, c) for exp, c in cases if allowed(c.split()) != exp]
 for env, exp in [("", 0), ("evil name", 0), ("example-org", 1)]:
     os.environ["GH_BROKER_OWNERS"] = env
     fresh = {"__name__": "broker"}; exec(compile(src, "broker.py", "exec"), fresh)
+    fresh["is_public"] = ns["is_public"]
     ok = len(fresh["OWNERS"]) == exp and fresh["allowed"]("pr view 1 -R example-org/x".split()) == bool(exp)
     if not ok:
         bad.append((bool(exp), f"GH_BROKER_OWNERS={env!r}"))
