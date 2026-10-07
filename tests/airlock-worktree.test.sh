@@ -74,7 +74,14 @@ rm -r "${dest}"
 mkdir -p "${dest}"
 AIRLOCK_WORKSPACE="${src}" run images/workbench/bin/airlock-worktree app
 check "a repository wins over a plain folder" 0 out "airlock-worktree: ${dest} on brave-otter, from origin/main"
+# A relative path means that path only, never the workspace's namesake.
+AIRLOCK_WORKSPACE="${src}" run images/workbench/bin/airlock-worktree ./app
+check "a relative path is not looked up in the workspace" 1 err \
+  "airlock-worktree: ${src}/other/app is not a git repository"
 rmdir "${src}/other/app"
+AIRLOCK_WORKSPACE="${src}" run images/workbench/bin/airlock-worktree sub/app
+check "nor is one with a folder in it" 1 err \
+  "airlock-worktree: no repository sub/app (looked for ${src}/other/sub/app)"
 cd "${src}"
 
 run images/workbench/bin/airlock-worktree app

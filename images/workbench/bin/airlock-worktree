@@ -20,13 +20,16 @@ die() {
 
 [[ -n "${AIRLOCK_SESSION:-}" ]] || die "not in a session; host/workbench session start (make claude) starts one"
 [[ -n "${1:-}" ]] || die "usage: airlock-worktree REPO [BRANCH]"
-# A name is looked up in the folder you are in, then in the workspace: the
-# agent's shell may have moved into another clone. The first git repository
-# wins; failing that, the first folder, so the error names it.
+# A bare name is looked up in the folder you are in, then in the workspace:
+# the agent's shell may have moved into another clone. A path (absolute, or
+# relative with a slash) means that path only. The first git repository wins;
+# failing that, the first folder, so the error names it.
 tried=("$1")
 if [[ "$1" != /* ]]; then
   tried=("${PWD}/$1")
-  [[ -z "${AIRLOCK_WORKSPACE:-}" ]] || tried+=("${AIRLOCK_WORKSPACE}/$1")
+  if [[ "$1" != */* && -n "${AIRLOCK_WORKSPACE:-}" ]]; then
+    tried+=("${AIRLOCK_WORKSPACE}/$1")
+  fi
 fi
 repo=""
 for path in "${tried[@]}"; do
