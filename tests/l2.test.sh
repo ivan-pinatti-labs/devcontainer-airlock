@@ -137,4 +137,15 @@ check "outside a repository, the current directory is the tree" 6 calls \
 GIT_TOP="" L2_IMAGE="" run "${l2}" ls
 check "and with no image anywhere it says so" 1 err "l2: no image, set L2_IMAGE or .devcontainer/l2-image"
 
+# In the agent's command sandbox no unix socket can be opened (EPERM). The
+# real probe runs in every case above; here python3 answers as it would there.
+stub python3 'exit 4'
+mkdir -p "${repo}/.devcontainer/l2"
+echo "FROM l2" >"${repo}/.devcontainer/l2/Dockerfile"
+run "${l2}" true
+check "a sandboxed call says so" 4 err "l2: this call ran inside the agent's command sandbox"
+check "and how to run it instead" 4 err "l2: run l2 as a command of its own"
+refute "rather than sending you to the host" "podman"
+rm -r "${repo}/.devcontainer/l2"
+
 finish

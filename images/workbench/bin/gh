@@ -18,9 +18,11 @@ Exit status codes:
   1    a --body-file path could not be read
   124  no reply from the broker within TIMEOUT seconds
   126  the broker refused the command (the message says why)
-  127  the broker is not reachable, or the connection to it failed
+  127  the broker is not reachable (or this call ran inside Claude Code's
+        command sandbox, which says so), or the connection to it failed
   any  otherwise, the exit status of gh itself
 """
+import errno
 import json
 import os
 import socket
@@ -91,9 +93,19 @@ try:
     s.settimeout(TIMEOUT)
     s.connect(path)
 except OSError as e:
-    sys.stderr.write(
-        f"gh: the gh broker is not reachable at {path} ({e.strerror}).\n"
-        "gh: start the helpers on the host: host/workbench up\n")
+    if e.errno == errno.EPERM:
+        # Claude Code's command sandbox blocks every unix socket, so one
+        # cannot even be opened (EACCES would be the socket file's mode).
+        sys.stderr.write(
+            "gh: this call ran inside the agent's command sandbox, which blocks the "
+            "gh broker's socket; the broker is fine.\n"
+            "gh: run gh as a command of its own: no loop, pipe, redirect, `&&` or `cd` "
+            "around it, and --body-file rather than a long --body (docs/LAYERS.md, "
+            "\"The coding agents\").\n")
+    else:
+        sys.stderr.write(
+            f"gh: the gh broker is not reachable at {path} ({e.strerror}).\n"
+            "gh: start the helpers on the host: host/workbench up\n")
     sys.exit(127)
 try:
     s.sendall((json.dumps({"argv": argv, "cwd": os.getcwd(), "stdin": stdin}) + "\n").encode())

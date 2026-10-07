@@ -378,9 +378,14 @@ files they cannot edit (root owned, read only):
   A call leaves the sandbox only when every part of it matches an
   exclusion: `cd ... && git push` and `gh ... | head` stay inside, since
   `cd` and `head` are not excluded. `git -C` and `git -c` do not match
-  `git *` at all (measured with Claude Code 2.1.283). Whatever stays inside
-  cannot reach the sockets and fails. Excluded commands still go through
-  the permission prompts.
+  `git *` at all (measured with Claude Code 2.1.283). Other shapes that
+  stay inside: a loop (`for n in 1 2; do gh issue view $n; done`), a
+  redirect (`l2 -- sh x.sh > out.txt`), and a single `gh` call with a long
+  multi line `--body` holding backticks and quotes (use `--body-file`).
+  Whatever stays inside cannot reach the sockets and fails. `gh` and `l2`
+  recognize that (the socket cannot even be opened, `EPERM`) and say the
+  call ran in the sandbox; `podman` and `git` give their own errors.
+  Excluded commands still go through the permission prompts.
 - Which commands run without asking, which ask and which are refused comes
   from agent-policy and the airlock's overlay on it (below). For `podman`
   (a client of the engine) that means reads (`ps`, `images`, `inspect`,

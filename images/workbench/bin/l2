@@ -46,6 +46,8 @@
 # Exit status codes:
 #   2    usage error
 #   3    the run changed a path the workbench or the host execute
+#   4    this call ran inside Claude Code's command sandbox, where the
+#        engine's socket is blocked
 #   any  otherwise, the exit status of COMMAND
 
 set -o errexit
@@ -105,6 +107,23 @@ done
   echo "l2: no command given" >&2
   exit 2
 }
+
+# Claude Code's command sandbox blocks every unix socket: one cannot even be
+# opened (EPERM), so the engine is out of reach and podman's errors, and the
+# load-l2 hint below, would point at the host instead.
+sandboxed=0
+python3 -c '
+import errno, socket, sys
+try:
+    socket.socket(socket.AF_UNIX).close()
+except OSError as e:
+    sys.exit(4 if e.errno == errno.EPERM else 0)
+' 2>/dev/null || sandboxed=$?
+if [[ "${sandboxed}" -eq 4 ]]; then
+  echo "l2: this call ran inside the agent's command sandbox, which blocks the L2 engine's socket; the engine is fine." >&2
+  echo "l2: run l2 as a command of its own: no loop, pipe, redirect, \`&&\` or \`cd\` around it (docs/LAYERS.md, \"The coding agents\")." >&2
+  exit 4
+fi
 
 mode=rw
 [[ "${ro}" = true ]] && mode=ro

@@ -21,9 +21,13 @@ devcontainer-airlock has the full picture):
   part of it is an excluded command. `cd` into the repository in a call of
   its own, then run `git push` or `gh pr checks 12` by itself: no
   `cd ... &&`, no pipe into another tool, and no `git -C` or `git -c`, which
-  do not match at all. Those stay inside the sandbox, where the sockets are
-  blocked and `git` goes to `github.com:22` through the sandbox's own proxy
-  and fails with "Bad Gateway".
+  do not match at all. Loops (`for ...; do gh ...; done`), redirects
+  (`l2 ... > out.txt`) and a long multi line `--body` stay inside too: make
+  parallel calls instead of a loop, and use `--body-file`. Those stay inside
+  the sandbox, where the sockets are blocked and `git` goes to
+  `github.com:22` through the sandbox's own proxy and fails with "Bad
+  Gateway". `gh` and `l2` say when a call ran in the sandbox; an error that
+  sends you to the host helpers comes from a call that did not.
 - A `Permission denied (publickey)` from `git` is GitHub refusing
   authentication. Run `ssh-add -l`: "no identities" means the agent holds
   no key, so ask the user to run `make unlock` on the host. When it lists a
