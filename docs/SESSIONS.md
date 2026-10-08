@@ -63,7 +63,8 @@ A session never mounts a clone read write.
 - When the work is agreed, the session runs `airlock-worktree <repo>
   [<branch>]` (new, in the workbench image). It makes an **independent
   clone** into its folder: `git clone --no-hardlinks` from the read only
-  main clone (no network), `origin` set to the main clone's remote, fetch, a
+  main clone (no network), `origin` set to the main clone's remote (with an
+  ssh push URL when that is GitHub over `https`), fetch, a
   branch from `origin/main`, `l2-hooks-install`. The branch is named after
   the work and can be chosen at any time; the folder keeps the session's
   name.
