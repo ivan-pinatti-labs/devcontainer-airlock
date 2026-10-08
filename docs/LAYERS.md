@@ -375,7 +375,8 @@ files they cannot edit (root owned, read only):
   socket list is macOS only) and sends traffic through a proxy of its own,
   so the commands that need the broker, the ssh-agent or the engine are in
   its `excludedCommands`: `l2`, `git`, `podman`, `gh`, `ssh-add -l`, and
-  `airlock-worktree`, whose clone fetches through the ssh-agent and whose
+  `airlock-worktree`, whose clone fetches `origin` (through the ssh-agent
+  when that is an ssh URL, past the sandbox's proxy either way) and whose
   hooks install through `l2`.
   A call leaves the sandbox only when every part of it matches an
   exclusion: `cd ... && git push` and `gh ... | head` stay inside, since
