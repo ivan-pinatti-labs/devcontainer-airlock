@@ -790,8 +790,8 @@ workbench says where it is):
 | Go | `GOPROXY`; `GOSUMDB` stays on, the gate serves `sum.golang.org` too | `/go/` |
 | apt (Ubuntu, main and security) | the gate as the plain http proxy | `/apt/ubuntu/`, `/apt/ubuntu-security/` |
 | apt (Debian, main and security) | the gate as the plain http proxy | `/apt/debian/`, `/apt/debian-security/` |
-| Alpine apk | a repositories line pointing at the gate | `/apk/alpine/` |
-| yum and dnf (Fedora) | a baseurl pointing at the gate | `/yum/fedora/` |
+| Alpine apk | its sources switched to http (below), then the gate as the plain http proxy | `/apk/alpine/` |
+| yum and dnf (Fedora) | its sources switched to http (below), then the gate as the plain http proxy | `/yum/fedora/` |
 | docker.io, ghcr.io | the engine's registries.conf, mirrors on ports 5000 and 5001 | `/v2/` |
 
 The engine gets the same for its own pulls and for the images it builds:
@@ -799,6 +799,30 @@ registry mirrors in a registries.conf drop-in, and the gate as its plain http
 proxy, so apt in an image build is served from the mirror. pip and npm in an
 image build still go through the egress proxy unless the Dockerfile points
 them at the gate.
+
+Ubuntu and Debian images name their archives over plain http, so the gate
+serves them with no change in the Dockerfile. Alpine and Fedora images name
+theirs over https, a tunnel the gate cannot open without breaking TLS, so
+they reach upstream through the `alpine` and `fedora` sets instead. One line
+early in the Dockerfile switches them to http and so to the mirror:
+
+```dockerfile
+# Alpine
+RUN sed -i 's|^https://dl-cdn.alpinelinux.org/|http://dl-cdn.alpinelinux.org/|' /etc/apk/repositories
+# Fedora: the two Fedora repositories, and off with Cisco's openh264 one,
+# which has no http source to switch to
+RUN sed -i -e 's|^metalink=|#metalink=|' \
+      -e 's|^#baseurl=http://download.example/pub/fedora/linux/|baseurl=http://dl.fedoraproject.org/pub/fedora/linux/|' \
+      /etc/yum.repos.d/fedora.repo /etc/yum.repos.d/fedora-updates.repo \
+  && sed -i 's|^enabled=1|enabled=0|' /etc/yum.repos.d/fedora-cisco-openh264.repo
+```
+
+This is the trade apt already makes: the plain http hop is between the build
+and the gate, on the workspace network, and the backend fetches upstream
+over https. apk and dnf check every package's signature, so http cannot slip
+a modified package past them. With the mirror off, the same http requests go
+out through the egress proxy and need the `alpine` or `fedora` set, which is
+also the override for a build that keeps https.
 
 `mirror` in `.devcontainer/egress-sets` is not an egress set: it says the
 workspace installs through the mirror, and `up` refuses it when the mirror is
