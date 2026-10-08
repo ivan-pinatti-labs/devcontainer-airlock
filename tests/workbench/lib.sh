@@ -43,7 +43,7 @@ wb=host/workbench
 export PODMAN_STATE="${__scratch}/podman"
 mkdir -p "${PODMAN_STATE}"/{ctr,net,vol,secret,img,store,start-logs,dies,rules}
 printf '%s\n' 'python  PyPI' 'node    npm' 'golang  Go modules' 'docker-hub  Docker Hub' \
-  'ghcr  GitHub' 'ubuntu  Ubuntu' 'nodesource  NodeSource' 'alpine  Alpine' 'fedora  Fedora' \
+  'ghcr  GitHub' 'ubuntu  Ubuntu' 'debian  Debian' 'nodesource  NodeSource' 'alpine  Alpine' 'fedora  Fedora' \
   'hashicorp  HashiCorp' >"${PODMAN_STATE}/sets"
 
 # The host: a home, a runtime folder and the folder workspaces live under.

@@ -1,0 +1,2 @@
+description = "Debian's apt archive, for building Debian based images. Plain http apt is served by the package mirror without this set (the mirror's backend uses it); select it for a build that reaches Debian itself, over https or with the mirror off."
+domains = ["deb.debian.org", "security.debian.org"]

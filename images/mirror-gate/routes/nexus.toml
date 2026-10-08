@@ -31,6 +31,14 @@ prefix = "/apt/ubuntu-security/"
 target = "/repository/apt-ubuntu-security/"
 
 [[route]]
+prefix = "/apt/debian/"
+target = "/repository/apt-debian/"
+
+[[route]]
+prefix = "/apt/debian-security/"
+target = "/repository/apt-debian-security/"
+
+[[route]]
 prefix = "/yum/fedora/"
 target = "/repository/yum-fedora/"
 
@@ -58,3 +66,16 @@ to = "/apt/ubuntu/"
 [[forward]]
 url = "http://security.ubuntu.com/ubuntu/"
 to = "/apt/ubuntu-security/"
+
+# Debian images name deb.debian.org for both; older ones security.debian.org.
+[[forward]]
+url = "http://deb.debian.org/debian/"
+to = "/apt/debian/"
+
+[[forward]]
+url = "http://deb.debian.org/debian-security/"
+to = "/apt/debian-security/"
+
+[[forward]]
+url = "http://security.debian.org/debian-security/"
+to = "/apt/debian-security/"

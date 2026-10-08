@@ -1048,7 +1048,7 @@ proxy_leave() {
 # whose only way out is the egress proxy with the upstream registries' sets,
 # and the gate, the only part clients reach, at .254 on every workspace's
 # network. The backend is never on a workspace network.
-MIRROR_SETS=python,node,golang,docker-hub,ghcr,ubuntu,alpine,fedora
+MIRROR_SETS=python,node,golang,docker-hub,ghcr,ubuntu,debian,alpine,fedora
 mirror_on() {
   case "${MIRROR}" in
   1 | on | yes | true) return 0 ;;
