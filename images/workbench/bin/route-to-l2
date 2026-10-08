@@ -18,10 +18,15 @@ Commands that are not matched (git, gh, ls, cat, podman, l2 itself) are left
 alone. A command that both calls l2 and runs project code outside it (say
 `pytest; l2 -- pytest`) is refused in either mode: wrapped whole, its l2
 would run inside L2, where there is no l2, and left alone, the bare part
-would run in the workbench. Run the two as separate commands. This is a
+would run in the workbench. Run the two as separate commands. So is one that
+mixes project code with a part that cannot work in L2 (`curl ... | python3`,
+`gh`, `git push`): moved whole, that part would fail there with an error
+that points elsewhere. Operators inside quotes do not split a command, so
+`l2 -- sh -c 'a && b'` is one l2 call. This is a
 policy for the agents, not a security boundary on its own: docs/LAYERS.md
 says what is.
 """
+# cspell:words commenters
 import json
 import re
 import shlex
@@ -42,15 +47,48 @@ NEEDS_NET = [
     ("pre-commit", "install-hooks"), ("pre-commit", "autoupdate"), ("poetry", "install"),
 ]
 ALWAYS_NET = {"npx", "uvx"}
+# What L2 never has: the gh broker, the ssh-agent, and a remote for git.
+WORKBENCH_ONLY = {"gh", "ssh", "scp", "ssh-add"}
+GIT_REMOTE = {"fetch", "pull", "push", "clone", "ls-remote"}
+# What L2 has only with --net.
+NET_TOOLS = {"curl", "wget"}
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# A token made of these alone is an operator that ends a simple command
+# (; & && | || ;; newlines, parentheses); one with < or > in it
+# is a redirection, which stays with its command.
+OPERATOR = set(";&|()\n")
+
+
+def commands(command):
+    """The simple commands in `command`, as word lists, split at operators
+    outside quotes: an operator inside a quoted argument (`sh -c 'a && b'`,
+    `sed 's|x|y|'`) does not split it. A command the lexer cannot read
+    (unbalanced quotes) is split at every operator instead."""
+    lexer = shlex.shlex(command.replace("\\\n", " "), posix=True, punctuation_chars=";&|()<>\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        for part in re.split(r"&&|\|\||;|\||\n", command):
+            try:
+                yield shlex.split(part)
+            except ValueError:
+                yield part.split()
+        return
+    words = []
+    for token in tokens:
+        if token and set(token) <= OPERATOR:
+            yield words
+            words = []
+        else:
+            words.append(token)
+    yield words
 
 
 def segments(command):
-    for part in re.split(r"&&|\|\||;|\||\n", command):
-        try:
-            words = shlex.split(part)
-        except ValueError:
-            words = part.split()
+    for words in commands(command):
         while words and ASSIGNMENT.match(words[0]):
             words = words[1:]
         if words and words[0] in ("sudo", "env", "exec", "time", "nice"):
@@ -82,6 +120,29 @@ def classify(command):
     return routed, net
 
 
+def git_subcommand(words):
+    """git's subcommand, past the global options that take a value."""
+    i = 1
+    while i < len(words) and words[i].startswith("-"):
+        i += 2 if words[i] in ("-C", "-c", "--git-dir", "--work-tree") else 1
+    return words[i] if i < len(words) else ""
+
+
+def outside_l2(command, net):
+    """A part of the command that cannot work in the L2 run it would be
+    moved to, or None: gh, ssh and git's remote commands need the broker or
+    the agent, which L2 never has, and curl and wget need --net."""
+    for words in segments(command):
+        head = words[0].rsplit("/", 1)[-1]
+        if head in WORKBENCH_ONLY:
+            return head
+        if head == "git" and git_subcommand(words) in GIT_REMOTE:
+            return f"git {git_subcommand(words)}"
+        if head in NET_TOOLS and not net:
+            return head
+    return None
+
+
 def main():
     deny_mode = "--deny" in sys.argv[1:]
     try:
@@ -102,6 +163,18 @@ def main():
                 "Calls l2 and also runs project code outside it. Wrapped in l2 whole, "
                 "the inner l2 would not be found there; left as is, the rest would run "
                 "in the workbench. Run the l2 call and the rest as separate commands.")}},
+            sys.stdout)
+        return
+    part = outside_l2(command, net)
+    if part:
+        json.dump({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                f"Runs project code, which would move the whole command to L2, and `{part}`, "
+                "which cannot work there (no network, no gh broker, no ssh-agent). Split the "
+                f"`{part}` part from the rest: run it as a command of its own, writing what "
+                "the rest needs to a file in the working tree, then run the rest.")}},
             sys.stdout)
         return
     l2 = "l2 --net --" if net else "l2 --"
