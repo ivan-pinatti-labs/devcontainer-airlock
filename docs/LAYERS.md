@@ -568,7 +568,8 @@ can take the token away. Every request is logged: `podman logs gh-broker`.
 Refused: anything outside the allowlist (including `gh auth token`, `repo
 delete`, `secret`), repositories and owners outside `WORKBENCH_GH_OWNERS`
 (named by `-R`, `--repo`, `--owner`, a URL, or a `repo:`, `org:` or `user:`
-qualifier in a search), `gh api` with a method other than GET, and GraphQL
+qualifier in a search, `gh search`'s or a list's `--search`), `gh api` with
+a method other than GET, and GraphQL
 mutations, except the two writes `allowlist.json` names (a reply to a review
 comment, and `resolveReviewThread`). Reads are the exception to the owners:
 the commands under `public_reads` (issue, pull request and release `list`

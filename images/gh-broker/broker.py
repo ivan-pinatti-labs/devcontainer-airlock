@@ -72,16 +72,31 @@ def repos_ok(argv):
         return False
     if not all(v.lower() + "/" in OWNERS for v in flag_values(argv, OWNER_FLAGS)):
         return False
-    if argv[:1] == ["search"]:
-        for a in argv[2:]:
-            for kind, value in QUALIFIER.findall(a):
-                value = value.strip("\"'").lower()
-                if kind.lower() == "repo":
-                    if not value.startswith(OWNERS):
-                        return False
-                elif value + "/" not in OWNERS:
-                    return False
+    for kind, value in qualifiers(argv):
+        if kind == "repo":
+            if not value.startswith(OWNERS):
+                return False
+        elif value + "/" not in OWNERS:
+            return False
     return True
+
+
+# `gh issue list` and `gh pr list` take a search query too, and a `repo:`
+# qualifier in it widens the read past the -R they name: repeated `repo:`
+# qualifiers are OR'ed.
+SEARCH_FLAGS = ("--search", "-S")
+
+
+def qualifiers(argv):
+    """Every scope qualifier in a search query of argv, as (kind, value)
+    lower cased: in a gh search's own terms, and in a --search/-S value."""
+    texts = argv[2:] if argv[:1] == ["search"] else []
+    texts = texts + flag_values(argv, SEARCH_FLAGS)
+    return [
+        (kind.lower(), value.strip("\"'").lower())
+        for text in texts
+        for kind, value in QUALIFIER.findall(text)
+    ]
 
 
 # Read only commands that may also name a public repository outside the
@@ -129,10 +144,16 @@ def plain_repo(repo):
 
 def public_read_ok(argv):
     """A read only command whose repositories outside the owners (named by
-    -R or a URL) are all public."""
+    -R, a URL or a repo: qualifier in its search) are all public. An org:,
+    user: or owner: qualifier outside the owners names no one repository to
+    check, so it is refused."""
     if " ".join(argv[:2]) not in PUBLIC_READS or flag_values(argv, OWNER_FLAGS):
         return False
+    scopes = qualifiers(argv)
+    if any(kind != "repo" and value + "/" not in OWNERS for kind, value in scopes):
+        return False
     named = flag_values(argv, REPO_FLAGS) + ["/".join(m) for a in argv for m in URL_REPO.findall(a)]
+    named += [value for kind, value in scopes if kind == "repo"]
     outside = [r for r in named if not r.lower().startswith(OWNERS)]
     return all(plain_repo(r) and is_public(r) for r in outside)
 

@@ -7,7 +7,7 @@ reads the copy in the tree instead. Nothing here starts gh or listens on a
 real socket path outside the test's own directory.
 """
 
-# cspell:words Rsomeone socketpair
+# cspell:words Rsomeone socketpair Srepo
 from __future__ import annotations
 
 import builtins
@@ -208,6 +208,17 @@ CASES = [
     (False, "api repos/upstream/project/../secret"),
     (False, "api repos/example-org/x/../../upstream/hidden"),
     (False, "api repos/example-org/x/%2E%2E/y"),
+    # A list command's --search/-S is a search query too: a repo: qualifier
+    # in it widens the read, so it is held to the same owners or public.
+    (True, "pr list -R example-org/x --search repo:example-org/y"),
+    (True, "issue list -S org:example-org"),
+    (False, "pr list -R example-org/x --search repo:evil/private"),
+    (False, "pr list --search=repo:upstream/hidden"),
+    (False, "issue list -S org:evil"),
+    (True, "pr list -R upstream/project --search repo:upstream/project"),
+    (True, "issue list -R upstream/project -Srepo:upstream/project"),
+    (False, "pr list -R upstream/project --search repo:upstream/hidden"),
+    (False, "issue list -R upstream/project -S user:evil"),
 ]
 
 SPACED = ["api", "graphql", "-f"]
@@ -287,6 +298,21 @@ ARGV_CASES = [
     (True, ["search", "prs", "(repo:example-org/x OR repo:example-org/y) is:open"]),
     (False, ["search", "prs", "(repo:example-org/x OR repo:someone-else/y)"]),
     (False, ["search", "prs", "is:open repo:someone-else/x"]),
+    (
+        False,
+        [
+            "pr",
+            "list",
+            "-R",
+            "upstream/project",
+            "--search",
+            "is:open repo:upstream/hidden",
+        ],
+    ),
+    (
+        True,
+        ["pr", "list", "-R", "upstream/project", "--search", "is:open author:someone"],
+    ),
 ]
 
 
