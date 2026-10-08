@@ -7,8 +7,10 @@ own directory.
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
 import runpy
 import socket
 import threading
@@ -208,3 +210,49 @@ def test_no_command_is_sent_as_is(monkeypatch, sock):
 def test_an_unreachable_broker(monkeypatch, capsys, sock):
     assert run_gh(monkeypatch, ["pr", "list"]) == 127
     assert "not reachable" in capsys.readouterr().err
+
+
+def blocked_socket(code):
+    def make(*_args, **_kwargs):
+        raise OSError(code, os.strerror(code))
+
+    return make
+
+
+def test_a_sandboxed_call_says_so(monkeypatch, capsys, sock):
+    # Claude Code's command sandbox refuses to open any unix socket.
+    monkeypatch.setattr(socket, "socket", blocked_socket(errno.EPERM))
+    assert run_gh(monkeypatch, ["pr", "list"]) == 127
+    err = capsys.readouterr().err
+    assert "most likely ran inside the agent's command sandbox" in err
+    assert "host/workbench up" not in err
+
+
+def test_another_socket_error_is_not_the_sandbox(monkeypatch, capsys, sock):
+    monkeypatch.setattr(socket, "socket", blocked_socket(errno.EACCES))
+    assert run_gh(monkeypatch, ["pr", "list"]) == 127
+    err = capsys.readouterr().err
+    assert "cannot open a unix socket" in err
+    assert "sandbox" not in err
+
+
+class RefusingSocket:
+    """Opens, then refuses the connection with EPERM."""
+
+    def __init__(self, *_args):
+        pass
+
+    def settimeout(self, _seconds):
+        pass
+
+    def connect(self, _path):
+        raise OSError(errno.EPERM, os.strerror(errno.EPERM))
+
+
+def test_a_refused_connection_is_not_the_sandbox(monkeypatch, capsys, sock):
+    # Only failing to open a socket at all points at the sandbox.
+    monkeypatch.setattr(socket, "socket", RefusingSocket)
+    assert run_gh(monkeypatch, ["pr", "list"]) == 127
+    err = capsys.readouterr().err
+    assert "not reachable" in err
+    assert "sandbox" not in err

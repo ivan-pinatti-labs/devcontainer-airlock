@@ -189,7 +189,10 @@ because Claude Code's command sandbox creates placeholders there (`skills/`,
 `hooks/` and more) before running anything; those stay with the session and
 never reach the real folder.
 `airlock-worktree <repo> [<branch>]`, run in the session, clones the
-repository there, independent of the main clone. Transcripts, history and
+repository there, independent of the main clone. A bare `<repo>` name is
+looked up in the current folder, then in the workspace's root
+(`AIRLOCK_WORKSPACE`). A GitHub `https` origin keeps fetching over `https`
+and gets an ssh push URL, since pushes go through the ssh-agent. Transcripts, history and
 memory stay shared: every session starts in the workspace's root, so it
 writes under the same project. So does the account's agent folder, login
 and settings with it: Claude Code saves its login by renaming a file over it
@@ -374,13 +377,24 @@ files they cannot edit (root owned, read only):
   inside the workbench. It blocks every unix socket on Linux (its per path
   socket list is macOS only) and sends traffic through a proxy of its own,
   so the commands that need the broker, the ssh-agent or the engine are in
-  its `excludedCommands`: `l2`, `git`, `podman`, `gh` and `ssh-add -l`.
+  its `excludedCommands`: `l2`, `git`, `podman`, `gh`, `ssh-add -l`, and
+  `airlock-worktree`, whose clone fetches `origin` (through the ssh-agent
+  when that is an ssh URL, past the sandbox's proxy either way) and whose
+  hooks install through `l2`.
   A call leaves the sandbox only when every part of it matches an
   exclusion: `cd ... && git push` and `gh ... | head` stay inside, since
   `cd` and `head` are not excluded. `git -C` and `git -c` do not match
-  `git *` at all (measured with Claude Code 2.1.283). Whatever stays inside
-  cannot reach the sockets and fails. Excluded commands still go through
-  the permission prompts.
+  `git *` at all (measured with Claude Code 2.1.283). Other shapes that
+  stay inside: a loop (`for n in 1 2; do gh issue view $n; done`), a
+  redirect (`l2 -- sh x.sh > out.txt`), and any argument holding backticks
+  or `$(` even in single quotes, where the shell takes them literally
+  (measured with Claude Code 2.1.284: ``l2 -- echo 'a `b` c'`` ran inside,
+  while a multi line argument and `sh -c 'a; b'` ran outside). Markdown in
+  a `gh --body` is the usual case: use `--body-file`.
+  Whatever stays inside cannot reach the sockets and fails. `gh` and `l2`
+  recognize that (the socket cannot even be opened, `EPERM`) and say the
+  call ran in the sandbox; `podman` and `git` give their own errors.
+  Excluded commands still go through the permission prompts.
 - Which commands run without asking, which ask and which are refused comes
   from agent-policy and the airlock's overlay on it (below). For `podman`
   (a client of the engine) that means reads (`ps`, `images`, `inspect`,
@@ -568,9 +582,21 @@ can take the token away. Every request is logged: `podman logs gh-broker`.
 Refused: anything outside the allowlist (including `gh auth token`, `repo
 delete`, `secret`), repositories and owners outside `WORKBENCH_GH_OWNERS`
 (named by `-R`, `--repo`, `--owner`, a URL, or a `repo:`, `org:` or `user:`
-qualifier in a search), `gh api` with a method other than GET, and GraphQL
+qualifier in a search, `gh search`'s or a list's `--search`), `gh api` with
+a method other than GET, and GraphQL
 mutations, except the two writes `allowlist.json` names (a reply to a review
-comment, and `resolveReviewThread`). Interactive prompts are not
+comment, and `resolveReviewThread`). Reads are the exception to the owners:
+the commands under `public_reads` (issue, pull request and release `list`
+and `view`) and `gh api` GETs under `repos/` may name a repository outside
+them when GitHub says it is public, so an upstream issue can be followed.
+The broker asks GitHub (`repos/<owner>/<repo>`, with the token) and keeps
+the answer for ten minutes; anything private, missing, or not plain
+`owner/name` stays refused, and so does every write. GraphQL queries are
+not held to any repository by the broker; the token holds them. Being fine
+grained for the organization, it reads the organization's private
+repositories and public ones elsewhere, nothing else. That boundary is the
+token's: a classic token, which reaches every repository its user can,
+would remove it, so keep the token fine grained. Interactive prompts are not
 available, so pass the flags a prompt would ask for. The broker never reads
 a file named on the command line, since it would read it beside the token;
 the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the
@@ -628,13 +654,13 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `github` (always) | github.com, the API, codeload, ssh over 443, release and raw downloads | GitHub's ranges from `api.github.com/meta`, enforced |
 | `ghcr` (always) | GitHub's container registry, where these images are published | GitHub's ranges, enforced |
 | `python`, `node` | PyPI, npm | |
-| `golang` | the Go module proxy, and every Cloud Storage bucket (below) | |
+| `golang` | the Go module proxy and vulnerability database, and every Cloud Storage bucket (below) | |
 | `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
 | `debian` | Debian's apt archive. Plain http apt gets it from the package mirror without this set; list it to reach Debian itself (https sources, or the mirror off) | |
-| `docker-hub`, `quay` | those registries and their CDNs | |
+| `docker-hub`, `quay` | those registries and their download hosts (Docker Hub's blobs come from an S3 bucket) | |
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
-| `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages, trivy's database, sigstore's trust root | |
-| `aws` | AWS service APIs | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
+| `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages (and Alpine's GitLab, for aports issues), trivy's database, sigstore's trust root | |
+| `aws` | AWS service APIs, and ECR Public with its CloudFront download host | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
 | `sonarqube-cloud` | SonarQube for IDE in connected mode: SonarQube Cloud (EU region), its scanner and events hosts, SonarSource's analyzer downloads | |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh

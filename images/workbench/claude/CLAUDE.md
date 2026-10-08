@@ -9,7 +9,9 @@ devcontainer-airlock has the full picture):
   managed hook to run in L2: a throwaway container with no network, no
   credentials, and only the working tree mounted. When a tool is "not found"
   there, the repository's L2 image lacks it (`.devcontainer/l2/Dockerfile`);
-  it says nothing about the host or the workbench.
+  it says nothing about the host or the workbench. The whole command moves,
+  so one that also needs the network or the workbench (`curl ... | python3`,
+  `pytest && git push`) is refused: run the two parts as separate commands.
 - `l2 --net -- ...` gives an L2 run the egress proxy, for installs.
   `l2 --engine -- ...` is for test suites that build or start containers.
 - `gh` works through a broker that holds the token and runs an allowlist of
@@ -21,9 +23,14 @@ devcontainer-airlock has the full picture):
   part of it is an excluded command. `cd` into the repository in a call of
   its own, then run `git push` or `gh pr checks 12` by itself: no
   `cd ... &&`, no pipe into another tool, and no `git -C` or `git -c`, which
-  do not match at all. Those stay inside the sandbox, where the sockets are
-  blocked and `git` goes to `github.com:22` through the sandbox's own proxy
-  and fails with "Bad Gateway".
+  do not match at all. Loops (`for ...; do gh ...; done`), redirects
+  (`l2 ... > out.txt`) and an argument holding backticks or `$(`, even in
+  single quotes (Markdown in a `--body`), stay inside too: make parallel
+  calls instead of a loop, and use `--body-file`. Those stay inside
+  the sandbox, where the sockets are blocked and `git` goes to
+  `github.com:22` through the sandbox's own proxy and fails with "Bad
+  Gateway". `gh` and `l2` say when a call ran in the sandbox; an error that
+  sends you to the host helpers comes from a call that did not.
 - A `Permission denied (publickey)` from `git` is GitHub refusing
   authentication. Run `ssh-add -l`: "no identities" means the agent holds
   no key, so ask the user to run `make unlock` on the host. When it lists a

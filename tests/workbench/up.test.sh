@@ -74,9 +74,9 @@ check "with your git identity" 0 calls \
 check "git over ssh through the proxy" 0 calls \
   "ProxyCommand='socat - PROXY:10.203.1.2:%h:%p,proxyport=8888'"
 check "the claude login folder and the sockets" 0 calls \
-  "-v ${ws}:${ws}:Z -v ${HOME}/.local/share/workbench/claude:/home/dev/.claude:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-claude-app -e AIRLOCK_HOST_HOME=${HOME} --hostname workbench-claude-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine --label workbench.voice=ready -v ${run_dir}/voice/workbench-claude-app:/run/workbench-voice:ro,Z -w ${ws} --entrypoint catatonit localhost/airlock-workbench-claude:local -- workbench-init"
+  "-v ${ws}:${ws}:Z -v ${HOME}/.local/share/workbench/claude:/home/dev/.claude:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-claude-app -e AIRLOCK_HOST_HOME=${HOME} -e AIRLOCK_WORKSPACE=${ws} --hostname workbench-claude-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine --label workbench.voice=ready -v ${run_dir}/voice/workbench-claude-app:/run/workbench-voice:ro,Z -w ${ws} --entrypoint catatonit localhost/airlock-workbench-claude:local -- workbench-init"
 check "codex has its own login folder and no voice folder" 0 calls \
-  "-v ${HOME}/.local/share/workbench/codex:/home/dev/.codex:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-codex-app -e AIRLOCK_HOST_HOME=${HOME} --hostname workbench-codex-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine -w ${ws} --entrypoint catatonit localhost/airlock-workbench-codex:local -- workbench-init"
+  "-v ${HOME}/.local/share/workbench/codex:/home/dev/.codex:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-codex-app -e AIRLOCK_HOST_HOME=${HOME} -e AIRLOCK_WORKSPACE=${ws} --hostname workbench-codex-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine -w ${ws} --entrypoint catatonit localhost/airlock-workbench-codex:local -- workbench-init"
 
 # Everything is running now: a second up starts nothing.
 run "${wb}" up

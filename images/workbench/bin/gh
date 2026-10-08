@@ -18,9 +18,11 @@ Exit status codes:
   1    a --body-file path could not be read
   124  no reply from the broker within TIMEOUT seconds
   126  the broker refused the command (the message says why)
-  127  the broker is not reachable, or the connection to it failed
+  127  the broker is not reachable (or this call ran inside Claude Code's
+        command sandbox, which says so), or the connection to it failed
   any  otherwise, the exit status of gh itself
 """
+import errno
 import json
 import os
 import socket
@@ -88,6 +90,21 @@ else:
 path = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
 try:
     s = socket.socket(socket.AF_UNIX)
+except OSError as e:
+    # Not being allowed to open any unix socket at all (EPERM, before the
+    # broker is even named) is what Claude Code's command sandbox does; the
+    # broker's own state plays no part in it.
+    if e.errno != errno.EPERM:
+        sys.stderr.write(f"gh: cannot open a unix socket ({e.strerror})\n")
+        sys.exit(127)
+    sys.stderr.write(
+        "gh: no unix socket can be opened here, so this call most likely ran inside the "
+        "agent's command sandbox, which blocks the gh broker's socket.\n"
+        "gh: run gh as a command of its own: no loop, pipe, redirect, `&&` or `cd` "
+        "around it, and --body-file rather than a --body holding backticks (docs/LAYERS.md, "
+        "\"The coding agents\").\n")
+    sys.exit(127)
+try:
     s.settimeout(TIMEOUT)
     s.connect(path)
 except OSError as e:

@@ -34,10 +34,43 @@ def hook():
         ("pytest; l2 -- pytest", True, False),
         ("l2 -- pytest && npm ci", True, True),
         ("ls ;; pytest", True, False),
+        # Operators inside quotes do not split the command.
+        (
+            "l2 --net --ro -- sh -c 'cd /tmp && go install x && vet-all ./...'",
+            False,
+            False,
+        ),
+        ("sed -i 's|./run.sh|bash x.sh|' vet-all-gocryptfs.sh", False, False),
+        ("echo 'a; pytest' && ls", False, False),
+        # Outside quotes they still do, at newlines and parentheses too.
+        ("pytest -q 2>&1 | tail -5", True, False),
+        ("ls &>/dev/null & pytest", True, False),
+        ("ls\npytest", True, False),
+        ("(cd sub && pytest)", True, False),
+        ("echo $(pytest)", True, False),
+        ("l2 -- \\\n  pytest", False, False),
     ],
 )
 def test_classify(hook, command, routed, net):
     assert hook.classify(command) == (routed, net)
+
+
+@pytest.mark.parametrize(
+    ("command", "net", "part"),
+    [
+        ("curl -s https://example.com | python3 -c 'import sys'", False, "curl"),
+        ("wget -q x && pytest", False, "wget"),
+        ("pip install x && curl -sO https://example.com/y", True, None),
+        ("python3 - <<'EOF'\nprint(1)\nEOF\ngh pr view 1", False, "gh"),
+        ("git -C repo fetch origin && pytest", False, "git fetch"),
+        ("git -c core.x=1 push && pytest", False, "git push"),
+        ("pytest && git status", False, None),
+        ("git", False, None),
+        ("pytest && ssh-add -l", False, "ssh-add"),
+    ],
+)
+def test_outside_l2(hook, command, net, part):
+    assert hook.outside_l2(command, net) == part
 
 
 def run(hook, monkeypatch, capsys, stdin, *args):
@@ -105,6 +138,22 @@ def test_deny_mode_names_the_command_to_run(hook, monkeypatch, capsys):
 
 def test_a_standalone_l2_call_is_left_alone(hook, monkeypatch, capsys):
     assert run(hook, monkeypatch, capsys, call("l2 --net -- npm ci")) is None
+
+
+def test_a_self_contained_l2_call_is_left_alone(hook, monkeypatch, capsys):
+    command = (
+        "l2 --net -- sh -c 'cd /tmp && git clone x && go install y && vet-all ./...'"
+    )
+    assert run(hook, monkeypatch, capsys, call(command)) is None
+
+
+@pytest.mark.parametrize("args", [(), ("--deny",)])
+def test_a_network_part_beside_project_code_is_refused(hook, monkeypatch, capsys, args):
+    command = "curl -s https://api.github.com/x | python3 -c 'import json'"
+    out = run(hook, monkeypatch, capsys, call(command), *args)
+    assert out["permissionDecision"] == "deny"
+    assert "updatedInput" not in out
+    assert "Split the `curl` part from the rest" in out["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("args", [(), ("--deny",)])
