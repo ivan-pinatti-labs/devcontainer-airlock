@@ -79,3 +79,14 @@ to = "/apt/debian-security/"
 [[forward]]
 url = "http://security.debian.org/debian-security/"
 to = "/apt/debian-security/"
+
+# Alpine and Fedora images fetch over https, which the gate cannot serve. A
+# build that switches its sources to http (docs/LAYERS.md, "What clients
+# see") is served from here; apk and dnf check the signatures either way.
+[[forward]]
+url = "http://dl-cdn.alpinelinux.org/alpine/"
+to = "/apk/alpine/"
+
+[[forward]]
+url = "http://dl.fedoraproject.org/pub/fedora/linux/"
+to = "/yum/fedora/"

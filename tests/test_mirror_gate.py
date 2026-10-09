@@ -250,6 +250,27 @@ def test_debian_is_served_from_the_mirror(mg, backend, url, repository):
 
 
 @pytest.mark.parametrize(
+    ("url", "backend_path"),
+    [
+        (
+            "http://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/APKINDEX.tar.gz",
+            "/repository/apk-alpine/v3.22/main/x86_64/APKINDEX.tar.gz",
+        ),
+        (
+            "http://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/repodata/repomd.xml",
+            "/repository/yum-fedora/releases/43/Everything/x86_64/os/repodata/repomd.xml",
+        ),
+    ],
+)
+def test_alpine_and_fedora_over_http_are_served_from_the_mirror(
+    mg, backend, url, backend_path
+):
+    backend.table = {backend_path: Resp(200, b"ok", {"Content-Length": "2"})}
+    r = ask(mg, "GET", url)
+    assert (r.status, r.body) == (200, b"ok")
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "/apt/ubuntu/../../repository/npm/evil/-/evil-1.0.0.tgz",
