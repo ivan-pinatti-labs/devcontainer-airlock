@@ -206,7 +206,7 @@ CMD ["/bin/bash"]
 # and what the package's signature does and does not prove.
 FROM common AS claude
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.288
+ARG CLAUDE_CODE_VERSION=2.1.289
 RUN set -eu; \
   export HOME=/root npm_config_cache=/tmp/npm-cache; \
   npm init --yes >/dev/null; \
