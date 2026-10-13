@@ -445,7 +445,10 @@ that has moved), together with the airlock's overlay, for both agents.
   `git -c core.hooksPath=...`), reads of credential files (here, the
   agent's own login), and container runs that would reach too far
   (`--privileged`, host namespaces, a mount of the home folder or of the
-  engine socket). It answers ask or deny, or nothing. Claude Code takes the
+  engine socket). It answers ask or deny, or nothing, and for Claude Code
+  allow on the one thing its static rules cannot express: a command they
+  allow behind `git -C <dir>` or an aws read verb (`guard-allow.json`
+  beside it lists those prefixes). Claude Code takes the
   strictest answer of the two hooks, so it only ever tightens what
   `route-to-l2` allows, and it judges the command as written, not as
   `route-to-l2` rewrites it.

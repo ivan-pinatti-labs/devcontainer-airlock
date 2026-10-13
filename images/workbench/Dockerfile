@@ -76,7 +76,7 @@ FROM ${BASE_IMAGE} AS agent-policy
 # hadolint ignore=DL3002
 USER 0:0
 # renovate: datasource=github-tags depName=ivan-pinatti-labs/agent-policy
-ARG AGENT_POLICY_REF=v0.2.0@661e7aa245f76dc66e404f54900dee645d0e9961
+ARG AGENT_POLICY_REF=v0.6.12@4047118981121c05499c00f867cdd0756a80aed0
 COPY claude/managed-settings.json /tmp/managed-settings.json
 COPY agent-policy/ /tmp/overlay/
 # The overlay's rule files join agent-policy's own before the render (which
@@ -84,7 +84,9 @@ COPY agent-policy/ /tmp/overlay/
 # of agent-policy's fails the build. Rendered without its scratchpad
 # (--no-scratch): the workbench runs containers through its own L2 engine.
 # Out of it: the guard and its library; every allow, ask and deny rule and the
-# guard's hook, for Claude Code; the prefix rules, for Codex; and the
+# guard's hook, for Claude Code, with the prefixes the guard may allow behind
+# `git -C` (guard-allow.json, which that hook names); the prefix rules, for
+# Codex; and the
 # workbench's own managed settings with agent-policy's
 # sandbox path lists merged in (credentials never readable, PATH and startup
 # folders never writable). The rest of its sandbox file stays out: the
@@ -106,7 +108,7 @@ RUN set -eu; \
   mkdir -p /out/lib; \
   cp /src/hooks/guard /out/; \
   cp -r /src/lib/agent_policy /out/lib/; \
-  cp /tmp/dist/claude/50-agent-policy.json /out/; \
+  cp /tmp/dist/claude/50-agent-policy.json /tmp/dist/claude/guard-allow.json /out/; \
   mkdir -p /out/codex; \
   cp /tmp/dist/codex/agent-policy.rules /out/codex/; \
   jq --slurpfile t /tmp/dist/claude/sandbox-trial.json \
@@ -241,12 +243,17 @@ RUN bash -n /usr/local/bin/claude && bash -n /usr/local/bin/rec \
 COPY claude/CLAUDE.md /etc/claude-code/
 COPY --from=agent-policy /out/managed-settings.json /etc/claude-code/
 COPY --from=agent-policy /out/50-agent-policy.json /etc/claude-code/managed-settings.d/
-COPY --from=agent-policy /out/guard /usr/local/libexec/agent-policy/guard
+COPY --from=agent-policy /out/guard /out/guard-allow.json /usr/local/libexec/agent-policy/
 COPY --from=agent-policy /out/lib/ /usr/local/libexec/agent-policy/lib/
+# The probe runs the hook exactly as the drop-in names it, so a file the hook
+# needs and the image lacks fails the build: an allow file it cannot read
+# would make the guard allow nothing, and every `git -C` command would ask.
 RUN chmod 0755 /usr/local/libexec/agent-policy/guard \
-  && printf '{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/"}' > /tmp/guard-probe.json \
-  && /usr/local/libexec/agent-policy/guard --agent claude < /tmp/guard-probe.json >/dev/null \
-  && rm /tmp/guard-probe.json
+  && hook="$(jq -r '.hooks.PreToolUse[].hooks[].command' /etc/claude-code/managed-settings.d/50-agent-policy.json)" \
+  && printf '{"tool_name":"Bash","tool_input":{"command":"git -C /tmp status"},"cwd":"/"}' > /tmp/guard-probe.json \
+  && sh -c "${hook}" < /tmp/guard-probe.json > /tmp/guard-probe.out \
+  && grep -q '"permissionDecision": *"allow"' /tmp/guard-probe.out \
+  && rm /tmp/guard-probe.json /tmp/guard-probe.out
 COPY --from=extensions /opt/vscode-extensions-claude /opt/vscode-extensions
 COPY vscode/claude-settings.json /tmp/agent-settings.json
 RUN install -d -o 1000 -g 1000 /home/dev/.claude \
