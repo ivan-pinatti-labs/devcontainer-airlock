@@ -23,6 +23,10 @@ printf '%s\n' '# what the tests reach' '' golang docker-hub >"${app}/.devcontain
 up_again
 check "the sets the checkout lists" 0 out "workbench: up for ${app}"
 assert "are registered" grep -qx "sets=golang,docker-hub" "${conf}"
+printf '%s\n%s' golang hashicorp >"${app}/.devcontainer/egress-sets"
+up_again
+assert "the last one too when the file has no final newline" grep -qx "sets=golang,hashicorp" "${conf}"
+printf '%s\n' golang docker-hub >"${app}/.devcontainer/egress-sets"
 
 mkdir -p "${app}/.devcontainer/l2"
 touch "${app}/.devcontainer/l2/Dockerfile"
@@ -80,6 +84,10 @@ up_again
 check "an unknown profile stops up" 1 err \
   "workbench: unknown profile 'docker-socket' in ${app}/.devcontainer/workbench-profile"
 refute "before anything starts" "podman run"
+printf '%s' nested-network >"${app}/.devcontainer/workbench-profile"
+up_again
+check "a profile on a last line with no newline applies too" 0 calls \
+  "-e CONTAINERS_CONF_OVERRIDE=/usr/local/share/devcontainer/containers-bridge-network.conf"
 rm "${app}/.devcontainer/workbench-profile"
 
 # A group asks for what its clones and the folder itself ask for.
@@ -89,7 +97,8 @@ clone "${org}/two"
 clone "${org}/three"
 mkdir -p "${org}/one/.devcontainer/l2" "${org}/.devcontainer"
 printf '%s\n' '# sets' golang >"${org}/one/.devcontainer/egress-sets"
-on_remote "${org}/two" origin/HEAD .devcontainer/egress-sets "$(printf '%s\n' '' hashicorp golang)"
+# Its last set is read too, though the file ends without a newline.
+on_remote "${org}/two" origin/HEAD .devcontainer/egress-sets "$(printf '%s\n' '' golang hashicorp)"
 on_remote "${org}/two" origin/HEAD .devcontainer/l2/Dockerfile "FROM x"
 echo node >"${org}/.devcontainer/egress-sets"
 printf '%s\n' nested-devices >"${org}/.devcontainer/workbench-profile"

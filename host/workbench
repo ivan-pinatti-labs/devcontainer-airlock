@@ -701,7 +701,7 @@ repo_file() {
 # The egress sets one repository of a group asks for, read through repo_file.
 group_sets_of() {
   local r="$1" p out=""
-  while read -r p; do
+  while read -r p || [ -n "${p}" ]; do
     case "${p}" in
     '' | '#'*) ;;
     *[!a-z0-9-]*) die "'${p}' in ${r}/.devcontainer/egress-sets is not an egress set name" ;;
@@ -718,7 +718,7 @@ sets_of() {
   local src="$1" f p out=""
   f="${src}/.devcontainer/egress-sets"
   if [ -f "${f}" ]; then
-    while read -r p; do
+    while read -r p || [ -n "${p}" ]; do
       case "${p}" in
       '' | '#'*) ;;
       *[!a-z0-9-]*) die "'${p}' in ${f} is not an egress set name" ;;
@@ -752,7 +752,7 @@ profiles() {
     # the caller rather than one branch of it.
     out="$(profiles_of "$1")" || return 1
     while read -r r; do
-      while read -r p; do
+      while read -r p || [ -n "${p}" ]; do
         case "${p}" in
         '' | '#'*) ;;
         nested-network | nested-devices | hooks-engine) out="${out}"$'\n'"${p}" ;;
@@ -771,7 +771,7 @@ profiles_of() {
   local f p
   f="$1/.devcontainer/workbench-profile"
   [ -f "${f}" ] || return 0
-  while read -r p; do
+  while read -r p || [ -n "${p}" ]; do
     case "${p}" in
     '' | '#'*) ;;
     nested-network | nested-devices | hooks-engine) echo "${p}" ;;
@@ -1858,7 +1858,7 @@ session_read() {
   f="$(session_dir "$1")/session"
   [ -f "${f}" ] || die "no session $1 (host/workbench session list)"
   S_AGENT="" S_WS="" S_ID=""
-  while IFS='=' read -r key value; do
+  while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
     agent) S_AGENT="${value}" ;;
     workspace) S_WS="${value}" ;;
