@@ -1418,6 +1418,7 @@ cmd_restart_broker() {
 cmd_restart_ssh_agent() {
   restart_shared devcontainer-ssh-agent
   echo "workbench: ssh-agent restarted"
+  key_dropped
 }
 
 cmd_restart_mirror() {
@@ -1446,12 +1447,14 @@ restart_shared() {
   case "$1" in
   "${PROXY}") start_proxy ;;
   gh-broker) start_broker ;;
-  devcontainer-ssh-agent)
-    start_ssh_agent
-    echo "workbench: the ssh-agent holds no key now; host/workbench unlock (make unlock) before a git push" >&2
-    ;;
+  devcontainer-ssh-agent) start_ssh_agent ;;
   mirror-gate) start_mirror ;;
   esac
+}
+
+# Said after the ssh-agent's restart, which forgets the unlocked key.
+key_dropped() {
+  echo "workbench: the ssh-agent holds no key now; host/workbench unlock (make unlock) before a git push" >&2
 }
 
 # The image shared service $1 runs, by its local tag.
@@ -1518,6 +1521,7 @@ refresh_shared() {
   for s in "${stale[@]}"; do
     if restart_shared "${s}"; then
       echo "workbench: restarted ${s} on the new $(shared_image "${s}")" >&2
+      [ "${s}" != devcontainer-ssh-agent ] || key_dropped
     fi
   done
 }
@@ -1795,12 +1799,15 @@ cmd_down() {
   stop_shared_if_idle
 }
 
-# The shared services, when no workbench or L2 engine is left on the host,
-# workspace or session.
+# The shared services, when no workbench or L2 engine is left running on
+# the host, workspace or session. A stopped one uses nothing, and `up`
+# replaces it rather than starting it again, so it does not count: counted,
+# the stopped containers an older `up` left behind kept the shared services
+# running for weeks.
 stop_shared_if_idle() {
   local names
   # A failed listing is not an empty one: stop nothing on a guess.
-  if ! names="$(podman ps -a --format '{{.Names}}')"; then
+  if ! names="$(podman ps --format '{{.Names}}')"; then
     echo "workbench: could not list the containers left, so the shared services keep running" >&2
     return 1
   fi
