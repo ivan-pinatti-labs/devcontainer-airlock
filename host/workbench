@@ -1817,10 +1817,7 @@ conversation_exists() {
 # writes that much before anything is typed.
 drop_if_unused() {
   # shellcheck disable=SC2016 # expanded by the shell in the workbench
-  podman exec "$1" sh -c 'for f in /home/dev/.claude/projects/*/"$1".jsonl; do
-    [ -f "$f" ] || continue
-    grep -q "\"type\":\"user\"" "$f" || rm -f "$f"
-  done' sh "$2" >/dev/null 2>&1 || true
+  podman exec "$1" sh -c 'for f in /home/dev/.claude/projects/*/"$1".jsonl; do [ -f "$f" ] || continue; grep -q "\"type\":\"user\"" "$f" || rm -f "$f"; done' sh "$2" >/dev/null 2>&1 || true
 }
 
 # After a Claude Code session's agent exits, while its workbench still runs:
