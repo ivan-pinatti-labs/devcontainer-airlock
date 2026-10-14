@@ -1430,9 +1430,19 @@ cmd_restart_mirror() {
 
 # Restart shared service $1 from its local image. The proxy and the gate
 # start again on every network registered with them, so no workspace needs
-# bringing up again.
+# bringing up again. Returns 1, saying why, and leaves the running one as
+# it is when it could not be replaced: an ssh-agent with no key to start
+# again with, or a container that would not go.
 restart_shared() {
+  if [ "$1" = devcontainer-ssh-agent ] && [ ! -f "${SSH_KEY}" ]; then
+    echo "workbench: no ${SSH_KEY}, so the ssh-agent is left as it is" >&2
+    return 1
+  fi
   podman rm -f -t 5 "$1" >/dev/null 2>&1 || true
+  if running "$1"; then
+    echo "workbench: could not remove ${1} to restart it; podman rm -f ${1}" >&2
+    return 1
+  fi
   case "$1" in
   "${PROXY}") start_proxy ;;
   gh-broker) start_broker ;;
@@ -1490,7 +1500,8 @@ shared_in_use() {
 # that restarts them, and left running. Never restarted under a session
 # without asking: the proxy's restart drops its open connections, and the
 # ssh-agent's the unlocked key. A service left running takes the new image
-# anyway when the last session stops, since that stops them all.
+# anyway when the last workbench or L2 engine stops, since that stops them
+# all.
 refresh_shared() {
   local s stale=()
   for s in "${PROXY}" gh-broker devcontainer-ssh-agent mirror-gate; do
@@ -1500,13 +1511,14 @@ refresh_shared() {
   [ "${#stale[@]}" -gt 0 ] || return 0
   if shared_in_use; then
     for s in "${stale[@]}"; do
-      echo "workbench: ${s} runs an older image than $(shared_image "${s}"), and is left running for the sessions using it; it takes the new one when the last of them stops, or now with $(shared_restart "${s}")" >&2
+      echo "workbench: ${s} runs an older image than $(shared_image "${s}"), and is left running for the sessions using it; it takes the new one when the last workbench or L2 engine stops, or now with $(shared_restart "${s}")" >&2
     done
     return 0
   fi
   for s in "${stale[@]}"; do
-    restart_shared "${s}"
-    echo "workbench: restarted ${s} on the new $(shared_image "${s}")" >&2
+    if restart_shared "${s}"; then
+      echo "workbench: restarted ${s} on the new $(shared_image "${s}")" >&2
+    fi
   done
 }
 

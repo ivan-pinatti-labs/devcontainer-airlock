@@ -81,7 +81,7 @@ container workbench-claude-s-busy-bee running
 run "${wb}" pull
 for s in ${services}; do
   check "a pull under a session names ${s} and how to restart it" 0 err \
-    "workbench: ${s} runs an older image than ${img[${s}]}, and is left running for the sessions using it; it takes the new one when the last of them stops, or now with ${how[${s}]}"
+    "workbench: ${s} runs an older image than ${img[${s}]}, and is left running for the sessions using it; it takes the new one when the last workbench or L2 engine stops, or now with ${how[${s}]}"
 done
 refute "and restarts none" "podman rm -f -t 5"
 assert "the proxy keeps its image" test "$(ran egress-proxy)" = sha256:old
@@ -115,10 +115,38 @@ image localhost/airlock-l2:local sha256:l2
 container egress-proxy running
 container gh-broker running
 printf 'sha256:old' >"${PODMAN_STATE}/ctr/gh-broker/image"
+rule 'inspect --format {{.Image}} egress-proxy' 'exit 1'
 run "${wb}" up
 check "up with nothing to compare" 0 out "workbench: up for ${app}"
-refute "keeps a service started from no image the host has" "podman run -d --name egress-proxy"
+refute "keeps a service whose image cannot be inspected" "podman run -d --name egress-proxy"
+assert "without removing it" test "$(grep -cx 'podman rm -f -t 5 egress-proxy' "${STUB_LOG}")" -eq 0
 refute "and one whose local image is gone" "podman run -d --name gh-broker"
+refute "without removing that one either" "podman rm -f -t 5 gh-broker"
+unrule
+
+# A service that cannot be replaced is left as it is, and the others restart.
+fresh
+running_on sha256:old
+rule 'rm -f -t 5 gh-broker' 'exit 1'
+run "${wb}" pull
+check "a removal that fails is said" 0 err "workbench: could not remove gh-broker to restart it; podman rm -f gh-broker"
+refute "nothing is started in its place" "podman run -d --name gh-broker"
+assert "nor reported restarted" test "$(grep -c 'restarted gh-broker' "${__scratch}/err")" -eq 0
+check "the others restart" 0 err "workbench: restarted egress-proxy on the new localhost/airlock-egress-proxy:local"
+unrule
+
+fresh
+running_on sha256:old
+mv "${HOME}/.ssh/devcontainer/id_ed25519" "${__scratch}/key"
+run "${wb}" pull
+check "an ssh-agent with no key to start again with is said" 0 err \
+  "workbench: no ${HOME}/.ssh/devcontainer/id_ed25519, so the ssh-agent is left as it is"
+refute "and kept" "podman rm -f -t 5 devcontainer-ssh-agent"
+run "${wb}" restart-ssh-agent
+check "restart-ssh-agent with no key fails" 1 err \
+  "workbench: no ${HOME}/.ssh/devcontainer/id_ed25519, so the ssh-agent is left as it is"
+assert "keeping the agent" test -f "${PODMAN_STATE}/ctr/devcontainer-ssh-agent/running"
+mv "${__scratch}/key" "${HOME}/.ssh/devcontainer/id_ed25519"
 
 # A build replaces the images as a pull does.
 fresh

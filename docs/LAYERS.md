@@ -658,8 +658,9 @@ named. When one is, nothing is restarted, because the proxy's restart drops
 every open connection and the ssh-agent's forgets the unlocked key: each
 one behind is named, with the command that restarts it (`restart-proxy`,
 `restart-broker`, `restart-ssh-agent` or `restart-mirror`), and the start
-carries on. The last session to stop stops them all anyway, so the next
-start takes the new images without anyone running those. The mirror's
+carries on. The `down` or session stop that leaves no workbench or L2
+engine running stops them all anyway, so the next start takes the new
+images without anyone running those. The mirror's
 backend is pinned by digest in `host/workbench`, so no `build` or `pull`
 changes it.
 
