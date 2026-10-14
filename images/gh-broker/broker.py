@@ -13,6 +13,9 @@ outside the allowed owners (-R, --owner, a URL, a search qualifier), flags that 
 the allowlist names (resolving a review thread). The exception: the read
 only commands under public_reads, and `gh api` GETs under repos/, may name a
 repository outside the owners when GitHub says it is public.
+
+One command is the broker's own rather than gh's: `wait pr`, a bounded wait
+on a pull request's state (see wait_pr below).
 """
 import json
 import os
@@ -319,6 +322,106 @@ def merge_ok(argv):
     return not any(a == "--admin" or a.startswith("--admin=") for a in argv)
 
 
+# `gh wait pr N -R owner/repo [--timeout SECONDS]`: the broker's own command,
+# not gh's. It reads the pull request once a minute and answers as soon as
+# anything an agent acts on has changed (state, draft, mergeable, the review
+# decision, a new push, the merge queue, the overall check result, the count
+# of reviews, comments or unresolved threads), or when the timeout passes.
+# An agent runs it in the background and is told when it returns, so it waits
+# for the event itself instead of guessing when to look, and every step it
+# takes afterwards is still a command of its own (#145). Read only, and held
+# to the allowed owners like any other command.
+BROKER_COMMANDS = frozenset(ALLOW.get("broker_commands", []))
+# The longest wait, in seconds: one CodeRabbit review slot (about an hour)
+# and a margin. A caller that asks for longer gets this, so no wait is
+# unbounded. The workbench gh allows this much and a little more for the reply.
+WAIT_CAP = 3900
+WAIT_POLL = 60
+WAIT_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){"
+    "pullRequest(number:$number){state isDraft mergeable reviewDecision headRefOid"
+    " mergeQueueEntry{state} reviews{totalCount} comments{totalCount}"
+    " reviewThreads(first:100){nodes{isResolved}}"
+    " commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}"
+)
+
+
+def wait_args(argv):
+    """(repo, number, timeout) for a well formed `wait pr`, else None."""
+    if argv[:2] != ["wait", "pr"] or len(argv) < 3 or not argv[2].isdigit():
+        return None
+    repo, timeout, i = None, WAIT_CAP, 3
+    while i < len(argv):
+        flag, value = argv[i], argv[i + 1] if i + 1 < len(argv) else None
+        if value is None:
+            return None
+        if flag in REPO_FLAGS and repo is None:
+            repo = value
+        elif flag == "--timeout" and value.isdigit() and int(value) > 0:
+            timeout = min(int(value), WAIT_CAP)
+        else:
+            return None
+        i += 2
+    if repo is None or not plain_repo(repo) or not repo.lower().startswith(OWNERS):
+        return None
+    return repo, int(argv[2]), timeout
+
+
+def pr_snapshot(repo, number):
+    """What `wait` compares: the pull request's state, as a flat dict, or None
+    when GitHub could not be read this time."""
+    owner, name = repo.split("/")
+    try:
+        p = subprocess.run(
+            [
+                "gh", "api", "graphql", "-f", f"query={WAIT_QUERY}", "-f", f"owner={owner}",
+                "-f", f"name={name}", "-F", f"number={number}",
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+        pr = json.loads(p.stdout)["data"]["repository"]["pullRequest"]
+    except (subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError):
+        return None
+    if not pr:
+        return None
+    commits = pr["commits"]["nodes"]
+    rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
+    return {
+        "state": pr["state"],
+        "draft": pr["isDraft"],
+        "mergeable": pr["mergeable"],
+        "review": pr["reviewDecision"],
+        "head": pr["headRefOid"],
+        "queue": (pr["mergeQueueEntry"] or {}).get("state"),
+        "checks": (rollup or {}).get("state"),
+        "reviews": pr["reviews"]["totalCount"],
+        "comments": pr["comments"]["totalCount"],
+        "open_threads": sum(not t["isResolved"] for t in pr["reviewThreads"]["nodes"]),
+    }
+
+
+def wait_pr(repo, number, timeout, sleep=time.sleep, clock=time.monotonic):
+    """The reply to `wait pr`: rc 0 and what changed as soon as something
+    does, rc 124 with the state unchanged at the timeout, rc 1 when the pull
+    request cannot be read at all."""
+    first = pr_snapshot(repo, number)
+    if first is None:
+        return {"rc": 1, "out": "", "err": f"gh-broker: cannot read {repo}#{number}\n"}
+    deadline = clock() + timeout
+    while (left := deadline - clock()) > 0:
+        sleep(min(WAIT_POLL, left))
+        now = pr_snapshot(repo, number)
+        if now is None:
+            continue
+        changed = sorted(k for k in now if now[k] != first[k])
+        if changed:
+            out = {"changed": changed, "was": {k: first[k] for k in changed}, "now": now}
+            return {"rc": 0, "out": json.dumps(out) + "\n", "err": ""}
+    out = {"changed": [], "now": first, "waited": timeout}
+    return {"rc": 124, "out": json.dumps(out) + "\n",
+            "err": f"gh-broker: {repo}#{number} unchanged after {timeout}s\n"}
+
+
 def allowed(argv):
     return refusal(argv) is None
 
@@ -328,6 +431,10 @@ def allowed(argv):
 def refusal(argv):
     if not argv:
         return "no command"
+    if " ".join(argv[:2]) in BROKER_COMMANDS:
+        return None if wait_args(argv) else (
+            "usage: gh wait pr NUMBER -R OWNER/REPO [--timeout SECONDS], on a"
+            f" repository under an allowed owner; at most {WAIT_CAP}s")
     if argv[0] == "api":
         return None if api_ok(argv) else (
             "this gh api call is not allowed: only reads, review comment replies"
@@ -363,6 +470,9 @@ def serve(conn):
             conn.sendall(json.dumps({"rc": 126, "out": "", "err": msg}).encode())
             return
         print("RUN", json.dumps(argv), "in", req.get("cwd"), flush=True)
+        if " ".join(argv[:2]) in BROKER_COMMANDS:
+            conn.sendall(json.dumps(wait_pr(*wait_args(argv))).encode())
+            return
         cwd = req.get("cwd")
         cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else "/"
         try:

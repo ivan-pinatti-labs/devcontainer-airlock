@@ -60,6 +60,9 @@ cases = [
   (False, "search issues --repo example-org/x,someone-else/y"), (False, "pr list -Rsomeone-else/x"), (False, "pr comment 1 -Rsomeone-else/x --body spam"),
   (False, "search issues repo:someone-else/x"), (False, "search issues is:open org:someone-else"),
   (False, "search prs user:someone-else"), (False, "search issues -repo:someone-else/x"),
+  # The broker's own bounded wait on a pull request: read only, owners only.
+  (True,  "wait pr 7 -R example-org/x"), (True, "wait pr 7 -R example-org/x --timeout 120"),
+  (False, "wait pr 7 -R someone-else/x"), (False, "wait pr 7"), (False, "wait pr 7 -R example-org/x --interval 1"),
 ]
 # Cases whose arguments hold spaces or newlines, given as argv lists.
 Q = "api graphql -f".split()
