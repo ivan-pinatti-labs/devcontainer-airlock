@@ -169,7 +169,10 @@ merges and the host rebuilds.
   stopped, its clones, their branches and PR state.
 - **Stop**: when the agent exits the container stops. `make stop-<session>`
   stops it from outside. The last session to stop stops the shared services
-  (#59).
+  (#59). A session that starts with none other running restarts the shared
+  services a `build` or `pull` left on an older image; beside another
+  session it names them and the command that restarts each instead (#148,
+  docs/LAYERS.md).
 - **Clean up**: `make prune` removes stopped sessions whose pull requests
   merged and whose clones hold nothing else: no uncommitted change, no
   commit that is not pushed. Anything else is listed and kept. `make

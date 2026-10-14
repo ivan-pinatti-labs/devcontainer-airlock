@@ -647,6 +647,22 @@ unlocked key, so `host/workbench unlock` again after that. `up` and `down`
 take a lock, so a `down` cannot stop the services under an `up` starting
 another workspace.
 
+A `build` or `pull` replaces the images, not the services already running
+from the old ones, and a service on an older image fails in ways that do
+not point to it: a proxy from before a new egress set refuses a workspace
+that asks for it. So `build`, `pull`, `up` and every session start compare
+each running shared service's image (the proxy, the gh broker, the
+ssh-agent and the mirror's gate) with its local tag. When no workbench or
+L2 engine is running, the ones behind are restarted on the new image, and
+named. When one is, nothing is restarted, because the proxy's restart drops
+every open connection and the ssh-agent's forgets the unlocked key: each
+one behind is named, with the command that restarts it (`restart-proxy`,
+`restart-broker`, `restart-ssh-agent` or `restart-mirror`), and the start
+carries on. The last session to stop stops them all anyway, so the next
+start takes the new images without anyone running those. The mirror's
+backend is pinned by digest in `host/workbench`, so no `build` or `pull`
+changes it.
+
 ### Egress sets
 
 What a proxy allows is built from **egress sets**, one per service, in

@@ -10,9 +10,10 @@
 # did:
 #   ctr/NAME/                 a container; `running` in it while it runs,
 #                             labels/KEY, nets (one network a line), mounts
-#                             (volume names), logs, images/IMAGE (its own
-#                             store: the image Id), own-images (what its
-#                             `podman images` prints)
+#                             (volume names), logs, image (the Id of the
+#                             host image it runs, when it was one),
+#                             images/IMAGE (its own store: the image Id),
+#                             own-images (what its `podman images` prints)
 #   net/NAME                  a network, holding its subnet
 #   vol/NAME, secret/NAME     a volume, a secret
 #   img/IMAGE                 a host image, holding its Id; IMAGE.digest and
@@ -232,6 +233,7 @@ case "$1" in
         echo ;;
       *Networks*) tr '\n' ' ' <"${C}/${name}/nets" 2>/dev/null; echo ;;
       *Mounts*) tr '\n' ' ' <"${C}/${name}/mounts" 2>/dev/null; echo ;;
+      '{{.Image}}') cat "${C}/${name}/image" 2>/dev/null; echo ;;
     esac ;;
   ps)
     filter=""
@@ -240,6 +242,7 @@ case "$1" in
     for d in "${C}"/*/; do
       [ -d "${d}" ] || continue
       n="$(basename "${d}")"
+      [ "$2" = -a ] || [ -f "${d}/running" ] || continue
       case "${filter}" in
         label=*)
           k="${filter#label=}"
@@ -280,6 +283,11 @@ case "$1" in
               /*) ;;
               *) echo "${v%%:*}" >>"${d}/mounts" ;;
             esac ;;
+          # The image it runs: the first argument that is a host image.
+          *)
+            if [ ! -f "${d}/image" ] && [ -f "${S}/img/$(key "${a}")" ]; then
+              cp "${S}/img/$(key "${a}")" "${d}/image"
+            fi ;;
         esac
       done
       if [ -f "${S}/start-logs/${name}" ]; then
