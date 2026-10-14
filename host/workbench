@@ -6,7 +6,10 @@
   Usage:
     host/workbench build            build every image locally (localhost/*:local)
     host/workbench pull             or take the published ones instead, and tag
-                                    them as the local ones
+                                    them as the local ones. Either restarts
+                                    the shared services left on an older
+                                    image when no session uses them, and
+                                    otherwise says which and how
     host/workbench init [DIR]       set up a repository for the workbench: its
                                     egress sets, an L2 image, the make targets
     host/workbench up [WORKSPACE]   start the workbenches, one per agent, and
@@ -59,6 +62,12 @@
     host/workbench restart-proxy    restart the egress proxy alone (after
                                     rebuilding it); every workspace is cut
                                     off for the few seconds it takes
+    host/workbench restart-ssh-agent
+                                    restart the ssh-agent alone (after
+                                    rebuilding the claude workbench image);
+                                    it forgets the unlocked key
+    host/workbench restart-mirror   restart the package mirror's gate alone
+                                    (after rebuilding it)
     host/workbench install-units    install a systemd user unit that starts
                                     the helpers at login (changes your
                                     ~/.config/systemd/user; run it yourself)
@@ -784,6 +793,9 @@ cmd_build() {
   done
   # The nested test runner builds on its own upstream image, not on base.
   podman build -t "localhost/airlock-podman-nested:${TAG}" "${HERE}/images/podman-nested"
+  lock_state
+  refresh_shared
+  unlock_state
 }
 
 # The published images, tagged as the local ones, for anyone who would rather
@@ -795,6 +807,9 @@ cmd_pull() {
     ref="$(pull_published "${i}")" || die "could not pull ${REGISTRY}/airlock-${i}"
     echo "workbench: ${i} ${ref}"
   done
+  lock_state
+  refresh_shared
+  unlock_state
 }
 
 # Pull one published image, tag it as the local one, and print the reference
@@ -1350,6 +1365,7 @@ cmd_up() {
   *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
   esac
   lock_state
+  refresh_shared
   start_helpers
   proxy_join "${ws}"
   if mirror_on; then
@@ -1387,8 +1403,7 @@ cmd_helpers_down() {
 
 cmd_restart_proxy() {
   local f served=""
-  podman rm -f -t 5 "${PROXY}" >/dev/null 2>&1 || true
-  start_proxy
+  restart_shared "${PROXY}"
   for f in "${EGRESS_DIR}"/*.conf; do
     [ -f "${f}" ] && served="${served} $(basename "${f}" .conf)"
   done
@@ -1396,9 +1411,115 @@ cmd_restart_proxy() {
 }
 
 cmd_restart_broker() {
-  podman rm -f -t 5 gh-broker >/dev/null 2>&1 || true
-  start_broker
+  restart_shared gh-broker
   echo "workbench: gh broker restarted"
+}
+
+cmd_restart_ssh_agent() {
+  restart_shared devcontainer-ssh-agent
+  echo "workbench: ssh-agent restarted"
+}
+
+cmd_restart_mirror() {
+  mirror_on || die "the package mirror is off (WORKBENCH_MIRROR=${MIRROR})"
+  lock_state
+  restart_shared mirror-gate
+  unlock_state
+  echo "workbench: package mirror gate restarted"
+}
+
+# Restart shared service $1 from its local image. The proxy and the gate
+# start again on every network registered with them, so no workspace needs
+# bringing up again. Returns 1, saying why, and leaves the running one as
+# it is when it could not be replaced: an ssh-agent with no key to start
+# again with, or a container that would not go.
+restart_shared() {
+  if [ "$1" = devcontainer-ssh-agent ] && [ ! -f "${SSH_KEY}" ]; then
+    echo "workbench: no ${SSH_KEY}, so the ssh-agent is left as it is" >&2
+    return 1
+  fi
+  podman rm -f -t 5 "$1" >/dev/null 2>&1 || true
+  if running "$1"; then
+    echo "workbench: could not remove ${1} to restart it; podman rm -f ${1}" >&2
+    return 1
+  fi
+  case "$1" in
+  "${PROXY}") start_proxy ;;
+  gh-broker) start_broker ;;
+  devcontainer-ssh-agent)
+    start_ssh_agent
+    echo "workbench: the ssh-agent holds no key now; host/workbench unlock (make unlock) before a git push" >&2
+    ;;
+  mirror-gate) start_mirror ;;
+  esac
+}
+
+# The image shared service $1 runs, by its local tag.
+shared_image() {
+  case "$1" in
+  "${PROXY}") echo "${PROXY_IMAGE}" ;;
+  gh-broker) echo "${BROKER_IMAGE}" ;;
+  devcontainer-ssh-agent) wb_image claude ;;
+  mirror-gate) echo "${GATE_IMAGE}" ;;
+  esac
+}
+
+# The command that restarts shared service $1, and what that costs a
+# session using it.
+shared_restart() {
+  case "$1" in
+  "${PROXY}") echo "host/workbench restart-proxy (every session is cut off for a few seconds)" ;;
+  gh-broker) echo "host/workbench restart-broker (a gh command running then fails)" ;;
+  devcontainer-ssh-agent) echo "host/workbench restart-ssh-agent, then unlock again (it forgets the key)" ;;
+  mirror-gate) echo "host/workbench restart-mirror (an install running then fails)" ;;
+  esac
+}
+
+# Whether shared service $1 runs an older image than its local tag names
+# now: a `build` or `pull` came after it started. One that is not running,
+# or with nothing to compare, is not behind.
+behind() {
+  local ran mine
+  running "$1" || return 1
+  ran="$(podman inspect --format '{{.Image}}' "$1" 2>/dev/null)" || return 1
+  mine="$(podman image inspect --format '{{.Id}}' "$(shared_image "$1")" 2>/dev/null)" || return 1
+  [ -n "${ran}" ] && [ -n "${mine}" ] && [ "${ran}" != "${mine}" ]
+}
+
+# Whether a workbench or an L2 engine is running, which a restarted shared
+# service would cut off. A failed listing counts as one, so nothing is
+# restarted on a guess.
+shared_in_use() {
+  local names
+  names="$(podman ps --format '{{.Names}}')" || return 0
+  grep -qE '^(workbench|l2-engine)-' <<<"${names}"
+}
+
+# The shared services running an older image than the local one take the
+# new one: restarted when nothing uses them, or else named, with the command
+# that restarts them, and left running. Never restarted under a session
+# without asking: the proxy's restart drops its open connections, and the
+# ssh-agent's the unlocked key. A service left running takes the new image
+# anyway when the last workbench or L2 engine stops, since that stops them
+# all.
+refresh_shared() {
+  local s stale=()
+  for s in "${PROXY}" gh-broker devcontainer-ssh-agent mirror-gate; do
+    [ "${s}" != mirror-gate ] || mirror_on || continue
+    if behind "${s}"; then stale+=("${s}"); fi
+  done
+  [ "${#stale[@]}" -gt 0 ] || return 0
+  if shared_in_use; then
+    for s in "${stale[@]}"; do
+      echo "workbench: ${s} runs an older image than $(shared_image "${s}"), and is left running for the sessions using it; it takes the new one when the last workbench or L2 engine stops, or now with $(shared_restart "${s}")" >&2
+    done
+    return 0
+  fi
+  for s in "${stale[@]}"; do
+    if restart_shared "${s}"; then
+      echo "workbench: restarted ${s} on the new $(shared_image "${s}")" >&2
+    fi
+  done
 }
 
 cmd_install_units() {
@@ -1761,6 +1882,7 @@ session_up() {
   profiles "${ws}" >/dev/null || exit 1
   egress_sets "${ws}" >/dev/null || exit 1
   lock_state
+  refresh_shared
   start_helpers
   proxy_join "${ws}"
   if mirror_on; then
@@ -2105,6 +2227,8 @@ helpers) cmd_helpers ;;
 helpers-down) cmd_helpers_down ;;
 restart-broker) cmd_restart_broker ;;
 restart-proxy) cmd_restart_proxy ;;
+restart-ssh-agent) cmd_restart_ssh_agent ;;
+restart-mirror) cmd_restart_mirror ;;
 install-units) cmd_install_units ;;
 -h | --help | help) sed -n '3,/^    2  usage error$/p' "$0" ;;
 *)
