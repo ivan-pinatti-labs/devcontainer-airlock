@@ -149,21 +149,22 @@ merges and the host rebuilds.
   `make claude resume=<id>` (any `claude` target; `RESUME=` too) starts a
   new session that continues that conversation instead, the id Claude Code
   prints when it exits. The id is checked before anything starts: it has to
-  be a conversation in this folder's history, since another folder's is not
-  mounted in the workbench.
+  be a conversation in this folder's history, one whose transcript records
+  this folder or a folder under it, since another folder's is not mounted in
+  the workbench.
 - **Attach**: `make attach-<session>` (tab completes) starts it again if it
   stopped and resumes the agent's conversation (`claude --resume`). That is
   the conversation the agent ended in, not necessarily the one it started
   with: `/resume` or `/clear` inside moves it to another, the workbench's
-  SessionStart hook (`conversation-note`) writes down which, and when the
-  agent exits the session's record follows it.
+  SessionStart hook (`conversation-note`) adds each one it enters to a list,
+  and when the agent exits the session's record follows the last.
 - **Empty conversations**: Remote Control writes a few lines of bookkeeping
   into the session's new conversation as soon as it registers, before
   anything is typed. A session that moves to another conversation with
   `/resume` (or ends before a message) would leave that one behind, listed
   in `claude --resume` with nothing in it. So when the agent exits, the
-  transcripts of the session's conversations that hold no message from you
-  are removed. A conversation with even one message stays.
+  transcripts of every conversation the session was in that hold no message
+  from you are removed. A conversation with even one message stays.
 - **List**: `make sessions`: name, agent and account, profile, running or
   stopped, its clones, their branches and PR state.
 - **Stop**: when the agent exits the container stops. `make stop-<session>`

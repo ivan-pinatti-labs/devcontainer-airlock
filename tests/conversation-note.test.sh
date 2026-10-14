@@ -33,6 +33,10 @@ note "{\"session_id\":\"${id}\",\"source\":\"resume\"}"
 assert "it exits 0" test "${__status}" -eq 0
 assert "and writes the conversation down" grep -qx "${id}" "${AIRLOCK_CONVERSATION_FILE}"
 assert "printing nothing, since that would reach the conversation" test ! -s "${__scratch}/out"
+next=7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
+bash "${__repo}/images/workbench/bin/conversation-note" <<<"{\"session_id\":\"${next}\",\"source\":\"clear\"}"
+assert "the next one is added after it, so the last is the one the agent is in" \
+  test "$(cat "${AIRLOCK_CONVERSATION_FILE}")" = "$(printf '%s\n%s' "${id}" "${next}")"
 
 note 'not json'
 assert "input it cannot read never stops the session" test "${__status}" -eq 0

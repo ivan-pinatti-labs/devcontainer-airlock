@@ -1796,12 +1796,18 @@ conversation_id_ok() {
 }
 
 # Whether conversation $3 is in workspace $1's history for agent $2: the
-# agent folder's own projects, or a host history folder mounted over them
-# (WORKBENCH_HISTORY).
+# agent folder's own projects for the workspace and the paths under it, or
+# a host history folder mounted over them (WORKBENCH_HISTORY). A project
+# folder's name encodes its path ambiguously, so, as for the history
+# mounts, the transcript's recorded working directories have to be the
+# workspace or under it.
 conversation_exists() {
-  local m
-  for m in "${DATA}/$2/projects/"*/"$3.jsonl"; do
-    [ -e "${m}" ] && return 0
+  local slug d m cwd
+  slug="$(printf '%s' "$1" | tr -c 'A-Za-z0-9' -)"
+  for d in "${DATA}/$2/projects/${slug}" "${DATA}/$2/projects/${slug}"-*; do
+    [ -f "${d}/$3.jsonl" ] || continue
+    cwd="$({ grep -h -o '"cwd":"[^"]*"' "${d}/$3.jsonl" || true; } | sed 's/^"cwd":"//; s/"$//' | sort -u)"
+    [ -n "${cwd}" ] && all_under "$1" <<<"${cwd}" && return 0
   done
   while read -r m; do
     case "${m}" in
@@ -1821,20 +1827,24 @@ drop_if_unused() {
 }
 
 # After a Claude Code session's agent exits, while its workbench still runs:
-# follow the conversation it ended in, so attach resumes that one (/resume
-# or /clear inside moves to another, and the workbench's SessionStart hook,
-# conversation-note, writes down which), and drop the transcripts of
-# conversations that never got a message. $1: the workbench.
+# follow the conversation it ended in, so attach resumes that one, and drop
+# the transcripts of every conversation it was in that never got a message.
+# /resume or /clear inside moves it to another, and the workbench's
+# SessionStart hook, conversation-note, adds each to a list, in order, so
+# the last is the one it ended in. $1: the workbench.
 session_settle() {
-  local now
+  local id last=""
   [ "$(agent_of "${S_AGENT}")" = claude ] || return 0
-  now="$(podman exec "$1" cat /tmp/airlock-conversation 2>/dev/null || true)"
-  if conversation_id_ok "${now}" && [ "${now}" != "${S_ID}" ]; then
-    drop_if_unused "$1" "${S_ID}"
-    sed -i "s/^claude_id=.*/claude_id=${now}/" "$(session_dir "${SESSION}")/session"
-    S_ID="${now}"
-  fi
   drop_if_unused "$1" "${S_ID}"
+  while read -r id; do
+    conversation_id_ok "${id}" || continue
+    drop_if_unused "$1" "${id}"
+    last="${id}"
+  done < <(podman exec "$1" cat /tmp/airlock-conversation 2>/dev/null || true)
+  if [ -n "${last}" ] && [ "${last}" != "${S_ID}" ]; then
+    sed -i "s/^claude_id=.*/claude_id=${last}/" "$(session_dir "${SESSION}")/session"
+    S_ID="${last}"
+  fi
 }
 
 # Run the session's agent, attached to this terminal, and take the session
@@ -1878,12 +1888,17 @@ cmd_session_start() {
   while [ $# -gt 0 ]; do
     case "$1" in
     --remote) remote=1 ;;
-    --resume)
-      [ $# -gt 1 ] || die "session start: --resume needs a conversation id"
-      resume="$2"
-      shift
+    --resume | --resume=*)
+      if [ "$1" = --resume ]; then
+        [ $# -gt 1 ] || die "session start: --resume needs a conversation id"
+        resume="$2"
+        shift
+      else
+        resume="${1#--resume=}"
+      fi
+      # An empty one too: it would otherwise start a new conversation.
+      [ -n "${resume}" ] || die "session start: --resume needs a conversation id"
       ;;
-    --resume=*) resume="${1#--resume=}" ;;
     -*) die "session start: unknown option $1" ;;
     *) if [ -z "${agent}" ]; then agent="$1"; else ws="$1"; fi ;;
     esac

@@ -27,7 +27,9 @@ REMOTE ?= 1
 # host/workbench checks it is one before anything starts.
 resume ?=
 RESUME ?= $(resume)
-RESUME_ARG = $(if $(RESUME),--resume '$(RESUME)')
+# Through the environment, so no quote in it can break the recipe's shell.
+export RESUME
+RESUME_ARG = $(if $(RESUME),--resume "$$RESUME")
 
 # A repository's own `help` target lists these by depending on this one.
 workbench-help:

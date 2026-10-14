@@ -107,10 +107,21 @@ rule "exec workbench-claude-s-${s} cat /tmp/airlock-conversation" "echo 'not an 
 run "${wb}" session attach "${s}"
 assert "anything but a conversation id is ignored" grep -qx "claude_id=${other}" "${sessions}/${s}/session"
 unrule
+middle=9e8d7c6b-5a49-4382-a1b0-c9d8e7f6a5b4
+last=1f2e3d4c-5b6a-4798-8a9b-0c1d2e3f4a5b
+rule "exec workbench-claude-s-${s} cat /tmp/airlock-conversation" "printf '%s\n' ${other} ${middle} ${last}"
+run "${wb}" session attach "${s}"
+check "every conversation it passed through is checked" 0 calls "done sh ${middle}"
+assert "and the last one is kept" grep -qx "claude_id=${last}" "${sessions}/${s}/session"
+unrule
 
 # A conversation resumed by id in a new session (make claude resume=ID).
 run "${wb}" session start claude --resume
 check "--resume needs an id" 1 err "workbench: session start: --resume needs a conversation id"
+run "${wb}" session start claude --resume=
+check "an empty one is refused, not taken for none" 1 err "workbench: session start: --resume needs a conversation id"
+run "${wb}" session start claude --resume ''
+check "in either form" 1 err "workbench: session start: --resume needs a conversation id"
 run "${wb}" session start codex --resume "${other}"
 check "only Claude Code resumes one by id" 1 err "workbench: only Claude Code resumes a conversation by id"
 run "${wb}" session start claude --resume 'x; id'
@@ -119,8 +130,17 @@ missing=2a7f3c19-8e4d-4b6a-b5c2-9d1e0f3a7c58
 run "${wb}" session start claude --resume "${missing}"
 check "so is one not in this workspace's history" 1 err \
   "workbench: no conversation ${missing} in the history of ${app}; resume it from the folder it was started in"
+slug="$(printf '%s' "${app}" | tr -c 'A-Za-z0-9' -)"
 mkdir -p "${HOME}/.local/share/workbench/claude/projects/-elsewhere"
-touch "${HOME}/.local/share/workbench/claude/projects/-elsewhere/${other}.jsonl"
+printf '{"cwd":"/elsewhere"}\n' >"${HOME}/.local/share/workbench/claude/projects/-elsewhere/${other}.jsonl"
+run "${wb}" session start claude --resume "${other}"
+check "one from another project's history is refused too" 1 err "workbench: no conversation ${other} in the history of ${app}"
+mkdir -p "${HOME}/.local/share/workbench/claude/projects/${slug}-x"
+printf '{"cwd":"/elsewhere"}\n' >"${HOME}/.local/share/workbench/claude/projects/${slug}-x/${other}.jsonl"
+run "${wb}" session start claude --resume "${other}"
+check "even when its folder's name starts like this one's" 1 err "workbench: no conversation ${other} in the history of ${app}"
+mkdir -p "${HOME}/.local/share/workbench/claude/projects/${slug}"
+printf '{"cwd":"%s"}\n' "${app}" >"${HOME}/.local/share/workbench/claude/projects/${slug}/${other}.jsonl"
 run "${wb}" session start claude --resume "${other}"
 r="$(session_name)"
 check "a new session resumes it" 0 calls "workbench-claude-s-${r} claude --resume ${other}"
