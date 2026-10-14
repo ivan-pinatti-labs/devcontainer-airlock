@@ -38,18 +38,22 @@ assert "nor its registry settings" test ! -e "${mirror}/app.registries.conf"
 assert "the other workspace still is" test -e "${egress}/other.conf"
 refute "another workspace left, the shared services stay" "mirror-nexus"
 
-rule 'ps -a --format {{.Names}}' 'exit 125'
+rule 'ps --format {{.Names}}' 'exit 125'
 run "${wb}" down "${other}"
 check "a failed listing stops nothing on a guess" 1 err \
   "workbench: could not list the containers left, so the shared services keep running"
 refute "nothing shared is removed" "podman rm -f -t 5 mirror-gate"
 unrule
 
+# Stopped ones an older up left behind use nothing, so they keep nothing up.
+container workbench-claude-old
+container l2-engine-old
 run "${wb}" down "${other}"
 check "down from anywhere, of the workspace named" 0 out \
   "workbench: nothing else running, so the shared services stopped too; the next start brings them back"
 check "the shared services stop with the last one" 0 calls \
   "podman rm -f -t 5 mirror-gate mirror-nexus egress-proxy gh-broker devcontainer-ssh-agent"
+assert "the stopped ones are left as they are" test -d "${PODMAN_STATE}/ctr/workbench-claude-old"
 check "and the mirror's network" 0 calls "podman network rm workbench-net-airlock-mirror"
 assert "and the mirror's registration" test ! -e "${egress}/airlock-mirror.conf"
 

@@ -66,6 +66,8 @@ done
 check "under the lock" 0 calls "flock -w 120 9"
 check "saying the ssh-agent forgot the key" 0 err \
   "workbench: the ssh-agent holds no key now; host/workbench unlock (make unlock) before a git push"
+assert "right after saying it restarted" test "$(grep -A1 'restarted devcontainer-ssh-agent' "${__scratch}/err" | tail -n 1)" = \
+  "workbench: the ssh-agent holds no key now; host/workbench unlock (make unlock) before a git push"
 check "the gate on the networks registered with it, after provisioning" 0 err "workbench: provisioning the package mirror"
 refute "the mirror's backend, pinned by digest, is kept" "podman run -d --name mirror-nexus"
 assert "the proxy before the gate, which goes out through it" \

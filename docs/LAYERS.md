@@ -641,7 +641,9 @@ network, so nothing needs to be brought up again.
 The shared services (the egress proxy, the package mirror, the gh broker
 and the ssh-agent) follow the workspaces. The `up` that finds one of them
 not running starts it, and the `down` that leaves no workbench or L2 engine
-on the host stops them all, so nothing runs that nothing uses. Their
+running on the host stops them all, so nothing runs that nothing uses. A
+stopped workbench or engine does not count: `up` replaces one rather than
+starting it again. Their
 volumes stay, so the next start is warm. Stopping the ssh-agent drops the
 unlocked key, so `host/workbench unlock` again after that. `up` and `down`
 take a lock, so a `down` cannot stop the services under an `up` starting
