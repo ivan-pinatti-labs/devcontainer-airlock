@@ -1,0 +1,21 @@
+#!/bin/bash
+# Claude Code's SessionStart hook in the workbench: add the conversation
+# the agent is in to a list, at start and whenever /resume or /clear
+# moves it to another. When the agent exits, host/workbench resumes the
+# last one when the session is attached again, and drops every one that
+# never got a message (docs/SESSIONS.md, "Lifecycle"). Each session
+# has a workbench of its own, made anew on attach, so one file per
+# container is enough.
+#
+# It never stops the session: whatever it reads, it exits 0, and it prints
+# nothing, since a SessionStart hook's output reaches the conversation.
+set -u
+
+# AIRLOCK_CONVERSATION_FILE stands in for the real one, for the tests.
+note="${AIRLOCK_CONVERSATION_FILE:-/tmp/airlock-conversation}"
+
+id="$(jq -r '.session_id // empty' 2>/dev/null)" || exit 0
+# A UUID and nothing else: host/workbench writes it into the session record.
+[[ "${id}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 0
+(printf '%s\n' "${id}" >>"${note}") 2>/dev/null || true
+exit 0

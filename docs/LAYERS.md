@@ -100,6 +100,7 @@ make claude              # a new Claude Code session over the folder you are in,
 make claude-plain        # neither voice nor remote control
 make codex               # a new Codex session (no voice)
 make sessions            # every session, running or stopped, and its branches
+make claude resume=<id>  # continue that conversation in a new session
 make attach-<session>    # resume one; stop-, shell-, prune- the same way
 make prune               # remove stopped sessions holding nothing of their own
 make claude-shell        # or codex-shell: a terminal in the workspace workbench

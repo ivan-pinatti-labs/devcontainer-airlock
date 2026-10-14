@@ -26,11 +26,13 @@
                                     with a device
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
-    host/workbench session start claude|codex[-<account>] [--remote] [WORKSPACE]
+    host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [WORKSPACE]
                                     a new session (docs/SESSIONS.md): its
                                     own workbench, network and L2 engine,
                                     the clones read only, its own folder in
-                                    each; it stops when the agent exits
+                                    each; it stops when the agent exits.
+                                    --resume ID continues that Claude Code
+                                    conversation instead of a new one
     host/workbench session attach|shell|stop|prune NAME
     host/workbench session list|prune
                                     resume one (the same conversation), a
@@ -1787,6 +1789,64 @@ session_down() {
   unlock_state
 }
 
+# A Claude Code conversation id: a UUID and nothing else, since it reaches a
+# shell in the workbench.
+conversation_id_ok() {
+  [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+}
+
+# Whether conversation $3 is in workspace $1's history for agent $2: the
+# agent folder's own projects for the workspace and the paths under it, or
+# a host history folder mounted over them (WORKBENCH_HISTORY). A project
+# folder's name encodes its path ambiguously, so, as for the history
+# mounts, the transcript's recorded working directories have to be the
+# workspace or under it.
+conversation_exists() {
+  local slug d m cwd
+  slug="$(printf '%s' "$1" | tr -c 'A-Za-z0-9' -)"
+  for d in "${DATA}/$2/projects/${slug}" "${DATA}/$2/projects/${slug}"-*; do
+    [ -f "${d}/$3.jsonl" ] || continue
+    cwd="$({ grep -h -o '"cwd":"[^"]*"' "${d}/$3.jsonl" || true; } | sed 's/^"cwd":"//; s/"$//' | sort -u)"
+    [ -n "${cwd}" ] && all_under "$1" <<<"${cwd}" && return 0
+  done
+  while read -r m; do
+    case "${m}" in
+    *:/home/dev/.claude/projects/*) [ -e "${m%%:/home/dev/.claude/projects/*}/$3.jsonl" ] && return 0 ;;
+    esac
+  done < <(history_mounts "$1" "$2")
+  return 1
+}
+
+# Remove conversation $2's transcript in workbench $1 when it holds no
+# message from the user: only Claude Code's bookkeeping (its mode, a Remote
+# Control registration), so nothing to resume. Starting with Remote Control
+# writes that much before anything is typed.
+drop_if_unused() {
+  # shellcheck disable=SC2016 # expanded by the shell in the workbench
+  podman exec "$1" sh -c 'for f in /home/dev/.claude/projects/*/"$1".jsonl; do [ -f "$f" ] || continue; grep -q "\"type\":\"user\"" "$f" || rm -f "$f"; done' sh "$2" >/dev/null 2>&1 || true
+}
+
+# After a Claude Code session's agent exits, while its workbench still runs:
+# follow the conversation it ended in, so attach resumes that one, and drop
+# the transcripts of every conversation it was in that never got a message.
+# /resume or /clear inside moves it to another, and the workbench's
+# SessionStart hook, conversation-note, adds each to a list, in order, so
+# the last is the one it ended in. $1: the workbench.
+session_settle() {
+  local id last=""
+  [ "$(agent_of "${S_AGENT}")" = claude ] || return 0
+  drop_if_unused "$1" "${S_ID}"
+  while read -r id; do
+    conversation_id_ok "${id}" || continue
+    drop_if_unused "$1" "${id}"
+    last="${id}"
+  done < <(podman exec "$1" cat /tmp/airlock-conversation 2>/dev/null || true)
+  if [ -n "${last}" ] && [ "${last}" != "${S_ID}" ]; then
+    sed -i "s/^claude_id=.*/claude_id=${last}/" "$(session_dir "${SESSION}")/session"
+    S_ID="${last}"
+  fi
+}
+
 # Run the session's agent, attached to this terminal, and take the session
 # down when it exits. $1: new or resume; $2: remote or empty.
 session_run() {
@@ -1810,43 +1870,64 @@ session_run() {
   echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS})"
   # Its terminal closing (a hangup) stops the session too, as the agent
   # exiting does, rather than leaving its containers running with no agent.
-  trap 'session_down "${S_WS}"; exit 129' HUP
+  trap 'session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
   (
     if [ "${bin}" = claude ] && voice_on; then
       voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
     fi
     exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
   ) || rc=$?
+  session_settle "${name}"
   session_down "${S_WS}"
   echo "workbench: session ${SESSION} stopped; make attach-${SESSION} resumes it"
   return "${rc}"
 }
 
 cmd_session_start() {
-  local agent="" remote="" ws="" a d
-  for a in "$@"; do
-    case "${a}" in
+  local agent="" remote="" ws="" resume="" d
+  while [ $# -gt 0 ]; do
+    case "$1" in
     --remote) remote=1 ;;
-    -*) die "session start: unknown option ${a}" ;;
-    *) if [ -z "${agent}" ]; then agent="${a}"; else ws="${a}"; fi ;;
+    --resume | --resume=*)
+      if [ "$1" = --resume ]; then
+        [ $# -gt 1 ] || die "session start: --resume needs a conversation id"
+        resume="$2"
+        shift
+      else
+        resume="${1#--resume=}"
+      fi
+      # An empty one too: it would otherwise start a new conversation.
+      [ -n "${resume}" ] || die "session start: --resume needs a conversation id"
+      ;;
+    -*) die "session start: unknown option $1" ;;
+    *) if [ -z "${agent}" ]; then agent="$1"; else ws="$1"; fi ;;
     esac
+    shift
   done
-  valid_agent "${agent:-none}" || die "which agent? host/workbench session start claude|codex[-<account>] [--remote] [WORKSPACE]"
+  valid_agent "${agent:-none}" || die "which agent? host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [WORKSPACE]"
   [ -z "${remote}" ] || [ "$(agent_of "${agent}")" = claude ] || die "only Claude Code has a remote control mode"
+  if [ -n "${resume}" ]; then
+    [ "$(agent_of "${agent}")" = claude ] || die "only Claude Code resumes a conversation by id"
+    conversation_id_ok "${resume}" || die "${resume} is not a conversation id (a UUID, as claude --resume prints it)"
+  fi
   ws="$(workspace "${ws}")"
   case "${ws}/" in
   "${ROOT}"/*) ;;
   *) die "${ws} is not under WORKBENCH_ROOT (${ROOT}); the gh broker could not see it" ;;
   esac
+  # Checked before anything starts: a conversation from another folder's
+  # history is not mounted in this workspace's workbench.
+  [ -z "${resume}" ] || conversation_exists "${ws}" "${agent}" "${resume}" ||
+    die "no conversation ${resume} in the history of ${ws}; resume it from the folder it was started in"
   SESSION="$(session_new_name)"
   d="$(session_dir "${SESSION}")"
   mkdir -p "${d}"
   chmod 700 "${d}"
   printf 'agent=%s\nworkspace=%s\nprofile=default\nclaude_id=%s\ncreated=%s\n' \
-    "${agent}" "${ws}" "$(cat /proc/sys/kernel/random/uuid)" "$(date -u +%FT%TZ)" >"${d}/session"
+    "${agent}" "${ws}" "${resume:-$(cat /proc/sys/kernel/random/uuid)}" "$(date -u +%FT%TZ)" >"${d}/session"
   session_read "${SESSION}"
   session_up "${S_WS}" "${S_AGENT}"
-  session_run new "${remote}"
+  if [ -n "${resume}" ]; then session_run resume "${remote}"; else session_run new "${remote}"; fi
 }
 
 cmd_session_attach() {
@@ -1885,6 +1966,7 @@ cmd_session_stop() {
   SESSION="${1:-}"
   [ -n "${SESSION}" ] || die "which session? host/workbench session stop NAME"
   session_read "${SESSION}"
+  session_settle "$(wb_name "${S_WS}" "${S_AGENT}")"
   session_down "${S_WS}"
   echo "workbench: session ${SESSION} stopped"
 }

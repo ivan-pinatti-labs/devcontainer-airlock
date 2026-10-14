@@ -23,7 +23,7 @@ session_name() { sed -n 's/^workbench: session \([^ ]*\) (.*/\1/p' "${__scratch}
 run "${wb}" session
 check "session needs a subcommand" 1 err "workbench: host/workbench session start|attach|shell|stop|list|prune"
 run "${wb}" session start
-check "start needs an agent" 1 err "workbench: which agent? host/workbench session start claude|codex[-<account>] [--remote] [WORKSPACE]"
+check "start needs an agent" 1 err "workbench: which agent? host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [WORKSPACE]"
 run "${wb}" session start claude --bogus
 check "an unknown option is refused" 1 err "workbench: session start: unknown option --bogus"
 run "${wb}" session start codex --remote
@@ -88,6 +88,69 @@ check "one whose terminal went away gets its agent again" 0 calls \
   "workbench-claude-s-${s} claude --resume ${id}"
 refute "in the workbench already running" "podman run -d --name workbench-claude"
 unrule
+
+# The conversation the agent ended in: /resume or /clear inside moves it to
+# another, the workbench's SessionStart hook writes that down, and attach
+# follows it.
+other=5d0e9c61-2f3a-4b8e-9a7c-1e6f4d2b8a03
+rule "exec workbench-claude-s-${s} cat /tmp/airlock-conversation" "echo ${other}"
+run "${wb}" session attach "${s}"
+check "when the agent exits, it reads which conversation it ended in" 0 calls \
+  "podman exec workbench-claude-s-${s} cat /tmp/airlock-conversation"
+check "drops the transcript of the one it left, if it never got a message" 0 calls "done sh ${id}"
+assert "and keeps the new one for the next attach" grep -qx "claude_id=${other}" "${sessions}/${s}/session"
+unrule
+run "${wb}" session attach "${s}"
+check "which then resumes it" 0 calls "workbench-claude-s-${s} claude --resume ${other}"
+check "the one it ends in is checked the same way" 0 calls "done sh ${other}"
+rule "exec workbench-claude-s-${s} cat /tmp/airlock-conversation" "echo 'not an id'"
+run "${wb}" session attach "${s}"
+assert "anything but a conversation id is ignored" grep -qx "claude_id=${other}" "${sessions}/${s}/session"
+unrule
+middle=9e8d7c6b-5a49-4382-a1b0-c9d8e7f6a5b4
+last=1f2e3d4c-5b6a-4798-8a9b-0c1d2e3f4a5b
+rule "exec workbench-claude-s-${s} cat /tmp/airlock-conversation" "printf '%s\n' ${other} ${middle} ${last}"
+run "${wb}" session attach "${s}"
+check "every conversation it passed through is checked" 0 calls "done sh ${middle}"
+assert "and the last one is kept" grep -qx "claude_id=${last}" "${sessions}/${s}/session"
+unrule
+
+# A conversation resumed by id in a new session (make claude resume=ID).
+run "${wb}" session start claude --resume
+check "--resume needs an id" 1 err "workbench: session start: --resume needs a conversation id"
+run "${wb}" session start claude --resume=
+check "an empty one is refused, not taken for none" 1 err "workbench: session start: --resume needs a conversation id"
+run "${wb}" session start claude --resume ''
+check "in either form" 1 err "workbench: session start: --resume needs a conversation id"
+run "${wb}" session start codex --resume "${other}"
+check "only Claude Code resumes one by id" 1 err "workbench: only Claude Code resumes a conversation by id"
+run "${wb}" session start claude --resume 'x; id'
+check "anything but a UUID is refused" 1 err "workbench: x; id is not a conversation id (a UUID, as claude --resume prints it)"
+missing=2a7f3c19-8e4d-4b6a-b5c2-9d1e0f3a7c58
+run "${wb}" session start claude --resume "${missing}"
+check "so is one not in this workspace's history" 1 err \
+  "workbench: no conversation ${missing} in the history of ${app}; resume it from the folder it was started in"
+slug="$(printf '%s' "${app}" | tr -c 'A-Za-z0-9' -)"
+mkdir -p "${HOME}/.local/share/workbench/claude/projects/-elsewhere"
+printf '{"cwd":"/elsewhere"}\n' >"${HOME}/.local/share/workbench/claude/projects/-elsewhere/${other}.jsonl"
+run "${wb}" session start claude --resume "${other}"
+check "one from another project's history is refused too" 1 err "workbench: no conversation ${other} in the history of ${app}"
+mkdir -p "${HOME}/.local/share/workbench/claude/projects/${slug}-x"
+printf '{"cwd":"/elsewhere"}\n' >"${HOME}/.local/share/workbench/claude/projects/${slug}-x/${other}.jsonl"
+run "${wb}" session start claude --resume "${other}"
+check "even when its folder's name starts like this one's" 1 err "workbench: no conversation ${other} in the history of ${app}"
+mkdir -p "${HOME}/.local/share/workbench/claude/projects/${slug}"
+printf '{"cwd":"%s"}\n' "${app}" >"${HOME}/.local/share/workbench/claude/projects/${slug}/${other}.jsonl"
+run "${wb}" session start claude --resume "${other}"
+r="$(session_name)"
+check "a new session resumes it" 0 calls "workbench-claude-s-${r} claude --resume ${other}"
+assert "and keeps it as its own" grep -qx "claude_id=${other}" "${sessions}/${r}/session"
+mkdir -p "${HOME}/host-claude/projects/$(printf '%s' "${app}" | tr -c 'A-Za-z0-9' -)"
+printf '{"cwd":"%s"}\n' "${app}" >"${HOME}/host-claude/projects/$(printf '%s' "${app}" | tr -c 'A-Za-z0-9' -)/${missing}.jsonl"
+export WORKBENCH_HISTORY="claude=${HOME}/host-claude"
+run "${wb}" session start claude --resume="${missing}"
+check "one in the host history it shares too" 0 calls "claude --resume ${missing}"
+unset WORKBENCH_HISTORY
 
 # shell and stop
 run "${wb}" session shell

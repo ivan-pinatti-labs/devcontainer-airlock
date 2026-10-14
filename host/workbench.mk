@@ -22,12 +22,21 @@
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 VOICE ?= 1
 REMOTE ?= 1
+# `make claude resume=<id>` (or RESUME=) continues that Claude Code
+# conversation in a new session: the id Claude Code prints when it exits.
+# host/workbench checks it is one before anything starts.
+resume ?=
+RESUME ?= $(resume)
+# Through the environment, so no quote in it can break the recipe's shell.
+export RESUME
+RESUME_ARG = $(if $(RESUME),--resume "$$RESUME")
 
 # A repository's own `help` target lists these by depending on this one.
 workbench-help:
 	@printf '%s\n' \
 		'Workbench:' \
 		'  claude                      A new Claude Code session, here, with voice (hold space) and remote control (REMOTE=0: without).' \
+		'                              resume=<id>: continue that conversation instead (any claude target).' \
 		'  claude-remote               The same as claude, whatever REMOTE says.' \
 		'  claude-plain                Claude Code with neither voice nor remote control.' \
 		'  codex                       A new Codex session, here.' \
@@ -50,7 +59,7 @@ WORKBENCH_ACCOUNTS := $(shell $(WORKBENCH) accounts 2>/dev/null)
 define workbench_account
 .PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-plain
 claude-$(1):
-	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) $$(if $$(filter 1,$$(REMOTE)),--remote)
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) $$(if $$(filter 1,$$(REMOTE)),--remote) $$(RESUME_ARG)
 codex-$(1):
 	@$$(WORKBENCH) session start codex-$(1)
 claude-$(1)-shell:
@@ -58,20 +67,20 @@ claude-$(1)-shell:
 codex-$(1)-shell:
 	@$$(WORKBENCH) shell codex-$(1)
 claude-$(1)-remote:
-	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --remote
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --remote $$(RESUME_ARG)
 claude-$(1)-plain:
-	@WORKBENCH_VOICE=0 $$(WORKBENCH) session start claude-$(1)
+	@WORKBENCH_VOICE=0 $$(WORKBENCH) session start claude-$(1) $$(RESUME_ARG)
 endef
 $(foreach a,$(WORKBENCH_ACCOUNTS),$(eval $(call workbench_account,$(a))))
 
 claude:
-	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude $(if $(filter 1,$(REMOTE)),--remote)
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude $(if $(filter 1,$(REMOTE)),--remote) $(RESUME_ARG)
 
 claude-remote:
-	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --remote
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --remote $(RESUME_ARG)
 
 claude-plain:
-	@WORKBENCH_VOICE=0 $(WORKBENCH) session start claude
+	@WORKBENCH_VOICE=0 $(WORKBENCH) session start claude $(RESUME_ARG)
 
 codex:
 	@$(WORKBENCH) session start codex

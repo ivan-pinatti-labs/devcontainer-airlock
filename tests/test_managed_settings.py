@@ -27,3 +27,17 @@ def excluded():
 )
 def test_the_command_runs_outside_the_sandbox(command):
     assert command in excluded()
+
+
+def test_session_start_notes_the_conversation():
+    """host/workbench resumes the conversation this hook writes down.
+
+    A /resume or /clear inside a session moves it to another conversation;
+    without the note, attach would resume the one the session started with
+    (docs/SESSIONS.md, "Lifecycle").
+    """
+    with open(SETTINGS, encoding="utf-8") as handle:
+        entries = json.load(handle)["hooks"]["SessionStart"]
+    commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
+    assert commands == ["/usr/local/libexec/workbench/conversation-note"]
+    assert (REPO_ROOT / "images/workbench/bin/conversation-note").is_file()
