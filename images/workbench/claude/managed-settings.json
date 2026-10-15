@@ -1,5 +1,8 @@
 {
   "allowManagedHooksOnly": true,
+  "permissions": {
+    "disableBypassPermissionsMode": "disable"
+  },
   "statusLine": {
     "type": "command",
     "command": "/usr/local/libexec/workbench/status-line",

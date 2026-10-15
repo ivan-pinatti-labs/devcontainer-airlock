@@ -82,20 +82,27 @@ run "${wb}" helpers-down
 check "helpers-down stops all three" 0 calls "podman rm -f -t 5 gh-broker devcontainer-ssh-agent egress-proxy"
 assert "and they are gone" test ! -e "${PODMAN_STATE}/ctr/gh-broker"
 
-# unlock: the key goes into the running agent, for 8 hours.
+# unlock: the key goes into the running agent, for 12 hours, or as many as
+# asked up to 48.
 run "${wb}" unlock
 check "unlock needs the ssh-agent" 1 err "workbench: the ssh-agent is not running; host/workbench up first"
 container devcontainer-ssh-agent running
 run "${wb}" unlock
-check "unlock adds the key for 8 hours" 0 calls \
-  "podman exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add -t 8h /key/id"
+check "unlock adds the key for 12 hours" 0 calls \
+  "podman exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add -t 12h /key/id"
 refute "an agent holding the key is kept" "podman rm"
+run "${wb}" unlock 48
+check "or for as many hours as asked" 0 calls "ssh-add -t 48h /key/id"
+for bad in 0 49 12h x; do
+  run "${wb}" unlock "${bad}"
+  check "but not ${bad}" 1 err "workbench: unlock: hours is a whole number from 1 to 48, not '${bad}'"
+done
 rule 'exec devcontainer-ssh-agent test -f /key/id' 'exit 1'
 run "${wb}" unlock
 check "an agent from before, with the key's folder, is started again" 0 calls \
   "podman rm -f -t 3 devcontainer-ssh-agent"
 check "with the key itself" 0 calls "-v ${key}:/key/id:ro,Z --entrypoint ssh-agent"
-check "then takes the key" 0 calls "ssh-add -t 8h /key/id"
+check "then takes the key" 0 calls "ssh-add -t 12h /key/id"
 unrule
 
 # install-units: a user unit for the helpers at login.
