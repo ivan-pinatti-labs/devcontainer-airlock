@@ -16,7 +16,8 @@
                                     the L2 engine, and the shared services
                                     (helpers, egress proxy, package mirror)
                                     that are not running yet
-    host/workbench unlock           add the ssh key to the agent for 8 hours
+    host/workbench unlock [HOURS]   add the ssh key to the agent for HOURS
+                                    (default 12, at most 48)
     host/workbench claude [WORKSPACE]
     host/workbench codex [WORKSPACE]
                                     that agent, in its workbench, in the
@@ -29,13 +30,19 @@
                                     with a device
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
-    host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [WORKSPACE]
+    host/workbench session start claude|codex[-<account>] [--remote] [--resume ID]
+                                  [--level hardened|assisted|unattended] [--hours N] [WORKSPACE]
                                     a new session (docs/SESSIONS.md): its
                                     own workbench, network and L2 engine,
                                     the clones read only, its own folder in
                                     each; it stops when the agent exits.
                                     --resume ID continues that Claude Code
-                                    conversation instead of a new one
+                                    conversation instead of a new one.
+                                    --level picks how far the agent goes
+                                    without asking (docs/MODES.md); an
+                                    unattended one runs N hours (a menu
+                                    asks when not given), with the key
+                                    unlocked as long
     host/workbench session attach|shell|stop|prune NAME
     host/workbench session list|prune
                                     resume one (the same conversation), a
@@ -1316,7 +1323,7 @@ voice_opts() {
 # The workbench of one agent. It mounts that agent's state folder and not the
 # other's.
 start_workbench() {
-  local ws="$1" agent="$2" name gitdir=() history=() hist voice=()
+  local ws="$1" agent="$2" name gitdir=() history=() hist voice=() level=()
   name="$(wb_name "${ws}" "${agent}")"
   check_owner "${name}" "$(ws_label)" "${ws}"
   running "${name}" && return
@@ -1329,6 +1336,9 @@ start_workbench() {
   if [ -n "${hist}" ]; then mapfile -t history <<<"${hist}"; fi
   hist="$(voice_opts "${name}" "${agent}")" || exit 1
   if [ -n "${hist}" ]; then mapfile -t voice <<<"${hist}"; fi
+  # A session's level; a workspace's own workbench (up) is hardened.
+  hist="$(level_opts "${agent}" "${S_LEVEL:-hardened}")" || exit 1
+  if [ -n "${hist}" ]; then mapfile -t level <<<"${hist}"; fi
   podman rm -f "${name}" >/dev/null 2>&1 || true
   podman run -d --name "${name}" \
     --label "$(ws_label)=${ws}" --label workbench.agent="${agent}" \
@@ -1348,7 +1358,8 @@ start_workbench() {
     -v "${GH_DIR}:/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
-    "${voice[@]}" \
+    "${voice[@]}" "${level[@]}" \
+    -e AIRLOCK_LEVEL="${S_LEVEL:-hardened}" \
     -w "${ws}" \
     --entrypoint catatonit "$(wb_image "$(agent_of "${agent}")")" -- workbench-init >/dev/null
 }
@@ -1560,8 +1571,40 @@ cmd_unlock() {
     podman rm -f -t 3 devcontainer-ssh-agent >/dev/null
     start_ssh_agent
   fi
+  unlock_key "${1:-${DEFAULT_HOURS}}"
+}
+
+# How long the key stays unlocked, and an unattended session runs, in hours:
+# twelve by default, two days at most (a weekend run).
+DEFAULT_HOURS=12
+MAX_HOURS=48
+hours_ok() { [[ "$1" =~ ^[1-9][0-9]?$ ]] && [ "$1" -le "${MAX_HOURS}" ]; }
+
+# Add the key to the ssh-agent for $1 hours. Adding it again while it is
+# held replaces its lifetime, and every session shares the one agent, so the
+# lifetime is never shorter than an unattended session still due to run
+# needs: it lasts to the latest of now plus $1 hours and every session
+# record's `ends=` still ahead.
+unlock_key() {
+  hours_ok "$1" || die "unlock: hours is a whole number from 1 to ${MAX_HOURS}, not '$1'"
   podman exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent \
-    ssh-add -t 8h /key/id
+    ssh-add -t "$(key_lifetime "$1")" /key/id
+}
+
+# The seconds unlock_key adds the key for (above).
+key_lifetime() {
+  local now latest f key value
+  now="$(date +%s)"
+  latest=$((now + $1 * 3600))
+  for f in "${SESSIONS}"/*/session; do
+    [ -f "${f}" ] || continue
+    while IFS='=' read -r key value || [ -n "${key}" ]; do
+      if [ "${key}" = ends ] && [[ "${value}" =~ ^[0-9]+$ ]] && [ "${value}" -gt "${latest}" ]; then
+        latest="${value}"
+      fi
+    done <"${f}"
+  done
+  echo $((latest - now))
 }
 
 # Run a command (default: a shell) in agent $1's workbench for workspace $2,
@@ -1857,12 +1900,15 @@ session_read() {
   local f key value
   f="$(session_dir "$1")/session"
   [ -f "${f}" ] || die "no session $1 (host/workbench session list)"
-  S_AGENT="" S_WS="" S_ID=""
+  # A record from before levels has none: hardened, which it ran as.
+  S_AGENT="" S_WS="" S_ID="" S_LEVEL=hardened S_HOURS=""
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
     agent) S_AGENT="${value}" ;;
     workspace) S_WS="${value}" ;;
     claude_id) S_ID="${value}" ;;
+    level) S_LEVEL="${value}" ;;
+    hours) S_HOURS="${value}" ;;
     esac
   done <"${f}"
 }
@@ -1916,6 +1962,73 @@ session_down() {
   podman network rm "$(net_name "${ws}")" >/dev/null 2>&1 || true
   stop_shared_if_idle || true
   unlock_state
+}
+
+# Session levels (docs/MODES.md): how far the agent may go without asking.
+# hardened is the policy as written and the default; assisted asks less
+# about reads, with you there; unattended asks nothing, for runs with nobody
+# at the keyboard, and is capped in hours.
+LEVELS="hardened assisted unattended"
+
+# ", <level>" for a session's start line, nothing for hardened.
+level_note() {
+  if [ "${S_LEVEL:-hardened}" = hardened ]; then return 0; fi
+  printf ', %s' "${S_LEVEL}"
+  if [ -n "${S_HOURS}" ]; then printf ' for %sh' "${S_HOURS}"; fi
+}
+
+# The unattended session's length, picked from a menu with the arrow keys
+# and Enter when there is a terminal to show it on, else the default.
+# WORKBENCH_MENU=1 shows it without one, for the tests.
+choose_hours() {
+  local options=(8 12 24 48) i=1 j key rest
+  if [ "${WORKBENCH_MENU:-}" != 1 ] && { [ ! -t 0 ] || [ ! -t 2 ]; }; then
+    echo "${DEFAULT_HOURS}"
+    return 0
+  fi
+  while true; do
+    printf '\rworkbench: run unattended for (arrows, Enter):' >&2
+    for j in "${!options[@]}"; do
+      if [ "${j}" = "${i}" ]; then printf ' [%sh]' "${options[j]}" >&2; else printf '  %sh ' "${options[j]}" >&2; fi
+    done
+    IFS= read -rsn1 key || break
+    case "${key}" in
+    $'\e')
+      IFS= read -rsn2 -t 1 rest || true
+      case "${rest}" in
+      '[D' | '[A') if [ "${i}" -gt 0 ]; then i=$((i - 1)); fi ;;
+      '[C' | '[B') if [ "${i}" -lt 3 ]; then i=$((i + 1)); fi ;;
+      esac
+      ;;
+    '') break ;;
+    esac
+  done
+  printf '\n' >&2
+  echo "${options[i]}"
+}
+
+# The settings for session level $2 in agent $1's workbench, as podman
+# options. Nothing for hardened, the drop-in the image installs. Another
+# level's drop-in and guard allow file are copied out of the image once per
+# image, into a folder no container mounts, and mounted read only over the
+# image's own.
+level_opts() {
+  local level="${2:-hardened}" image id dir f
+  [ "${level}" = hardened ] && return 0
+  image="$(wb_image "$(agent_of "$1")")"
+  id="$(podman image inspect --format '{{.Id}}' "${image}")" || die "cannot read the image ${image}"
+  dir="${DATA}/levels/${id#sha256:}/${level}"
+  mkdir -p "${dir}"
+  for f in 50-agent-policy.json guard-allow.json; do
+    [ -s "${dir}/${f}" ] && continue
+    podman run --rm --network none --entrypoint cat "${image}" \
+      "/usr/local/share/workbench/levels/${level}/${f}" >"${dir}/${f}.part" ||
+      die "the image ${image} has no ${level} level; make workbench-pull, or workbench-build"
+    mv "${dir}/${f}.part" "${dir}/${f}"
+  done
+  printf '%s\n' \
+    -v "${dir}/50-agent-policy.json:/etc/claude-code/managed-settings.d/50-agent-policy.json:ro,z" \
+    -v "${dir}/guard-allow.json:/usr/local/libexec/agent-policy/guard-allow.json:ro,z"
 }
 
 # A Claude Code conversation id: a UUID and nothing else, since it reaches a
@@ -1995,14 +2108,25 @@ session_run() {
       cmd+=(--session-id "${S_ID}")
     fi
     [ -z "${remote}" ] || cmd+=(--remote-control)
+    # Unattended runs in Claude Code's own auto mode, never with permission
+    # checks bypassed (docs/MODES.md).
+    [ "${S_LEVEL}" != unattended ] || cmd+=(--permission-mode auto)
   fi
-  echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS})"
+  echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS}$(level_note))"
   # Its terminal closing (a hangup) stops the session too, as the agent
   # exiting does, rather than leaving its containers running with no agent.
   trap 'session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
   (
-    if [ "${bin}" = claude ] && voice_on; then
+    # Not unattended: nobody is there to talk, and the hour cap below has to
+    # hold the only way the agent is started.
+    if [ "${bin}" = claude ] && [ -z "${S_HOURS}" ] && voice_on; then
       voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
+    fi
+    # An unattended session ends after the hours it was given, when the key
+    # it unlocked runs out too.
+    if [ -n "${S_HOURS}" ]; then
+      exec timeout --foreground --kill-after=60 "${S_HOURS}h" \
+        podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
     fi
     exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
   ) || rc=$?
@@ -2013,10 +2137,20 @@ session_run() {
 }
 
 cmd_session_start() {
-  local agent="" remote="" ws="" resume="" d
+  local agent="" remote="" ws="" resume="" level=hardened hours="" d
   while [ $# -gt 0 ]; do
     case "$1" in
     --remote) remote=1 ;;
+    --level)
+      [ $# -gt 1 ] || die "session start: --level needs one of ${LEVELS}"
+      level="$2"
+      shift
+      ;;
+    --hours)
+      [ $# -gt 1 ] || die "session start: --hours needs a number of hours"
+      hours="$2"
+      shift
+      ;;
     --resume | --resume=*)
       if [ "$1" = --resume ]; then
         [ $# -gt 1 ] || die "session start: --resume needs a conversation id"
@@ -2033,11 +2167,23 @@ cmd_session_start() {
     esac
     shift
   done
-  valid_agent "${agent:-none}" || die "which agent? host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [WORKSPACE]"
+  valid_agent "${agent:-none}" || die "which agent? host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [--level LEVEL] [--hours N] [WORKSPACE]"
   [ -z "${remote}" ] || [ "$(agent_of "${agent}")" = claude ] || die "only Claude Code has a remote control mode"
   if [ -n "${resume}" ]; then
     [ "$(agent_of "${agent}")" = claude ] || die "only Claude Code resumes a conversation by id"
     conversation_id_ok "${resume}" || die "${resume} is not a conversation id (a UUID, as claude --resume prints it)"
+  fi
+  case " ${LEVELS} " in
+  *" ${level} "*) ;;
+  *) die "session start: no level '${level}'; one of ${LEVELS} (docs/MODES.md)" ;;
+  esac
+  [ "${level}" = hardened ] || [ "$(agent_of "${agent}")" = claude ] ||
+    die "only Claude Code has the ${level} level so far; Codex runs hardened (docs/MODES.md)"
+  if [ "${level}" = unattended ]; then
+    [ -n "${hours}" ] || hours="$(choose_hours)"
+    hours_ok "${hours}" || die "session start: --hours is a whole number from 1 to ${MAX_HOURS}, not '${hours}'"
+  elif [ -n "${hours}" ]; then
+    die "session start: --hours is for an unattended session"
   fi
   ws="$(workspace "${ws}")"
   case "${ws}/" in
@@ -2052,10 +2198,18 @@ cmd_session_start() {
   d="$(session_dir "${SESSION}")"
   mkdir -p "${d}"
   chmod 700 "${d}"
-  printf 'agent=%s\nworkspace=%s\nprofile=default\nclaude_id=%s\ncreated=%s\n' \
-    "${agent}" "${ws}" "${resume:-$(cat /proc/sys/kernel/random/uuid)}" "$(date -u +%FT%TZ)" >"${d}/session"
+  printf 'agent=%s\nworkspace=%s\nprofile=default\nlevel=%s\nclaude_id=%s\ncreated=%s\n' \
+    "${agent}" "${ws}" "${level}" "${resume:-$(cat /proc/sys/kernel/random/uuid)}" "$(date -u +%FT%TZ)" >"${d}/session"
+  [ -z "${hours}" ] || printf 'hours=%s\nends=%s\n' "${hours}" "$(($(date +%s) + hours * 3600))" >>"${d}/session"
   session_read "${SESSION}"
   session_up "${S_WS}" "${S_AGENT}"
+  # The key is unlocked afresh for exactly as long as the session runs, so a
+  # push near the end does not find it locked. Its passphrase is asked here,
+  # with someone still at the keyboard.
+  if [ -n "${hours}" ] && ! unlock_key "${hours}"; then
+    session_down "${S_WS}"
+    die "the ssh key was not unlocked, so an unattended session could not push; nothing was started"
+  fi
   if [ -n "${resume}" ]; then session_run resume "${remote}"; else session_run new "${remote}"; fi
 }
 
@@ -2215,7 +2369,7 @@ build) cmd_build ;;
 pull) cmd_pull ;;
 init) cmd_init "${2:-}" ;;
 up) cmd_up "${2:-}" ;;
-unlock) cmd_unlock ;;
+unlock) cmd_unlock "${2:-}" ;;
 shell)
   shift
   cmd_shell "$@"

@@ -23,7 +23,7 @@ session_name() { sed -n 's/^workbench: session \([^ ]*\) (.*/\1/p' "${__scratch}
 run "${wb}" session
 check "session needs a subcommand" 1 err "workbench: host/workbench session start|attach|shell|stop|list|prune"
 run "${wb}" session start
-check "start needs an agent" 1 err "workbench: which agent? host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [WORKSPACE]"
+check "start needs an agent" 1 err "workbench: which agent? host/workbench session start claude|codex[-<account>] [--remote] [--resume ID] [--level LEVEL] [--hours N] [WORKSPACE]"
 run "${wb}" session start claude --bogus
 check "an unknown option is refused" 1 err "workbench: session start: unknown option --bogus"
 run "${wb}" session start codex --remote
@@ -157,6 +157,94 @@ export WORKBENCH_HISTORY="claude=${HOME}/host-claude"
 run "${wb}" session start claude --resume="${missing}"
 check "one in the host history it shares too" 0 calls "claude --resume ${missing}"
 unset WORKBENCH_HISTORY
+
+# Levels (docs/MODES.md).
+run "${wb}" session start claude --level
+check "--level needs a level" 1 err "workbench: session start: --level needs one of hardened assisted unattended"
+run "${wb}" session start claude --level lenient
+check "an unknown level is refused" 1 err "workbench: session start: no level 'lenient'; one of hardened assisted unattended (docs/MODES.md)"
+run "${wb}" session start codex --level assisted
+check "Codex runs hardened" 1 err "workbench: only Claude Code has the assisted level so far; Codex runs hardened (docs/MODES.md)"
+run "${wb}" session start claude --hours
+check "--hours needs hours" 1 err "workbench: session start: --hours needs a number of hours"
+run "${wb}" session start claude --hours 12
+check "hours are for an unattended session" 1 err "workbench: session start: --hours is for an unattended session"
+run "${wb}" session start claude --level unattended --hours 72
+check "two days at most" 1 err "workbench: session start: --hours is a whole number from 1 to 48, not '72'"
+
+run "${wb}" session start claude --level assisted
+check "a level needs the workbench image" 1 err "workbench: cannot read the image localhost/airlock-workbench-claude:local"
+image localhost/airlock-workbench-claude:local sha256:wb
+rule 'run --rm --network none --entrypoint cat *' 'exit 1'
+run "${wb}" session start claude --level assisted
+check "and the level in it" 1 err "workbench: the image localhost/airlock-workbench-claude:local has no assisted level; make workbench-pull, or workbench-build"
+unrule
+levels="${HOME}/.local/share/workbench/levels/wb"
+rule 'run --rm --network none --entrypoint cat *' 'echo "{\"level\": true}"'
+run "${wb}" session start claude --level assisted
+a="$(session_name)"
+check "an assisted session says so" 0 out "workbench: session ${a} (claude, ${app}, assisted)"
+assert "and records it" grep -qx "level=assisted" "${sessions}/${a}/session"
+check "its drop-in is copied out of the image" 0 calls \
+  "podman run --rm --network none --entrypoint cat localhost/airlock-workbench-claude:local /usr/local/share/workbench/levels/assisted/50-agent-policy.json"
+assert "kept beside the others of that image" grep -q level "${levels}/assisted/50-agent-policy.json"
+check "and mounted over the image's own, read only, labelled for every session to share" 0 calls \
+  "-v ${levels}/assisted/50-agent-policy.json:/etc/claude-code/managed-settings.d/50-agent-policy.json:ro,z -v ${levels}/assisted/guard-allow.json:/usr/local/libexec/agent-policy/guard-allow.json:ro,z"
+check "the workbench knows its level" 0 calls "-e AIRLOCK_LEVEL=assisted"
+refute "assisted is not auto mode by force" "--permission-mode"
+run "${wb}" session attach "${a}"
+check "attach keeps the level" 0 calls "-v ${levels}/assisted/50-agent-policy.json:"
+refute "copied once per image" "--entrypoint cat localhost"
+unrule
+
+# Unattended: hours, a fresh unlock for as long, auto mode and a cap.
+stub timeout 'shift 3; exec "$@"'
+# expire: every unattended session so far past its end, so the next unlock
+# lasts only as long as it asks for.
+expire() { sed -i 's/^ends=.*/ends=0/' "${sessions}"/*/session; }
+# hours_of: the hours the session the last run started was given.
+hours_of() { sed -n 's/^hours=//p' "${sessions}/$(session_name)/session"; }
+run "${wb}" session start claude --level unattended --hours 24
+u="$(session_name)"
+check "an unattended session says for how long" 0 out "workbench: session ${u} (claude, ${app}, unattended for 24h)"
+assert "and records it" grep -qx "hours=24" "${sessions}/${u}/session"
+check "the key is unlocked for as long, in seconds" 0 calls "ssh-add -t 86400 /key/id"
+assert "and the record says when it ends" grep -qE '^ends=[0-9]+$' "${sessions}/${u}/session"
+check "Claude Code runs in auto mode" 0 calls "claude --session-id"
+check "never with permission checks bypassed" 0 calls "--permission-mode auto"
+check "and the session ends when the hours do" 0 calls \
+  "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -w ${app} workbench-claude-s-${u} claude"
+run "${wb}" session attach "${u}"
+check "attach caps it again" 0 calls "timeout --foreground --kill-after=60 24h"
+export WORKBENCH_VOICE=1
+run "${wb}" session attach "${u}"
+refute "and gives it no voice" "pactl"
+check "so the cap holds" 0 calls "timeout --foreground --kill-after=60 24h"
+unset WORKBENCH_VOICE
+expire
+rule 'exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add *' 'exit 1'
+run "${wb}" session start claude --level unattended --hours 8
+check "a key that was not unlocked starts nothing" 1 err \
+  "workbench: the ssh key was not unlocked, so an unattended session could not push; nothing was started"
+refute "no agent runs" "claude --session-id"
+unrule
+expire
+run "${wb}" session start claude --level unattended
+check "with no terminal for the menu, 12 hours" 0 calls "ssh-add -t 43200 /key/id"
+expire
+export WORKBENCH_MENU=1
+run "${wb}" session start claude --level unattended <<<$'\e[C\e[C\e[C\e[X'
+check "the menu: right arrows, past the end, then Enter" 0 calls "ssh-add -t 172800 /key/id"
+check "drawn on standard error" 0 err "run unattended for (arrows, Enter):"
+run "${wb}" session start claude --level unattended <<<$'\e[D\e[Dq'
+assert "left arrows stop at the first" test "$(hours_of)" = 8
+assert "and an eight hour session leaves the key for the 48 hour one still running" \
+  grep -qE 'ssh-add -t 17[0-9]{4} /key/id' "${STUB_LOG}"
+expire
+run "${wb}" session start claude --level unattended </dev/null
+assert "and no input keeps the default" test "$(hours_of)" = 12
+unset WORKBENCH_MENU
+rm "${__scratch}/bin/timeout"
 
 # shell and stop
 run "${wb}" session shell

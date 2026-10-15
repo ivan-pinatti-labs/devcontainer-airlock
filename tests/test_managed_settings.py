@@ -41,3 +41,11 @@ def test_session_start_notes_the_conversation():
     commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
     assert commands == ["/usr/local/libexec/workbench/conversation-note"]
     assert (REPO_ROOT / "images/workbench/bin/conversation-note").is_file()
+
+
+def test_permission_checks_cannot_be_bypassed():
+    """No level runs with permission checks skipped, unattended included: it
+    uses Claude Code's auto mode (docs/MODES.md)."""
+    with open(SETTINGS, encoding="utf-8") as handle:
+        permissions = json.load(handle)["permissions"]
+    assert permissions["disableBypassPermissionsMode"] == "disable"
