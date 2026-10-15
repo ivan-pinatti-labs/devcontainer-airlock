@@ -70,6 +70,12 @@ check "a session that does not exist" 1 err "workbench: no session no-such (host
 run "${wb}" session attach "${s}"
 check "attach brings a stopped session back" 0 calls "podman run -d --name workbench-claude-s-${s}"
 check "and resumes its conversation" 0 calls "workbench-claude-s-${s} claude --resume ${id}"
+# A record edited by hand and saved with no final newline keeps its last line.
+grep -v '^claude_id=' "${sessions}/${s}/session" >"${__scratch}/record"
+printf 'claude_id=%s' "${id}" >>"${__scratch}/record"
+cp "${__scratch}/record" "${sessions}/${s}/session"
+run "${wb}" session attach "${s}"
+check "its last line is read too" 0 calls "workbench-claude-s-${s} claude --resume ${id}"
 rule "exec workbench-claude-s-${s} sh -c *" 'exit 2'
 run "${wb}" session attach --remote "${s}"
 check "with no transcript yet, it starts the same conversation again" 0 calls \
