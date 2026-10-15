@@ -536,6 +536,8 @@ WAIT_CASES = [
     (False, "wait pr 7 -R example-org/x -R someone-else/y"),
     (False, "wait pr 7 -R example-org/x --timeout 0"),
     (False, "wait pr 7 -R example-org/x --timeout soon"),
+    (False, "wait pr \u00b2 -R example-org/x"),
+    (False, "wait pr 7 -R example-org/x --timeout \u00b2"),
     (False, "wait pr 7 -R example-org/x --timeout"),
     (False, "wait pr 7 -R example-org/x --interval 1"),
     (False, "wait issue 7 -R example-org/x"),
@@ -557,6 +559,17 @@ def test_wait_never_waits_past_the_cap(broker):
     assert broker.wait_args(argv[:5]) == ("example-org/x", 7, broker.WAIT_CAP)
 
 
+def threads(*resolved, next_page=None, comments=1):
+    """A page of review threads, resolved or not, each with `comments`
+    comments; `next_page` is the cursor of a page after it."""
+    return {
+        "pageInfo": {"hasNextPage": next_page is not None, "endCursor": next_page},
+        "nodes": [
+            {"isResolved": r, "comments": {"totalCount": comments}} for r in resolved
+        ],
+    }
+
+
 def pr_answer(**fields):
     """What `gh api graphql` prints for the wait query."""
     pr = {
@@ -568,7 +581,7 @@ def pr_answer(**fields):
         "mergeQueueEntry": None,
         "reviews": {"totalCount": 0},
         "comments": {"totalCount": 0},
-        "reviewThreads": {"nodes": [{"isResolved": True}]},
+        "reviewThreads": threads(True),
         "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]},
     }
     pr.update(fields)
@@ -610,9 +623,7 @@ def test_wait_answers_when_the_pull_request_changes(broker, monkeypatch):
         pr_answer(),
         pr_answer(),
         subprocess.TimeoutExpired("gh", 60),
-        pr_answer(
-            reviewDecision="APPROVED", reviewThreads={"nodes": [{"isResolved": False}]}
-        ),
+        pr_answer(reviewDecision="APPROVED", reviewThreads=threads(False)),
     ]
     monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
     clock = Clock()
@@ -630,7 +641,41 @@ def test_wait_answers_when_the_pull_request_changes(broker, monkeypatch):
         "owner=example-org" in asked[0]
         and "name=x" in asked[0]
         and "number=7" in asked[0]
+        and "after=null" in asked[0]
     )
+
+
+def test_wait_sees_a_reply_on_a_thread_that_stays_open(broker, monkeypatch):
+    answers = [
+        pr_answer(reviewThreads=threads(False)),
+        pr_answer(reviewThreads=threads(False, comments=2)),
+    ]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, []))
+    clock = Clock()
+    reply = broker.wait_pr(
+        "example-org/x", 7, 3900, sleep=clock.sleep, clock=clock.monotonic
+    )
+    assert json.loads(reply["out"])["changed"] == ["thread_comments"]
+
+
+def test_review_threads_are_read_past_the_first_page(broker, monkeypatch):
+    asked = []
+    answers = [
+        pr_answer(reviewThreads=threads(True, next_page="c1")),
+        pr_answer(reviewThreads=threads(False, False)),
+    ]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
+    snapshot = broker.pr_snapshot("example-org/x", 7)
+    assert snapshot["open_threads"] == 2
+    assert snapshot["thread_comments"] == 3
+    assert "after=c1" in asked[1]
+
+
+def test_review_threads_stop_at_the_page_limit(broker, monkeypatch):
+    monkeypatch.setattr(broker, "WAIT_PAGES", 1)
+    answers = [pr_answer(reviewThreads=threads(False, next_page="c1"))]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, []))
+    assert broker.pr_snapshot("example-org/x", 7)["open_threads"] == 1
 
 
 def test_wait_gives_up_at_its_timeout(broker, monkeypatch):

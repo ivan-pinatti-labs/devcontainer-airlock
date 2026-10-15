@@ -157,7 +157,7 @@ def test_a_wait_gets_the_time_the_broker_may_take(monkeypatch, capsys, sock):
     330 s an ordinary command gets."""
     monkeypatch.setattr("socket.socket", StalledSocket)
     assert run_gh(monkeypatch, ["wait", "pr", "1", "-R", "example-org/x"]) == 124
-    assert "no reply from the gh broker after 4020s" in capsys.readouterr().err
+    assert "no reply from the gh broker after 4260s" in capsys.readouterr().err
 
 
 def test_a_connection_that_breaks_is_unreachable(monkeypatch, capsys, sock):

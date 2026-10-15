@@ -334,21 +334,30 @@ def merge_ok(argv):
 BROKER_COMMANDS = frozenset(ALLOW.get("broker_commands", []))
 # The longest wait, in seconds: one CodeRabbit review slot (about an hour)
 # and a margin. A caller that asks for longer gets this, so no wait is
-# unbounded. The workbench gh allows this much and a little more for the reply.
+# unbounded. Review threads are read 100 at a time, at most WAIT_PAGES pages
+# (a thousand threads) of WAIT_READ_TIMEOUT seconds each, so one look at the
+# pull request takes 300 seconds at most, and a whole wait WAIT_CAP plus one
+# look. The workbench gh allows that and a margin for the reply.
 WAIT_CAP = 3900
 WAIT_POLL = 60
+WAIT_PAGES = 10
+WAIT_READ_TIMEOUT = 30
 WAIT_QUERY = (
-    "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){"
+    "query($owner:String!,$name:String!,$number:Int!,$after:String){"
+    "repository(owner:$owner,name:$name){"
     "pullRequest(number:$number){state isDraft mergeable reviewDecision headRefOid"
     " mergeQueueEntry{state} reviews{totalCount} comments{totalCount}"
-    " reviewThreads(first:100){nodes{isResolved}}"
+    " reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}"
+    " nodes{isResolved comments{totalCount}}}"
     " commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}"
 )
+# ASCII digits only: str.isdigit() also takes "²", which int() then refuses.
+DIGITS = re.compile(r"[0-9]+")
 
 
 def wait_args(argv):
     """(repo, number, timeout) for a well formed `wait pr`, else None."""
-    if argv[:2] != ["wait", "pr"] or len(argv) < 3 or not argv[2].isdigit():
+    if argv[:2] != ["wait", "pr"] or len(argv) < 3 or not DIGITS.fullmatch(argv[2]):
         return None
     repo, timeout, i = None, WAIT_CAP, 3
     while i < len(argv):
@@ -357,7 +366,7 @@ def wait_args(argv):
             return None
         if flag in REPO_FLAGS and repo is None:
             repo = value
-        elif flag == "--timeout" and value.isdigit() and int(value) > 0:
+        elif flag == "--timeout" and DIGITS.fullmatch(value) and int(value) > 0:
             timeout = min(int(value), WAIT_CAP)
         else:
             return None
@@ -367,22 +376,36 @@ def wait_args(argv):
     return repo, int(argv[2]), timeout
 
 
+def read_pr(repo, number, after):
+    """One page of the wait query: the pull request, with its review threads
+    from the cursor `after` (None for the first page)."""
+    owner, name = repo.split("/")
+    cursor = ["-F", "after=null"] if after is None else ["-f", f"after={after}"]
+    p = subprocess.run(
+        [
+            "gh", "api", "graphql", "-f", f"query={WAIT_QUERY}", "-f", f"owner={owner}",
+            "-f", f"name={name}", "-F", f"number={number}", *cursor,
+        ],
+        capture_output=True, text=True, timeout=WAIT_READ_TIMEOUT,
+    )
+    return json.loads(p.stdout)["data"]["repository"]["pullRequest"]
+
+
 def pr_snapshot(repo, number):
     """What `wait` compares: the pull request's state, as a flat dict, or None
     when GitHub could not be read this time."""
-    owner, name = repo.split("/")
+    threads, after = [], None
     try:
-        p = subprocess.run(
-            [
-                "gh", "api", "graphql", "-f", f"query={WAIT_QUERY}", "-f", f"owner={owner}",
-                "-f", f"name={name}", "-F", f"number={number}",
-            ],
-            capture_output=True, text=True, timeout=60,
-        )
-        pr = json.loads(p.stdout)["data"]["repository"]["pullRequest"]
+        for _ in range(WAIT_PAGES):
+            pr = read_pr(repo, number, after)
+            if not pr:
+                return None
+            page = pr["reviewThreads"]
+            threads += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            after = page["pageInfo"]["endCursor"]
     except (subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError):
-        return None
-    if not pr:
         return None
     commits = pr["commits"]["nodes"]
     rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
@@ -396,18 +419,21 @@ def pr_snapshot(repo, number):
         "checks": (rollup or {}).get("state"),
         "reviews": pr["reviews"]["totalCount"],
         "comments": pr["comments"]["totalCount"],
-        "open_threads": sum(not t["isResolved"] for t in pr["reviewThreads"]["nodes"]),
+        "open_threads": sum(not t["isResolved"] for t in threads),
+        # A reply on a thread that stays open changes nothing above.
+        "thread_comments": sum(t["comments"]["totalCount"] for t in threads),
     }
 
 
 def wait_pr(repo, number, timeout, sleep=time.sleep, clock=time.monotonic):
     """The reply to `wait pr`: rc 0 and what changed as soon as something
     does, rc 124 with the state unchanged at the timeout, rc 1 when the pull
-    request cannot be read at all."""
+    request cannot be read at all. The first look counts against the timeout,
+    so the whole wait is the timeout plus at most the one last look."""
+    deadline = clock() + timeout
     first = pr_snapshot(repo, number)
     if first is None:
         return {"rc": 1, "out": "", "err": f"gh-broker: cannot read {repo}#{number}\n"}
-    deadline = clock() + timeout
     while (left := deadline - clock()) > 0:
         sleep(min(WAIT_POLL, left))
         now = pr_snapshot(repo, number)
