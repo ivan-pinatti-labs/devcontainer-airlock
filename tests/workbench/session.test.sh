@@ -194,6 +194,23 @@ unset WORKBENCH_VOICE
 # list and prune
 run "${wb}" session names
 check "names lists the sessions" 0 out "${s}"
+run "${wb}" session names --recent
+check "--recent, those used lately" 0 out "${s}"
+touch -d '10 days ago' "${sessions}/${s}/session"
+run "${wb}" session names --recent
+refute "not one left for longer" "${s}"
+assert "so it is not listed" sh -c "! grep -qx '${s}' '${__scratch}/out'"
+WORKBENCH_RECENT_DAYS=30 run "${wb}" session names --recent
+check "WORKBENCH_RECENT_DAYS widens it" 0 out "${s}"
+WORKBENCH_RECENT_DAYS=soon run "${wb}" session names --recent
+check "in whole days" 1 err "workbench: WORKBENCH_RECENT_DAYS is 'soon'; use a whole number of days"
+rule 'ps --filter label=workbench.session *' "printf '%s\n' ${s} ghost ''"
+run "${wb}" session names --running
+check "--running, those whose workbench runs" 0 out "${s}"
+assert "only sessions with a record" sh -c "! grep -qx ghost '${__scratch}/out'"
+unrule
+run "${wb}" session names --all
+check "nothing else" 1 err "workbench: host/workbench session names [--running|--recent]"
 run "${wb}" session list
 check "list says each session's agent and state" 0 out "${s}"
 assert "with a header" grep -qE '^SESSION +AGENT +STATE +WORKSPACE$' "${__scratch}/out"

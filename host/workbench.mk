@@ -41,7 +41,8 @@ workbench-help:
 		'  claude-plain                Claude Code with neither voice nor remote control.' \
 		'  codex                       A new Codex session, here.' \
 		'  sessions                    Every session: running or stopped, and its clones and branches.' \
-		'  attach-<session>            Resume a session (shell-, stop-, prune- the same way).' \
+		'  attach-<session>            Resume a running or recent session (shell-, stop- for running ones).' \
+		'  session-attach S=<name>     Any session by name (session-shell, -stop, -prune the same way).' \
 		'  prune                       Remove stopped sessions with nothing left only in them.' \
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
@@ -114,19 +115,41 @@ workbench-pull:
 
 # Sessions (docs/SESSIONS.md): each `make claude` or `make codex` is one,
 # with a random name. These act on one by name, and Tab lists the names.
-WORKBENCH_SESSIONS := $(shell $(WORKBENCH) session names 2>/dev/null)
-define workbench_session
-.PHONY: attach-$(1) shell-$(1) stop-$(1) prune-$(1)
+# Targets named after a session, so Tab completes the name, only for the
+# sessions in use: attach- for the running ones and those used in the last
+# few days (WORKBENCH_RECENT_DAYS, default 3), shell- and stop- for the
+# running ones. Any session at all goes by name instead: make session-attach
+# S=<name>, and session-shell, session-stop and session-prune the same way
+# (make sessions lists them).
+WORKBENCH_RUNNING := $(shell $(WORKBENCH) session names --running 2>/dev/null)
+WORKBENCH_RECENT := $(shell $(WORKBENCH) session names --recent 2>/dev/null)
+define workbench_attach
+.PHONY: attach-$(1)
 attach-$(1):
 	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session attach $(1) $$(if $$(filter 1,$$(REMOTE)),--remote)
+endef
+define workbench_running
+.PHONY: shell-$(1) stop-$(1)
 shell-$(1):
 	@$$(WORKBENCH) session shell $(1)
 stop-$(1):
 	@$$(WORKBENCH) session stop $(1)
-prune-$(1):
-	@$$(WORKBENCH) session prune $(1)
 endef
-$(foreach s,$(WORKBENCH_SESSIONS),$(eval $(call workbench_session,$(s))))
+$(foreach s,$(sort $(WORKBENCH_RUNNING) $(WORKBENCH_RECENT)),$(eval $(call workbench_attach,$(s))))
+$(foreach s,$(WORKBENCH_RUNNING),$(eval $(call workbench_running,$(s))))
+
+S ?=
+export S
+WORKBENCH_S = $(if $(S),"$$S",$(error which session? S=<name>; make sessions lists them))
+.PHONY: session-attach session-shell session-stop session-prune
+session-attach:
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session attach $(WORKBENCH_S) $(if $(filter 1,$(REMOTE)),--remote)
+session-shell:
+	@$(WORKBENCH) session shell $(WORKBENCH_S)
+session-stop:
+	@$(WORKBENCH) session stop $(WORKBENCH_S)
+session-prune:
+	@$(WORKBENCH) session prune $(WORKBENCH_S)
 
 sessions:
 	@$(WORKBENCH) session list
