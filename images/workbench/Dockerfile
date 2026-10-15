@@ -76,7 +76,7 @@ FROM ${BASE_IMAGE} AS agent-policy
 # hadolint ignore=DL3002
 USER 0:0
 # renovate: datasource=github-tags depName=ivan-pinatti-labs/agent-policy
-ARG AGENT_POLICY_REF=v0.6.12@4047118981121c05499c00f867cdd0756a80aed0
+ARG AGENT_POLICY_REF=v0.8.0@17f7c648b0b64a2de6117a2731c30f06fcd3df45
 COPY claude/managed-settings.json /tmp/managed-settings.json
 COPY agent-policy/ /tmp/overlay/
 # The overlay's rule files join agent-policy's own before the render (which
@@ -91,7 +91,9 @@ COPY agent-policy/ /tmp/overlay/
 # sandbox path lists merged in (credentials never readable, PATH and startup
 # folders never writable). The rest of its sandbox file stays out: the
 # workbench's short list of commands that run outside the sandbox is
-# deliberate.
+# deliberate. That is the hardened level; the assisted and unattended levels'
+# drop-in and allow file (agent-policy's modes) are kept beside it, for
+# host/workbench to mount over it in a session of that level (docs/MODES.md).
 RUN set -eu; \
   version="${AGENT_POLICY_REF%@*}"; commit="${AGENT_POLICY_REF#*@}"; \
   git clone --quiet --depth 1 --branch "${version}" \
@@ -105,6 +107,13 @@ RUN set -eu; \
   done; \
   python3 /src/tools/render.py --policy /src/policy --out /tmp/dist \
     --libexec /usr/local/libexec/agent-policy --no-scratch; \
+  for level in assisted unattended; do \
+    python3 /src/tools/render.py --policy /src/policy --out "/tmp/dist-${level}" \
+      --libexec /usr/local/libexec/agent-policy --no-scratch --mode "${level}"; \
+    mkdir -p "/out/levels/${level}"; \
+    cp "/tmp/dist-${level}/claude/50-agent-policy.json" "/tmp/dist-${level}/claude/guard-allow.json" \
+      "/out/levels/${level}/"; \
+  done; \
   mkdir -p /out/lib; \
   cp /src/hooks/guard /out/; \
   cp -r /src/lib/agent_policy /out/lib/; \
@@ -245,14 +254,19 @@ COPY --from=agent-policy /out/managed-settings.json /etc/claude-code/
 COPY --from=agent-policy /out/50-agent-policy.json /etc/claude-code/managed-settings.d/
 COPY --from=agent-policy /out/guard /out/guard-allow.json /usr/local/libexec/agent-policy/
 COPY --from=agent-policy /out/lib/ /usr/local/libexec/agent-policy/lib/
-# The probe runs the hook exactly as the drop-in names it, so a file the hook
-# needs and the image lacks fails the build: an allow file it cannot read
-# would make the guard allow nothing, and every `git -C` command would ask.
+COPY --from=agent-policy /out/levels/ /usr/local/share/workbench/levels/
+# The probe runs each level's hook exactly as its drop-in names it, so a file
+# the hook needs and the image lacks fails the build: an allow file it cannot
+# read would make the guard allow nothing, and every `git -C` command would
+# ask. Unattended also has to deny what it cannot ask about.
 RUN chmod 0755 /usr/local/libexec/agent-policy/guard \
-  && hook="$(jq -r '.hooks.PreToolUse[].hooks[].command' /etc/claude-code/managed-settings.d/50-agent-policy.json)" \
   && printf '{"tool_name":"Bash","tool_input":{"command":"git -C /tmp status"},"cwd":"/"}' > /tmp/guard-probe.json \
-  && sh -c "${hook}" < /tmp/guard-probe.json > /tmp/guard-probe.out \
-  && grep -q '"permissionDecision": *"allow"' /tmp/guard-probe.out \
+  && for settings in /etc/claude-code/managed-settings.d/50-agent-policy.json /usr/local/share/workbench/levels/*/50-agent-policy.json; do \
+    hook="$(jq -r '.hooks.PreToolUse[].hooks[].command' "${settings}")" \
+    && sh -c "${hook}" < /tmp/guard-probe.json > /tmp/guard-probe.out \
+    && grep -q '"permissionDecision": *"allow"' /tmp/guard-probe.out || exit 1; \
+  done \
+  && jq -e '.permissions.ask == []' /usr/local/share/workbench/levels/unattended/50-agent-policy.json >/dev/null \
   && rm /tmp/guard-probe.json /tmp/guard-probe.out
 COPY --from=extensions /opt/vscode-extensions-claude /opt/vscode-extensions
 COPY vscode/claude-settings.json /tmp/agent-settings.json

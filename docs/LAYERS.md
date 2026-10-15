@@ -94,10 +94,12 @@ key's public half is added to your GitHub account as an authentication key.
 Each day, from the repository you are working on:
 
 ```shell
-make unlock              # type the key's passphrase; lasts 8 hours
+make unlock              # type the key's passphrase; lasts 12 hours (HOURS=, up to 48)
 make claude              # a new Claude Code session over the folder you are in,
                          # with voice and remote control (REMOTE=0: without)
 make claude-plain        # neither voice nor remote control
+make claude-assisted     # asks less about reads, with you there (docs/MODES.md)
+make claude-unattended   # nobody to ask, for 8 to 48 hours (docs/MODES.md)
 make codex               # a new Codex session (no voice)
 make sessions            # every session, running or stopped, and its branches
 make claude resume=<id>  # continue that conversation in a new session
@@ -182,7 +184,9 @@ sessions started on the host, and the other way round.
 one agent run with a workbench, an internal network and an L2 engine of its
 own, named at random (`brave-otter`). Sessions run side by side, in any mix
 of agents and accounts, and cannot reach each other's processes, files or
-containers. A session reads the workspace's clones read only and writes
+containers. Each runs at a level, hardened unless `make claude-assisted` or
+`make claude-unattended` started it: how far the agent goes without asking
+you, never what it can reach (docs/MODES.md). A session reads the workspace's clones read only and writes
 only in its own folder in each repository, `<repo>/.claude/worktrees/<name>`.
 Other sessions' folders are inside the read only clone, so a session can
 read them but not write them. The workspace folder's own `.claude` is a
@@ -637,7 +641,8 @@ enqueue) is a command of its own that the guard and the allowlist see.
 login without ever handing over the key. The connection runs to
 `ssh.github.com` on port 443 through the egress proxy, and GitHub's host key
 is checked against keys fetched from GitHub's own API. `host/workbench
-unlock` adds the key for eight hours at a time.
+unlock` adds the key for twelve hours at a time, or as many as you give it
+up to 48 (an unattended session unlocks it for its own length).
 
 ## Network
 

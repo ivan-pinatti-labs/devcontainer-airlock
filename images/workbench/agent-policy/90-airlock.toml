@@ -22,6 +22,9 @@ prefix = [["l2", "--image"]]
 [[rule]]
 severity = "moderate"
 reason = "Stop a container: in the workbench, the session's own L2 containers; ask first, beyond agent-policy's allow"
+# Unattended (docs/MODES.md): cleaning up the containers a run made, as
+# agent-policy allows removing them there.
+modes = { unattended = "low" }
 prefix = [
   ["podman", "stop"],
   ["podman", "container", "stop"],
