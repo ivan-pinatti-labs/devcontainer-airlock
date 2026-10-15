@@ -41,6 +41,10 @@ devcontainer-airlock has the full picture):
   are green (that starts the CodeRabbit review). Answer the review, then
   enqueue the merge yourself with `gh pr merge --auto` once it is approved
   and every thread is resolved; never `--admin`, which skips the queue.
+- To wait for a pull request between those steps (checks, a review, the
+  approval, the queue), run `gh wait pr N -R owner/repo` in the background:
+  it returns when anything changes, or after at most 65 minutes, and says
+  what changed. A polling script of your own cannot reach the broker.
 - Network access leaves through an egress proxy that allows only the egress
   sets this repository lists in `.devcontainer/egress-sets`. A "403
   Forbidden" from the proxy means the host is in none of them; say so, and

@@ -521,3 +521,248 @@ def test_main_listens_and_serves_each_connection(broker, monkeypatch, tmp_path, 
     assert started == [("conn",)]
     assert sock.read_text() == ""
     assert oct(sock.stat().st_mode & 0o777) == "0o660"
+
+
+# gh wait pr: the broker's own bounded wait on a pull request (#145).
+
+WAIT_CASES = [
+    (True, "wait pr 7 -R example-org/x"),
+    (True, "wait pr 7 --repo example-org/x --timeout 120"),
+    (True, "wait pr 7 -R Example-Org/x --timeout 99999"),
+    (False, "wait pr 7"),
+    (False, "wait pr x -R example-org/x"),
+    (False, "wait pr 7 -R someone-else/x"),
+    (False, "wait pr 7 -R example-org/.."),
+    (False, "wait pr 7 -R example-org/x -R someone-else/y"),
+    (False, "wait pr 7 -R example-org/x --timeout 0"),
+    (False, "wait pr 7 -R example-org/x --timeout soon"),
+    (False, "wait pr 1234567890 -R example-org/x"),
+    (False, "wait pr 7 -R example-org/x --timeout 1234567890"),
+    (False, "wait pr \u00b2 -R example-org/x"),
+    (False, "wait pr 7 -R example-org/x --timeout \u00b2"),
+    (False, "wait pr 7 -R example-org/x --timeout"),
+    (False, "wait pr 7 -R example-org/x --interval 1"),
+    (False, "wait issue 7 -R example-org/x"),
+]
+
+
+@pytest.mark.parametrize(("expected", "command"), WAIT_CASES)
+def test_wait_is_held_to_its_own_form_and_the_owners(broker, expected, command):
+    assert broker.allowed(command.split()) is expected
+
+
+def test_wait_says_how_to_call_it(broker):
+    assert "usage: gh wait pr NUMBER" in broker.refusal(["wait", "pr", "7"])
+
+
+def test_wait_never_waits_past_the_cap(broker):
+    argv = ["wait", "pr", "7", "-R", "example-org/x", "--timeout", "99999"]
+    assert broker.wait_args(argv) == ("example-org/x", 7, broker.WAIT_CAP)
+    assert broker.wait_args(argv[:5]) == ("example-org/x", 7, broker.WAIT_CAP)
+
+
+def threads(*resolved, next_page=None, comments=1):
+    """A page of review threads, resolved or not, each with `comments`
+    comments; `next_page` is the cursor of a page after it."""
+    return {
+        "pageInfo": {"hasNextPage": next_page is not None, "endCursor": next_page},
+        "nodes": [
+            {"isResolved": r, "comments": {"totalCount": comments}} for r in resolved
+        ],
+    }
+
+
+def pr_answer(**fields):
+    """What `gh api graphql` prints for the wait query."""
+    pr = {
+        "state": "OPEN",
+        "isDraft": False,
+        "mergeable": "MERGEABLE",
+        "reviewDecision": None,
+        "headRefOid": "abc",
+        "mergeQueueEntry": None,
+        "reviews": {"totalCount": 0},
+        "comments": {"totalCount": 0},
+        "reviewThreads": threads(True),
+        "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING"}}}]},
+    }
+    pr.update(fields)
+    return json.dumps({"data": {"repository": {"pullRequest": pr}}})
+
+
+def scripted_gh(answers, asked):
+    """subprocess.run answering each gh call with the next of `answers`: a
+    string for its stdout, (exit status, stdout), or an exception to raise."""
+
+    def run(argv, **kwargs):
+        asked.append(argv)
+        answer = answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        rc, out = answer if isinstance(answer, tuple) else (0, answer)
+        return subprocess.CompletedProcess(argv, rc, out, "")
+
+    return run
+
+
+class Clock:
+    """time.monotonic and time.sleep, with sleeping moving the time on."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.slept = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def test_wait_answers_when_the_pull_request_changes(broker, monkeypatch):
+    asked = []
+    answers = [
+        pr_answer(),
+        pr_answer(),
+        subprocess.TimeoutExpired("gh", 60),
+        pr_answer(reviewDecision="APPROVED", reviewThreads=threads(False)),
+    ]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
+    clock = Clock()
+    reply = broker.wait_pr(
+        "example-org/x", 7, 3900, sleep=clock.sleep, clock=clock.monotonic
+    )
+    assert reply["rc"] == 0
+    out = json.loads(reply["out"])
+    assert out["changed"] == ["open_threads", "review"]
+    assert out["was"] == {"open_threads": 0, "review": None}
+    assert out["now"]["review"] == "APPROVED"
+    assert clock.slept == [60, 60, 60]
+    assert asked[0][:3] == ["gh", "api", "graphql"]
+    assert (
+        "owner=example-org" in asked[0]
+        and "name=x" in asked[0]
+        and "number=7" in asked[0]
+        and "after=null" in asked[0]
+    )
+
+
+def test_wait_sees_a_reply_on_a_thread_that_stays_open(broker, monkeypatch):
+    answers = [
+        pr_answer(reviewThreads=threads(False)),
+        pr_answer(reviewThreads=threads(False, comments=2)),
+    ]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, []))
+    clock = Clock()
+    reply = broker.wait_pr(
+        "example-org/x", 7, 3900, sleep=clock.sleep, clock=clock.monotonic
+    )
+    assert json.loads(reply["out"])["changed"] == ["thread_comments"]
+
+
+def test_review_threads_are_read_past_the_first_page(broker, monkeypatch):
+    asked = []
+    answers = [
+        pr_answer(reviewThreads=threads(True, next_page="c1")),
+        pr_answer(reviewThreads=threads(False, False)),
+    ]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
+    snapshot = broker.pr_snapshot("example-org/x", 7)
+    assert snapshot["open_threads"] == 2
+    assert snapshot["thread_comments"] == 3
+    assert "after=c1" in asked[1]
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [
+        # gh failed, though what it printed parses.
+        [(1, pr_answer())],
+        # More pages, by a cursor that does not move, or by none at all.
+        [
+            pr_answer(reviewThreads=threads(True, next_page="c1")),
+            pr_answer(reviewThreads=threads(True, next_page="c1")),
+        ],
+        [
+            pr_answer(
+                reviewThreads={
+                    "pageInfo": {"hasNextPage": True, "endCursor": None},
+                    "nodes": [],
+                }
+            )
+        ],
+        # A thread that is not there.
+        [
+            pr_answer(
+                reviewThreads={
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    "nodes": [None],
+                }
+            )
+        ],
+    ],
+)
+def test_an_answer_that_is_not_a_whole_reading_is_none(broker, monkeypatch, answers):
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, []))
+    assert broker.pr_snapshot("example-org/x", 7) is None
+
+
+def test_review_threads_stop_at_the_page_limit(broker, monkeypatch):
+    monkeypatch.setattr(broker, "WAIT_PAGES", 1)
+    answers = [pr_answer(reviewThreads=threads(False, next_page="c1"))]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, []))
+    assert broker.pr_snapshot("example-org/x", 7)["open_threads"] == 1
+
+
+def test_wait_gives_up_at_its_timeout(broker, monkeypatch):
+    answers = [pr_answer()] * 4
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(list(answers), []))
+    clock = Clock()
+    reply = broker.wait_pr(
+        "example-org/x", 7, 150, sleep=clock.sleep, clock=clock.monotonic
+    )
+    assert reply["rc"] == 124
+    assert json.loads(reply["out"])["changed"] == []
+    assert "unchanged after 150s" in reply["err"]
+    assert clock.slept == [60, 60, 30]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "not json",
+        json.dumps({"data": {"repository": {"pullRequest": None}}}),
+        json.dumps({"errors": [{"message": "Could not resolve"}]}),
+        subprocess.TimeoutExpired("gh", 60),
+    ],
+)
+def test_wait_on_a_pull_request_it_cannot_read(broker, monkeypatch, answer):
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh([answer], []))
+    reply = broker.wait_pr("example-org/x", 7, 60)
+    assert reply == {
+        "rc": 1,
+        "out": "",
+        "err": "gh-broker: cannot read example-org/x#7\n",
+    }
+
+
+def test_a_pull_request_with_no_commits_has_no_check_state(broker, monkeypatch):
+    monkeypatch.setattr(
+        broker.subprocess, "run", scripted_gh([pr_answer(commits={"nodes": []})], [])
+    )
+    assert broker.pr_snapshot("example-org/x", 7)["checks"] is None
+
+
+def test_serve_runs_a_wait_itself(broker, monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(
+        broker,
+        "wait_pr",
+        lambda *args: seen.append(args) or {"rc": 0, "out": "{}", "err": ""},
+    )
+    request = {"argv": ["wait", "pr", "7", "-R", "example-org/x", "--timeout", "60"]}
+    reply = serve_request(broker, json.dumps(request).encode() + b"\n")
+    assert reply == {"rc": 0, "out": "{}", "err": ""}
+    assert seen == [("example-org/x", 7, 60)]
+    assert capsys.readouterr().out.startswith("RUN")

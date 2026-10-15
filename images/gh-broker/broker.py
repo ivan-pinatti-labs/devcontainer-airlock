@@ -13,6 +13,9 @@ outside the allowed owners (-R, --owner, a URL, a search qualifier), flags that 
 the allowlist names (resolving a review thread). The exception: the read
 only commands under public_reads, and `gh api` GETs under repos/, may name a
 repository outside the owners when GitHub says it is public.
+
+One command is the broker's own rather than gh's: `wait pr`, a bounded wait
+on a pull request's state (see wait_pr below).
 """
 import json
 import os
@@ -319,6 +322,140 @@ def merge_ok(argv):
     return not any(a == "--admin" or a.startswith("--admin=") for a in argv)
 
 
+# `gh wait pr N -R owner/repo [--timeout SECONDS]`: the broker's own command,
+# not gh's. It reads the pull request once a minute and answers as soon as
+# anything an agent acts on has changed (state, draft, mergeable, the review
+# decision, a new push, the merge queue, the overall check result, the count
+# of reviews, comments or unresolved threads), or when the timeout passes.
+# An agent runs it in the background and is told when it returns, so it waits
+# for the event itself instead of guessing when to look, and every step it
+# takes afterwards is still a command of its own (#145). Read only, and held
+# to the allowed owners like any other command.
+BROKER_COMMANDS = frozenset(ALLOW.get("broker_commands", []))
+# The longest wait, in seconds: one CodeRabbit review slot (about an hour)
+# and a margin. A caller that asks for longer gets this, so no wait is
+# unbounded. Review threads are read 100 at a time, at most WAIT_PAGES pages
+# (a thousand threads) of WAIT_READ_TIMEOUT seconds each, so one look at the
+# pull request takes 300 seconds at most, and a whole wait WAIT_CAP plus one
+# look. The workbench gh allows that and a margin for the reply.
+WAIT_CAP = 3900
+WAIT_POLL = 60
+WAIT_PAGES = 10
+WAIT_READ_TIMEOUT = 30
+WAIT_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!,$after:String){"
+    "repository(owner:$owner,name:$name){"
+    "pullRequest(number:$number){state isDraft mergeable reviewDecision headRefOid"
+    " mergeQueueEntry{state} reviews{totalCount} comments{totalCount}"
+    " reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor}"
+    " nodes{isResolved comments{totalCount}}}"
+    " commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}"
+)
+# ASCII digits only: str.isdigit() also takes "²", which int() then refuses.
+# Nine at most, so int() never meets a string past Python's digit limit.
+DIGITS = re.compile(r"[0-9]{1,9}")
+
+
+def wait_args(argv):
+    """(repo, number, timeout) for a well formed `wait pr`, else None."""
+    if argv[:2] != ["wait", "pr"] or len(argv) < 3 or not DIGITS.fullmatch(argv[2]):
+        return None
+    repo, timeout, i = None, WAIT_CAP, 3
+    while i < len(argv):
+        flag, value = argv[i], argv[i + 1] if i + 1 < len(argv) else None
+        if value is None:
+            return None
+        if flag in REPO_FLAGS and repo is None:
+            repo = value
+        elif flag == "--timeout" and DIGITS.fullmatch(value) and int(value) > 0:
+            timeout = min(int(value), WAIT_CAP)
+        else:
+            return None
+        i += 2
+    if repo is None or not plain_repo(repo) or not repo.lower().startswith(OWNERS):
+        return None
+    return repo, int(argv[2]), timeout
+
+
+def read_pr(repo, number, after):
+    """One page of the wait query: the pull request, with its review threads
+    from the cursor `after` (None for the first page)."""
+    owner, name = repo.split("/")
+    cursor = ["-F", "after=null"] if after is None else ["-f", f"after={after}"]
+    p = subprocess.run(
+        [
+            "gh", "api", "graphql", "-f", f"query={WAIT_QUERY}", "-f", f"owner={owner}",
+            "-f", f"name={name}", "-F", f"number={number}", *cursor,
+        ],
+        capture_output=True, text=True, timeout=WAIT_READ_TIMEOUT,
+    )
+    # A failed call can still print partial data; it is not a reading.
+    if p.returncode != 0:
+        raise ValueError(p.stderr)
+    return json.loads(p.stdout)["data"]["repository"]["pullRequest"]
+
+
+def pr_snapshot(repo, number):
+    """What `wait` compares: the pull request's state, as a flat dict, or None
+    when GitHub could not be read this time, or answered with something that
+    is not a whole reading."""
+    threads, after = [], None
+    try:
+        for _ in range(WAIT_PAGES):
+            pr = read_pr(repo, number, after)
+            if not pr:
+                return None
+            page = pr["reviewThreads"]
+            threads += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            # A cursor that does not move would read the same page again.
+            if page["pageInfo"]["endCursor"] in (None, after):
+                return None
+            after = page["pageInfo"]["endCursor"]
+        commits = pr["commits"]["nodes"]
+        rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
+        return {
+            "state": pr["state"],
+            "draft": pr["isDraft"],
+            "mergeable": pr["mergeable"],
+            "review": pr["reviewDecision"],
+            "head": pr["headRefOid"],
+            "queue": (pr["mergeQueueEntry"] or {}).get("state"),
+            "checks": (rollup or {}).get("state"),
+            "reviews": pr["reviews"]["totalCount"],
+            "comments": pr["comments"]["totalCount"],
+            "open_threads": sum(not t["isResolved"] for t in threads),
+            # A reply on a thread that stays open changes nothing above.
+            "thread_comments": sum(t["comments"]["totalCount"] for t in threads),
+        }
+    except (subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def wait_pr(repo, number, timeout, sleep=time.sleep, clock=time.monotonic):
+    """The reply to `wait pr`: rc 0 and what changed as soon as something
+    does, rc 124 with the state unchanged at the timeout, rc 1 when the pull
+    request cannot be read at all. The first look counts against the timeout,
+    so the whole wait is the timeout plus at most the one last look."""
+    deadline = clock() + timeout
+    first = pr_snapshot(repo, number)
+    if first is None:
+        return {"rc": 1, "out": "", "err": f"gh-broker: cannot read {repo}#{number}\n"}
+    while (left := deadline - clock()) > 0:
+        sleep(min(WAIT_POLL, left))
+        now = pr_snapshot(repo, number)
+        if now is None:
+            continue
+        changed = sorted(k for k in now if now[k] != first[k])
+        if changed:
+            out = {"changed": changed, "was": {k: first[k] for k in changed}, "now": now}
+            return {"rc": 0, "out": json.dumps(out) + "\n", "err": ""}
+    out = {"changed": [], "now": first, "waited": timeout}
+    return {"rc": 124, "out": json.dumps(out) + "\n",
+            "err": f"gh-broker: {repo}#{number} unchanged after {timeout}s\n"}
+
+
 def allowed(argv):
     return refusal(argv) is None
 
@@ -328,6 +465,10 @@ def allowed(argv):
 def refusal(argv):
     if not argv:
         return "no command"
+    if " ".join(argv[:2]) in BROKER_COMMANDS:
+        return None if wait_args(argv) else (
+            "usage: gh wait pr NUMBER -R OWNER/REPO [--timeout SECONDS], on a"
+            f" repository under an allowed owner; at most {WAIT_CAP}s")
     if argv[0] == "api":
         return None if api_ok(argv) else (
             "this gh api call is not allowed: only reads, review comment replies"
@@ -363,6 +504,9 @@ def serve(conn):
             conn.sendall(json.dumps({"rc": 126, "out": "", "err": msg}).encode())
             return
         print("RUN", json.dumps(argv), "in", req.get("cwd"), flush=True)
+        if " ".join(argv[:2]) in BROKER_COMMANDS:
+            conn.sendall(json.dumps(wait_pr(*wait_args(argv))).encode())
+            return
         cwd = req.get("cwd")
         cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else "/"
         try:

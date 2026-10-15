@@ -73,10 +73,15 @@ def reads_stdin(argv):
 
 
 # The broker kills gh after 300 s; a reply that has not come some time after
-# that is not coming, so the call fails instead of waiting for ever.
+# that is not coming, so the call fails instead of waiting for ever. Its own
+# `gh wait pr` answers within WAIT_CAP (3900 s) plus one last look at the pull
+# request (300 s at most), and this leaves a minute more for the reply.
 TIMEOUT = 330
+WAIT_TIMEOUT = 4260
 
 argv, body = inline_body_file(sys.argv[1:])
+if argv[:2] == ["wait", "pr"]:
+    TIMEOUT = WAIT_TIMEOUT
 # Standard input is read only when the command takes it, and before the
 # broker is contacted. Read unconditionally, an input that never ends (a
 # pipe left open by whatever started this) blocked the call before it was

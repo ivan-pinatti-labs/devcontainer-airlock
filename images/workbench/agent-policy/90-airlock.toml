@@ -10,6 +10,11 @@
 # is a candidate to move there.
 
 [[rule]]
+severity = "read"
+reason = "Wait on a pull request's state: the gh broker's own read only command, which exists only in the workbench (docs/LAYERS.md, \"GitHub access\")"
+prefix = [["gh", "wait", "pr"]]
+
+[[rule]]
 severity = "moderate"
 reason = "Run L2 in an image of the agent's choosing instead of the repository's"
 prefix = [["l2", "--image"]]

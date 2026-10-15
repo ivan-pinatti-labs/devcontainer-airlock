@@ -606,6 +606,32 @@ a file named on the command line, since it would read it beside the token;
 the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the
 text as the body on stdin. A refusal says which rule it hit.
 
+**Waiting on a pull request.** Between those steps come long waits: a
+review slot, a test suite, the approval job, the merge queue. An agent in
+the workbench cannot poll for itself: a script it writes runs in L2, which
+has no broker, and a `gh` call inside a loop or a pipeline stays in the
+command sandbox, which cannot reach the broker's socket. Both are right,
+since the guard sees only `bash script.sh` and never what is inside it. So
+the broker has one command of its own, under `broker_commands`:
+
+```shell
+gh wait pr 147 -R ivan-pinatti-labs/devcontainer-airlock
+gh wait pr 147 -R ivan-pinatti-labs/devcontainer-airlock --timeout 600
+```
+
+It reads the pull request once a minute and returns as soon as anything an
+agent acts on changes (state, draft, mergeable, review decision, a new
+push, the merge queue, the overall check result, or the number of reviews,
+comments, unresolved threads or replies on review threads), printing what
+changed as JSON, with exit status 0. When nothing changes it returns at the
+timeout (`--timeout`, in seconds, 3900 by default and at most: one review
+slot and a margin), with exit status 124. Review threads are read a hundred
+at a time, up to a thousand. It is read
+only and held to `WORKBENCH_GH_OWNERS` like every other command. An agent
+runs it in the background and is told when it returns, so it wakes on the
+event rather than on a guess, and whatever it does next (mark ready, reply,
+enqueue) is a command of its own that the guard and the allowlist see.
+
 `git push` goes over ssh through the ssh-agent container, which signs the
 login without ever handing over the key. The connection runs to
 `ssh.github.com` on port 443 through the egress proxy, and GitHub's host key
