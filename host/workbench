@@ -1913,8 +1913,32 @@ session_read() {
   done <"${f}"
 }
 
+# The sessions' names, one a line: every session, or with --running those
+# whose workbench runs (one podman call for all), or with --recent those
+# started or attached in the last WORKBENCH_RECENT_DAYS days (default 3).
+# The make targets named after a session come only from the last two, so Tab
+# lists the ones in use, not every session ever kept (host/workbench.mk).
 session_names() {
-  local f
+  local f days="${WORKBENCH_RECENT_DAYS:-3}"
+  [ "$#" -le 1 ] || die "host/workbench session names [--running|--recent]"
+  case "${1:-}" in
+  --running)
+    podman ps --filter label=workbench.session --format '{{index .Labels "workbench.session"}}' 2>/dev/null |
+      while read -r f; do
+        if [ -n "${f}" ] && [ -f "$(session_dir "${f}")/session" ]; then echo "${f}"; fi
+      done | sort -u
+    return 0
+    ;;
+  --recent)
+    [[ "${days}" =~ ^[0-9]+$ ]] || die "WORKBENCH_RECENT_DAYS is '${days}'; use a whole number of days"
+    for f in "${SESSIONS}"/*/session; do
+      [ -n "$(find "${f}" -mtime "-${days}" 2>/dev/null)" ] && basename "$(dirname "${f}")"
+    done
+    return 0
+    ;;
+  '') ;;
+  *) die "host/workbench session names [--running|--recent]" ;;
+  esac
   for f in "${SESSIONS}"/*/session; do
     [ -f "${f}" ] && basename "$(dirname "${f}")"
   done
@@ -2112,6 +2136,8 @@ session_run() {
     # checks bypassed (docs/MODES.md).
     [ "${S_LEVEL}" != unattended ] || cmd+=(--permission-mode auto)
   fi
+  # Its record's time is when it was last used, for session names --recent.
+  touch "$(session_dir "${SESSION}")/session"
   echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS}$(level_note))"
   # Its terminal closing (a hangup) stops the session too, as the agent
   # exiting does, rather than leaving its containers running with no agent.
@@ -2227,6 +2253,8 @@ cmd_session_attach() {
   if running "$(wb_name "${S_WS}" "${S_AGENT}")"; then
     # Its agent still running in another terminal: a shell beside it.
     if podman exec "$(wb_name "${S_WS}" "${S_AGENT}")" pgrep -f "agent-clis/.*$(agent_of "${S_AGENT}")" >/dev/null 2>&1; then
+      # Used now, as much as a run is (session names --recent).
+      touch "$(session_dir "${SESSION}")/session"
       exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "$(wb_name "${S_WS}" "${S_AGENT}")" bash
     fi
     # Running with no agent (its terminal went away): the agent again.
@@ -2358,7 +2386,7 @@ cmd_session() {
   shell) cmd_session_shell "$@" ;;
   stop) cmd_session_stop "$@" ;;
   list | ls) cmd_session_list ;;
-  names) session_names ;;
+  names) session_names "$@" ;;
   prune) cmd_session_prune "$@" ;;
   *) die "host/workbench session start|attach|shell|stop|list|prune" ;;
   esac

@@ -282,6 +282,37 @@ unset WORKBENCH_VOICE
 # list and prune
 run "${wb}" session names
 check "names lists the sessions" 0 out "${s}"
+run "${wb}" session names --recent
+check "--recent, those used lately" 0 out "${s}"
+touch -d '10 days ago' "${sessions}/${s}/session"
+run "${wb}" session names --recent
+refute "not one left for longer" "${s}"
+assert "so it is not listed" sh -c "! grep -qx '${s}' '${__scratch}/out'"
+WORKBENCH_RECENT_DAYS=30 run "${wb}" session names --recent
+check "WORKBENCH_RECENT_DAYS widens it" 0 out "${s}"
+WORKBENCH_RECENT_DAYS=soon run "${wb}" session names --recent
+check "in whole days" 1 err "workbench: WORKBENCH_RECENT_DAYS is 'soon'; use a whole number of days"
+rule 'ps --filter label=workbench.session *' "printf '%s\n' ${s} ghost ''"
+run "${wb}" session names --running
+check "--running, those whose workbench runs" 0 out "${s}"
+assert "only sessions with a record" sh -c "! grep -qx ghost '${__scratch}/out'"
+unrule
+run "${wb}" session names --all
+check "nothing else" 1 err "workbench: host/workbench session names [--running|--recent]"
+run "${wb}" session names --recent --running
+check "and one filter at a time" 1 err "workbench: host/workbench session names [--running|--recent]"
+# Using an old session makes it recent again: a run of it, or a shell beside
+# its running agent.
+run "${wb}" session attach "${s}"
+run "${wb}" session names --recent
+check "a run of an old session makes it recent" 0 out "${s}"
+touch -d '10 days ago' "${sessions}/${s}/session"
+container "workbench-claude-s-${s}" running "workbench.session=${s}"
+run "${wb}" session attach "${s}"
+check "a shell beside its running agent" 0 calls "podman exec -it -e TERM -e COLORTERM -w ${app} workbench-claude-s-${s} bash"
+run "${wb}" session names --recent
+check "does too" 0 out "${s}"
+gone "workbench-claude-s-${s}"
 run "${wb}" session list
 check "list says each session's agent and state" 0 out "${s}"
 assert "with a header" grep -qE '^SESSION +AGENT +STATE +WORKSPACE$' "${__scratch}/out"

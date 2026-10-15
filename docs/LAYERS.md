@@ -103,7 +103,8 @@ make claude-unattended   # nobody to ask, for 8 to 48 hours (docs/MODES.md)
 make codex               # a new Codex session (no voice)
 make sessions            # every session, running or stopped, and its branches
 make claude resume=<id>  # continue that conversation in a new session
-make attach-<session>    # resume one; stop-, shell-, prune- the same way
+make attach-<session>    # resume a running or recent one; stop-, shell- for running ones
+make session-attach S=x  # any session by name; session-shell, -stop, -prune too
 make prune               # remove stopped sessions holding nothing of their own
 make claude-shell        # or codex-shell: a terminal in the workspace workbench
 ```

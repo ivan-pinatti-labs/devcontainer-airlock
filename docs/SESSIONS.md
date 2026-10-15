@@ -152,7 +152,9 @@ merges and the host rebuilds.
   be a conversation in this folder's history, one whose transcript records
   this folder or a folder under it, since another folder's is not mounted in
   the workbench.
-- **Attach**: `make attach-<session>` (tab completes) starts it again if it
+- **Attach**: `make attach-<session>` (tab completes, for a session running
+  or used in the last three days; `make session-attach S=<name>` for any
+  other, `WORKBENCH_RECENT_DAYS` sets the days) starts it again if it
   stopped and resumes the agent's conversation (`claude --resume`). That is
   the conversation the agent ended in, not necessarily the one it started
   with: `/resume` or `/clear` inside moves it to another, the workbench's
@@ -168,6 +170,7 @@ merges and the host rebuilds.
 - **List**: `make sessions`: name, agent and account, profile, running or
   stopped, its clones, their branches and PR state.
 - **Stop**: when the agent exits the container stops. `make stop-<session>`
+  (a running session; `make session-stop S=<name>` names one)
   stops it from outside. The last session to stop stops the shared services
   (#59), unless a workbench or L2 engine from `up` still runs. A session
   that starts with no workbench or L2 engine running restarts the shared
@@ -176,7 +179,7 @@ merges and the host rebuilds.
 - **Clean up**: `make prune` removes stopped sessions whose pull requests
   merged and whose clones hold nothing else: no uncommitted change, no
   commit that is not pushed. Anything else is listed and kept. `make
-  prune-<session>` for one, with the same checks.
+  session-prune S=<name>` for one, with the same checks.
 
 **Crashes.** Everything a session owns that matters is on the host's disk:
 
