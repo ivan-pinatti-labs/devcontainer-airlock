@@ -1581,11 +1581,30 @@ MAX_HOURS=48
 hours_ok() { [[ "$1" =~ ^[1-9][0-9]?$ ]] && [ "$1" -le "${MAX_HOURS}" ]; }
 
 # Add the key to the ssh-agent for $1 hours. Adding it again while it is
-# held sets the new lifetime, so this also renews it.
+# held replaces its lifetime, and every session shares the one agent, so the
+# lifetime is never shorter than an unattended session still due to run
+# needs: it lasts to the latest of now plus $1 hours and every session
+# record's `ends=` still ahead.
 unlock_key() {
   hours_ok "$1" || die "unlock: hours is a whole number from 1 to ${MAX_HOURS}, not '$1'"
   podman exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent \
-    ssh-add -t "$1h" /key/id
+    ssh-add -t "$(key_lifetime "$1")" /key/id
+}
+
+# The seconds unlock_key adds the key for (above).
+key_lifetime() {
+  local now latest f key value
+  now="$(date +%s)"
+  latest=$((now + $1 * 3600))
+  for f in "${SESSIONS}"/*/session; do
+    [ -f "${f}" ] || continue
+    while IFS='=' read -r key value || [ -n "${key}" ]; do
+      if [ "${key}" = ends ] && [[ "${value}" =~ ^[0-9]+$ ]] && [ "${value}" -gt "${latest}" ]; then
+        latest="${value}"
+      fi
+    done <"${f}"
+  done
+  echo $((latest - now))
 }
 
 # Run a command (default: a shell) in agent $1's workbench for workspace $2,
@@ -2008,8 +2027,8 @@ level_opts() {
     mv "${dir}/${f}.part" "${dir}/${f}"
   done
   printf '%s\n' \
-    -v "${dir}/50-agent-policy.json:/etc/claude-code/managed-settings.d/50-agent-policy.json:ro,Z" \
-    -v "${dir}/guard-allow.json:/usr/local/libexec/agent-policy/guard-allow.json:ro,Z"
+    -v "${dir}/50-agent-policy.json:/etc/claude-code/managed-settings.d/50-agent-policy.json:ro,z" \
+    -v "${dir}/guard-allow.json:/usr/local/libexec/agent-policy/guard-allow.json:ro,z"
 }
 
 # A Claude Code conversation id: a UUID and nothing else, since it reaches a
@@ -2098,7 +2117,9 @@ session_run() {
   # exiting does, rather than leaving its containers running with no agent.
   trap 'session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
   (
-    if [ "${bin}" = claude ] && voice_on; then
+    # Not unattended: nobody is there to talk, and the hour cap below has to
+    # hold the only way the agent is started.
+    if [ "${bin}" = claude ] && [ -z "${S_HOURS}" ] && voice_on; then
       voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
     fi
     # An unattended session ends after the hours it was given, when the key
@@ -2179,7 +2200,7 @@ cmd_session_start() {
   chmod 700 "${d}"
   printf 'agent=%s\nworkspace=%s\nprofile=default\nlevel=%s\nclaude_id=%s\ncreated=%s\n' \
     "${agent}" "${ws}" "${level}" "${resume:-$(cat /proc/sys/kernel/random/uuid)}" "$(date -u +%FT%TZ)" >"${d}/session"
-  [ -z "${hours}" ] || printf 'hours=%s\n' "${hours}" >>"${d}/session"
+  [ -z "${hours}" ] || printf 'hours=%s\nends=%s\n' "${hours}" "$(($(date +%s) + hours * 3600))" >>"${d}/session"
   session_read "${SESSION}"
   session_up "${S_WS}" "${S_AGENT}"
   # The key is unlocked afresh for exactly as long as the session runs, so a

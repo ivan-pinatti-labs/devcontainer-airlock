@@ -54,13 +54,17 @@ would only stall the run, so nothing asks:
 through with the arrow keys and Enter: 8, 12 (the default), 24 or 48 hours.
 `make claude-unattended HOURS=24` skips the menu. Then it:
 
-1. asks for the ssh key's passphrase once and unlocks the key for exactly
-   that long, so a push near the end does not find it locked;
+1. asks for the ssh key's passphrase once and unlocks the key for that
+   long, so a push near the end does not find it locked. Every session
+   shares one ssh-agent, and adding the key again replaces its lifetime, so
+   an unlock (this one or `make unlock`) never ends before an unattended
+   session still due to run does: each records when it ends (`ends=`);
 2. runs Claude Code in its own auto mode (`--permission-mode auto`), where
    its classifier judges what no rule names. Permission checks are never
    bypassed: `--dangerously-skip-permissions` is turned off for every
    level by the managed settings (`disableBypassPermissionsMode`);
-3. ends the session when the hours are up, as if the agent had exited.
+3. ends the session when the hours are up, as if the agent had exited. It
+   has no voice, whatever `WORKBENCH_VOICE` says: nobody is there to talk.
 
 `make attach-<session>` brings an unattended session back with the same
 cap. The key is not unlocked again; `make unlock HOURS=<n>` does that.
