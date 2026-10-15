@@ -536,6 +536,8 @@ WAIT_CASES = [
     (False, "wait pr 7 -R example-org/x -R someone-else/y"),
     (False, "wait pr 7 -R example-org/x --timeout 0"),
     (False, "wait pr 7 -R example-org/x --timeout soon"),
+    (False, "wait pr 1234567890 -R example-org/x"),
+    (False, "wait pr 7 -R example-org/x --timeout 1234567890"),
     (False, "wait pr \u00b2 -R example-org/x"),
     (False, "wait pr 7 -R example-org/x --timeout \u00b2"),
     (False, "wait pr 7 -R example-org/x --timeout"),
@@ -590,14 +592,15 @@ def pr_answer(**fields):
 
 def scripted_gh(answers, asked):
     """subprocess.run answering each gh call with the next of `answers`: a
-    string for its stdout, or an exception to raise."""
+    string for its stdout, (exit status, stdout), or an exception to raise."""
 
     def run(argv, **kwargs):
         asked.append(argv)
         answer = answers.pop(0)
         if isinstance(answer, BaseException):
             raise answer
-        return subprocess.CompletedProcess(argv, 0, answer, "")
+        rc, out = answer if isinstance(answer, tuple) else (0, answer)
+        return subprocess.CompletedProcess(argv, rc, out, "")
 
     return run
 
@@ -669,6 +672,40 @@ def test_review_threads_are_read_past_the_first_page(broker, monkeypatch):
     assert snapshot["open_threads"] == 2
     assert snapshot["thread_comments"] == 3
     assert "after=c1" in asked[1]
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [
+        # gh failed, though what it printed parses.
+        [(1, pr_answer())],
+        # More pages, by a cursor that does not move, or by none at all.
+        [
+            pr_answer(reviewThreads=threads(True, next_page="c1")),
+            pr_answer(reviewThreads=threads(True, next_page="c1")),
+        ],
+        [
+            pr_answer(
+                reviewThreads={
+                    "pageInfo": {"hasNextPage": True, "endCursor": None},
+                    "nodes": [],
+                }
+            )
+        ],
+        # A thread that is not there.
+        [
+            pr_answer(
+                reviewThreads={
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    "nodes": [None],
+                }
+            )
+        ],
+    ],
+)
+def test_an_answer_that_is_not_a_whole_reading_is_none(broker, monkeypatch, answers):
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, []))
+    assert broker.pr_snapshot("example-org/x", 7) is None
 
 
 def test_review_threads_stop_at_the_page_limit(broker, monkeypatch):

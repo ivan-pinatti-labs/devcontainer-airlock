@@ -352,7 +352,8 @@ WAIT_QUERY = (
     " commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}"
 )
 # ASCII digits only: str.isdigit() also takes "²", which int() then refuses.
-DIGITS = re.compile(r"[0-9]+")
+# Nine at most, so int() never meets a string past Python's digit limit.
+DIGITS = re.compile(r"[0-9]{1,9}")
 
 
 def wait_args(argv):
@@ -388,12 +389,16 @@ def read_pr(repo, number, after):
         ],
         capture_output=True, text=True, timeout=WAIT_READ_TIMEOUT,
     )
+    # A failed call can still print partial data; it is not a reading.
+    if p.returncode != 0:
+        raise ValueError(p.stderr)
     return json.loads(p.stdout)["data"]["repository"]["pullRequest"]
 
 
 def pr_snapshot(repo, number):
     """What `wait` compares: the pull request's state, as a flat dict, or None
-    when GitHub could not be read this time."""
+    when GitHub could not be read this time, or answered with something that
+    is not a whole reading."""
     threads, after = [], None
     try:
         for _ in range(WAIT_PAGES):
@@ -404,25 +409,28 @@ def pr_snapshot(repo, number):
             threads += page["nodes"]
             if not page["pageInfo"]["hasNextPage"]:
                 break
+            # A cursor that does not move would read the same page again.
+            if page["pageInfo"]["endCursor"] in (None, after):
+                return None
             after = page["pageInfo"]["endCursor"]
+        commits = pr["commits"]["nodes"]
+        rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
+        return {
+            "state": pr["state"],
+            "draft": pr["isDraft"],
+            "mergeable": pr["mergeable"],
+            "review": pr["reviewDecision"],
+            "head": pr["headRefOid"],
+            "queue": (pr["mergeQueueEntry"] or {}).get("state"),
+            "checks": (rollup or {}).get("state"),
+            "reviews": pr["reviews"]["totalCount"],
+            "comments": pr["comments"]["totalCount"],
+            "open_threads": sum(not t["isResolved"] for t in threads),
+            # A reply on a thread that stays open changes nothing above.
+            "thread_comments": sum(t["comments"]["totalCount"] for t in threads),
+        }
     except (subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError):
         return None
-    commits = pr["commits"]["nodes"]
-    rollup = commits[0]["commit"]["statusCheckRollup"] if commits else None
-    return {
-        "state": pr["state"],
-        "draft": pr["isDraft"],
-        "mergeable": pr["mergeable"],
-        "review": pr["reviewDecision"],
-        "head": pr["headRefOid"],
-        "queue": (pr["mergeQueueEntry"] or {}).get("state"),
-        "checks": (rollup or {}).get("state"),
-        "reviews": pr["reviews"]["totalCount"],
-        "comments": pr["comments"]["totalCount"],
-        "open_threads": sum(not t["isResolved"] for t in threads),
-        # A reply on a thread that stays open changes nothing above.
-        "thread_comments": sum(t["comments"]["totalCount"] for t in threads),
-    }
 
 
 def wait_pr(repo, number, timeout, sleep=time.sleep, clock=time.monotonic):
