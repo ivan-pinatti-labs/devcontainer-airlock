@@ -1920,6 +1920,7 @@ session_read() {
 # lists the ones in use, not every session ever kept (host/workbench.mk).
 session_names() {
   local f days="${WORKBENCH_RECENT_DAYS:-3}"
+  [ "$#" -le 1 ] || die "host/workbench session names [--running|--recent]"
   case "${1:-}" in
   --running)
     podman ps --filter label=workbench.session --format '{{index .Labels "workbench.session"}}' 2>/dev/null |
@@ -2252,6 +2253,8 @@ cmd_session_attach() {
   if running "$(wb_name "${S_WS}" "${S_AGENT}")"; then
     # Its agent still running in another terminal: a shell beside it.
     if podman exec "$(wb_name "${S_WS}" "${S_AGENT}")" pgrep -f "agent-clis/.*$(agent_of "${S_AGENT}")" >/dev/null 2>&1; then
+      # Used now, as much as a run is (session names --recent).
+      touch "$(session_dir "${SESSION}")/session"
       exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "$(wb_name "${S_WS}" "${S_AGENT}")" bash
     fi
     # Running with no agent (its terminal went away): the agent again.
