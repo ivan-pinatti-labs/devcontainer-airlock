@@ -245,15 +245,24 @@ refute "not when it is no terminal" "stty"
 # A hangup while the agent runs: its terminal went away. The agent runs
 # until the hangup has been sent, as a closing terminal ends it too.
 # shellcheck disable=SC2016 # expanded by the podman stub
-rule '*exec -it -e TERM*' 'touch "${PODMAN_STATE}/agent-up"; for _ in $(seq 1 100); do [ -e "${PODMAN_STATE}/hung-up" ] && exit 0; "${REAL_SLEEP}" 0.05; done; exit 1'
+rule '*exec -it -e TERM*' 'touch "${PODMAN_STATE}/agent-up"; for _ in $(seq 1 400); do [ -e "${PODMAN_STATE}/hung-up" ] && exit 0; "${REAL_SLEEP}" 0.05; done; exit 1'
 # timer_running, timer_gone: whether a cap timer's sleep is running.
-timer_running() { pgrep -fx "sleep 86280" >/dev/null; }
+# From /proc, in bash alone: kcov's image has no pgrep.
+timer_running() {
+  local c a=()
+  for c in /proc/[0-9]*/cmdline; do
+    mapfile -d '' -t a 2>/dev/null <"${c}" || continue
+    [ "${a[*]}" = "sleep 86280" ] && return 0
+  done
+  return 1
+}
 timer_gone() { ! timer_running; }
 : >"${STUB_LOG}"
 bash "${__repo}/${wb}" session attach "${u}" >"${__scratch}/out" 2>"${__scratch}/err" &
 hup=$!
-for _ in $(seq 1 100); do
-  [ -e "${PODMAN_STATE}/agent-up" ] && break
+# Both, as each starts on its own: slower under kcov, so a while.
+for _ in $(seq 1 400); do
+  [ -e "${PODMAN_STATE}/agent-up" ] && timer_running && break
   "${REAL_SLEEP}" 0.05
 done
 assert "an unattended agent runs with its cap's timer" timer_running

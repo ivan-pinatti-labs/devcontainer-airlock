@@ -38,6 +38,7 @@
     "checkmodule",
     "chroots",
     "clis",
+    "cmdline",
     "codeowners",
     "coderabbit",
     "coderabbitai",
