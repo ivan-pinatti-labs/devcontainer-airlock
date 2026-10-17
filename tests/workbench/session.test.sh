@@ -218,8 +218,9 @@ run "${wb}" session attach "${u}"
 check "attach caps it again" 0 calls "timeout --foreground --kill-after=60 24h"
 export WORKBENCH_VOICE=1
 run "${wb}" session attach "${u}"
-refute "and gives it no voice" "pactl"
-check "so the cap holds" 0 calls "timeout --foreground --kill-after=60 24h"
+check "with voice too, someone may still be there" 0 calls "pactl load-module module-pipe-sink"
+check "and the cap holds over the voice session" 0 calls \
+  "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC=/run/workbench-voice/mic-"
 unset WORKBENCH_VOICE
 expire
 rule 'exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add *' 'exit 1'

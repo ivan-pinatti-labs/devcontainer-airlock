@@ -1643,6 +1643,9 @@ cmd_shell() {
 # microphone routed into the pipe (voice_listen). Nothing in the workbench
 # can talk to the host's audio server. When voice cannot be set up, this
 # says why and returns, and the session starts without it.
+# What the agent's podman exec runs under: nothing, or an unattended
+# session's cap (session_run).
+AGENT_CAP=()
 voice_session() {
   local name="$1" dir ctl sink reader
   shift
@@ -1668,7 +1671,7 @@ voice_session() {
   voice_listen "$$" "${ctl}" &
   reader=$!
   trap 'kill "${reader}" 2>/dev/null; wait "${reader}" 2>/dev/null; pactl unload-module "${sink}" 2>/dev/null; rm -f "${dir}/mic-$$" "${ctl}"' EXIT
-  podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
+  "${AGENT_CAP[@]}" podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
     -e WORKBENCH_VOICE_CTL="/run/workbench-voice/ctl-$$" "$@" || exit
   exit $?
 }
@@ -2143,18 +2146,15 @@ session_run() {
   # exiting does, rather than leaving its containers running with no agent.
   trap 'session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
   (
-    # Not unattended: nobody is there to talk, and the hour cap below has to
-    # hold the only way the agent is started.
-    if [ "${bin}" = claude ] && [ -z "${S_HOURS}" ] && voice_on; then
+    # An unattended session ends after the hours it was given, when the key
+    # it unlocked runs out too: its agent runs under timeout, with voice or
+    # without (an unattended run you start at the keyboard has you there to
+    # talk until you leave).
+    [ -z "${S_HOURS}" ] || AGENT_CAP=(timeout --foreground --kill-after=60 "${S_HOURS}h")
+    if [ "${bin}" = claude ] && voice_on; then
       voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
     fi
-    # An unattended session ends after the hours it was given, when the key
-    # it unlocked runs out too.
-    if [ -n "${S_HOURS}" ]; then
-      exec timeout --foreground --kill-after=60 "${S_HOURS}h" \
-        podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
-    fi
-    exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
+    exec "${AGENT_CAP[@]}" podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
   ) || rc=$?
   session_settle "${name}"
   session_down "${S_WS}"
