@@ -63,7 +63,9 @@ through with the arrow keys and Enter: 8, 12 (the default), 24 or 48 hours.
    its classifier judges what no rule names. Permission checks are never
    bypassed: `--dangerously-skip-permissions` is turned off for every
    level by the managed settings (`disableBypassPermissionsMode`);
-3. ends the session when the hours are up, as if the agent had exited.
+3. ends the session when the hours are up, as if the agent had exited. Two
+   minutes before, the agent is asked to exit (SIGTERM), so it puts the
+   terminal back itself; the cap stops one that has not.
 
 It has voice, as `make claude` does (`VOICE=0`: without), since a run is
 often started with you still at the keyboard; the cap holds either way.

@@ -222,6 +222,59 @@ check "with voice too, someone may still be there" 0 calls "pactl load-module mo
 check "and the cap holds over the voice session" 0 calls \
   "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC=/run/workbench-voice/mic-"
 unset WORKBENCH_VOICE
+# Before the cap, the agent is asked to exit, so it puts the terminal back
+# itself: a sleep that returns at once, and an agent that runs until asked.
+stub sleep
+# shellcheck disable=SC2016 # expanded by the podman stub
+rule '*exec -it -e TERM*' 'for _ in $(seq 1 100); do grep -q "pkill -TERM" "${STUB_LOG}" && exit 0; "${REAL_SLEEP}" 0.05; done; exit 1'
+run "${wb}" session attach "${u}"
+check "two minutes before the cap" 0 calls "sleep 86280"
+check "the agent is asked to exit, with SIGTERM" 0 calls "podman exec workbench-claude-s-${u} pkill -TERM -f ^[^ ]*agent-clis/[^ ]*claude( |$)"
+unrule
+rm "${__scratch}/bin/sleep"
+run "${wb}" session attach "${u}"
+refute "an agent that exits first is not asked" "pkill"
+stub stty
+export WORKBENCH_TTY=1
+run "${wb}" session attach "${u}"
+check "the terminal is put back after the agent, whatever ended it" 0 calls "stty sane"
+check "every reporting mode the agent may have left on, off" 0 out $'\e[?1003l\e[?1006l\e[?1004l\e[?2004l'
+unset WORKBENCH_TTY
+rm "${__scratch}/bin/stty"
+run "${wb}" session attach "${u}"
+refute "not when it is no terminal" "stty"
+# A hangup while the agent runs: its terminal went away. The agent runs
+# until the hangup has been sent, as a closing terminal ends it too.
+# shellcheck disable=SC2016 # expanded by the podman stub
+rule '*exec -it -e TERM*' 'touch "${PODMAN_STATE}/agent-up"; for _ in $(seq 1 400); do [ -e "${PODMAN_STATE}/hung-up" ] && exit 0; "${REAL_SLEEP}" 0.05; done; exit 1'
+# timer_running, timer_gone: whether a cap timer's sleep is running.
+# From /proc, in bash alone: kcov's image has no pgrep.
+timer_running() {
+  local c a=()
+  for c in /proc/[0-9]*/cmdline; do
+    mapfile -d '' -t a 2>/dev/null <"${c}" || continue
+    [ "${a[*]}" = "sleep 86280" ] && return 0
+  done
+  return 1
+}
+timer_gone() { ! timer_running; }
+: >"${STUB_LOG}"
+bash "${__repo}/${wb}" session attach "${u}" >"${__scratch}/out" 2>"${__scratch}/err" &
+hup=$!
+# Both, as each starts on its own: slower under kcov, so a while.
+for _ in $(seq 1 400); do
+  [ -e "${PODMAN_STATE}/agent-up" ] && timer_running && break
+  "${REAL_SLEEP}" 0.05
+done
+assert "an unattended agent runs with its cap's timer" timer_running
+kill -HUP "${hup}"
+touch "${PODMAN_STATE}/hung-up"
+__status=0
+wait "${hup}" || __status=$?
+check "a hangup stops the session, exiting 129" 129 calls "podman ps -a --filter label=workbench.session=${u} --format {{.Names}}"
+assert "and stops the cap's timer with its sleep" timer_gone
+unrule
+rm -f "${PODMAN_STATE}/agent-up" "${PODMAN_STATE}/hung-up"
 expire
 rule 'exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add *' 'exit 1'
 run "${wb}" session start claude --level unattended --hours 8
