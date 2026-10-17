@@ -222,6 +222,9 @@ check "with voice too, someone may still be there" 0 calls "pactl load-module mo
 check "and the cap holds over the voice session" 0 calls \
   "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC=/run/workbench-voice/mic-"
 unset WORKBENCH_VOICE
+# The cap tests below swap lib.sh's short sleep for others; it comes back
+# after them.
+cp "${__scratch}/bin/sleep" "${__scratch}/short-sleep"
 # Before the cap, the agent is asked to exit, so it puts the terminal back
 # itself: a sleep that returns at once, and an agent that runs until asked.
 stub sleep
@@ -231,6 +234,8 @@ run "${wb}" session attach "${u}"
 check "two minutes before the cap" 0 calls "sleep 86280"
 check "the agent is asked to exit, with SIGTERM" 0 calls "podman exec workbench-claude-s-${u} pkill -TERM -f ^[^ ]*agent-clis/[^ ]*claude( |$)"
 unrule
+# The real sleep from here to the end of the cap tests: the cap's timer
+# must not go off while they run.
 rm "${__scratch}/bin/sleep"
 run "${wb}" session attach "${u}"
 refute "an agent that exits first is not asked" "pkill"
@@ -275,6 +280,28 @@ check "a hangup stops the session, exiting 129" 129 calls "podman ps -a --filter
 assert "and stops the cap's timer with its sleep" timer_gone
 unrule
 rm -f "${PODMAN_STATE}/agent-up" "${PODMAN_STATE}/hung-up"
+# The cap expiring: an agent that did not exit when asked. timeout has
+# signalled the podman exec client and exits 124, as coreutils' does.
+stub timeout 'exit 124'
+run "${wb}" session attach "${u}"
+check "the cap expiring ends the session as an exit does, with timeout's status" 124 calls \
+  "podman ps -a --filter label=workbench.session=${u} --format {{.Names}}"
+check "its workbench and engine go" 124 calls "podman rm -f -t 5 l2-engine-s-${u}"
+check "saying how to resume it" 124 out "workbench: session ${u} stopped; make attach-${u} resumes it"
+assert "and no cap timer is left" timer_gone
+# With voice, the microphone is the host's: its pipe goes too, and the
+# terminal is put back.
+export WORKBENCH_VOICE=1 WORKBENCH_TTY=1
+stub stty
+run "${wb}" session attach "${u}"
+check "with voice, the cap still ends it" 124 calls "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="
+check "and the microphone pipe is unloaded" 124 calls "pactl unload-module 101"
+check "the terminal put back" 124 calls "stty sane"
+check "and the session down" 124 calls "podman rm -f -t 5 l2-engine-s-${u}"
+unset WORKBENCH_VOICE WORKBENCH_TTY
+rm "${__scratch}/bin/stty"
+stub timeout 'shift 3; exec "$@"'
+cp "${__scratch}/short-sleep" "${__scratch}/bin/sleep"
 expire
 rule 'exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add *' 'exit 1'
 run "${wb}" session start claude --level unattended --hours 8
