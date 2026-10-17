@@ -63,8 +63,10 @@ through with the arrow keys and Enter: 8, 12 (the default), 24 or 48 hours.
    its classifier judges what no rule names. Permission checks are never
    bypassed: `--dangerously-skip-permissions` is turned off for every
    level by the managed settings (`disableBypassPermissionsMode`);
-3. ends the session when the hours are up, as if the agent had exited. It
-   has no voice, whatever `WORKBENCH_VOICE` says: nobody is there to talk.
+3. ends the session when the hours are up, as if the agent had exited. Two
+   minutes before, the agent is asked to exit (SIGTERM), so it puts the
+   terminal back itself; the cap stops one that has not. It has no voice,
+   whatever `WORKBENCH_VOICE` says: nobody is there to talk.
 
 `make attach-<session>` brings an unattended session back with the same
 cap. The key is not unlocked again; `make unlock HOURS=<n>` does that.

@@ -288,6 +288,7 @@
     "startswith",
     "statsig",
     "strerror",
+    "stty",
     "subarray",
     "subgid",
     "subgids",
