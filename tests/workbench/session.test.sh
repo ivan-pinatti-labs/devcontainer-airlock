@@ -218,8 +218,9 @@ run "${wb}" session attach "${u}"
 check "attach caps it again" 0 calls "timeout --foreground --kill-after=60 24h"
 export WORKBENCH_VOICE=1
 run "${wb}" session attach "${u}"
-refute "and gives it no voice" "pactl"
-check "so the cap holds" 0 calls "timeout --foreground --kill-after=60 24h"
+check "with voice too, someone may still be there" 0 calls "pactl load-module module-pipe-sink"
+check "and the cap holds over the voice session" 0 calls \
+  "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC=/run/workbench-voice/mic-"
 unset WORKBENCH_VOICE
 # Before the cap, the agent is asked to exit, so it puts the terminal back
 # itself: a sleep that returns at once, and an agent that runs until asked.

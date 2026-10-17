@@ -81,7 +81,7 @@ claude-$(1)-plain:
 claude-$(1)-assisted:
 	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --level assisted $$(if $$(filter 1,$$(REMOTE)),--remote) $$(RESUME_ARG)
 claude-$(1)-unattended:
-	@WORKBENCH_VOICE=0 $$(WORKBENCH) session start claude-$(1) --level unattended $$(if $$(filter 1,$$(REMOTE)),--remote) $$(HOURS_ARG) $$(RESUME_ARG)
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --level unattended $$(if $$(filter 1,$$(REMOTE)),--remote) $$(HOURS_ARG) $$(RESUME_ARG)
 endef
 $(foreach a,$(WORKBENCH_ACCOUNTS),$(eval $(call workbench_account,$(a))))
 
@@ -94,13 +94,14 @@ claude-remote:
 claude-plain:
 	@WORKBENCH_VOICE=0 $(WORKBENCH) session start claude $(RESUME_ARG)
 
-# The session levels (docs/MODES.md). Unattended has nobody to talk to, so no
-# voice; remote control stays, to look in from a phone.
+# The session levels (docs/MODES.md). Every one has voice (VOICE=0: without):
+# an unattended run is often started with you still at the keyboard. Remote
+# control stays, to look in from a phone.
 claude-assisted:
 	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --level assisted $(if $(filter 1,$(REMOTE)),--remote) $(RESUME_ARG)
 
 claude-unattended:
-	@WORKBENCH_VOICE=0 $(WORKBENCH) session start claude --level unattended $(if $(filter 1,$(REMOTE)),--remote) $(HOURS_ARG) $(RESUME_ARG)
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --level unattended $(if $(filter 1,$(REMOTE)),--remote) $(HOURS_ARG) $(RESUME_ARG)
 
 codex:
 	@$(WORKBENCH) session start codex

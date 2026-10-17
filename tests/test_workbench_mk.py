@@ -1,0 +1,68 @@
+"""Which Claude Code make targets in host/workbench.mk have voice.
+
+Every claude target passes VOICE through as WORKBENCH_VOICE (VOICE=0 turns
+it off for one run), the unattended ones included: a run is often started
+with someone still at the keyboard. Only the plain ones force it off. The
+recipes are read as text rather than run, because neither container `make
+coverage` runs the tests in has make, and a recipe is one line to check.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+WORKBENCH_MK = Path(__file__).resolve().parents[1] / "host/workbench.mk"
+
+# `name:` opening a rule (not `name :=` or `name ?=`), and the account
+# targets' `claude-$(1)-...` spelled as they are inside the define.
+RULE = re.compile(r"^(?P<target>[\w$().-]+):(?!=)")
+
+# What starts a session with voice when VOICE says so: `$(VOICE)`, or
+# `$$(VOICE)` inside the account define, which eval turns into `$(VOICE)`.
+VOICE_FROM_VOICE = re.compile(r"^@WORKBENCH_VOICE=\$\$?\(VOICE\) ")
+
+
+def recipes() -> dict[str, str]:
+    """Each rule's first recipe line, by target."""
+    found: dict[str, str] = {}
+    target = None
+    for line in WORKBENCH_MK.read_text().splitlines():
+        if match := RULE.match(line):
+            target = match["target"]
+        elif line.startswith("\t") and target is not None:
+            found.setdefault(target, line.strip())
+    return found
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "claude",
+        "claude-remote",
+        "claude-assisted",
+        "claude-unattended",
+        "claude-$(1)",
+        "claude-$(1)-remote",
+        "claude-$(1)-assisted",
+        "claude-$(1)-unattended",
+    ],
+)
+def test_voice_follows_voice(target: str) -> None:
+    recipe = recipes()[target]
+    assert VOICE_FROM_VOICE.match(recipe), recipe
+
+
+@pytest.mark.parametrize("target", ["claude-plain", "claude-$(1)-plain"])
+def test_plain_has_no_voice(target: str) -> None:
+    assert recipes()[target].startswith("@WORKBENCH_VOICE=0 ")
+
+
+def test_unattended_is_still_unattended() -> None:
+    """The voice change kept the level, the hours and the cap's arguments."""
+    for target in ("claude-unattended", "claude-$(1)-unattended"):
+        recipe = recipes()[target]
+        assert "--level unattended" in recipe
+        assert "HOURS_ARG)" in recipe
