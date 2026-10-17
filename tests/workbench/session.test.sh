@@ -242,6 +242,29 @@ unset WORKBENCH_TTY
 rm "${__scratch}/bin/stty"
 run "${wb}" session attach "${u}"
 refute "not when it is no terminal" "stty"
+# A hangup while the agent runs: its terminal went away. The agent runs
+# until the hangup has been sent, as a closing terminal ends it too.
+# shellcheck disable=SC2016 # expanded by the podman stub
+rule '*exec -it -e TERM*' 'touch "${PODMAN_STATE}/agent-up"; for _ in $(seq 1 100); do [ -e "${PODMAN_STATE}/hung-up" ] && exit 0; "${REAL_SLEEP}" 0.05; done; exit 1'
+# timer_running, timer_gone: whether a cap timer's sleep is running.
+timer_running() { pgrep -fx "sleep 86280" >/dev/null; }
+timer_gone() { ! timer_running; }
+: >"${STUB_LOG}"
+bash "${__repo}/${wb}" session attach "${u}" >"${__scratch}/out" 2>"${__scratch}/err" &
+hup=$!
+for _ in $(seq 1 100); do
+  [ -e "${PODMAN_STATE}/agent-up" ] && break
+  "${REAL_SLEEP}" 0.05
+done
+assert "an unattended agent runs with its cap's timer" timer_running
+kill -HUP "${hup}"
+touch "${PODMAN_STATE}/hung-up"
+__status=0
+wait "${hup}" || __status=$?
+check "a hangup stops the session, exiting 129" 129 calls "podman ps -a --filter label=workbench.session=${u} --format {{.Names}}"
+assert "and stops the cap's timer with its sleep" timer_gone
+unrule
+rm -f "${PODMAN_STATE}/agent-up" "${PODMAN_STATE}/hung-up"
 expire
 rule 'exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add *' 'exit 1'
 run "${wb}" session start claude --level unattended --hours 8

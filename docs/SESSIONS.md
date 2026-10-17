@@ -171,9 +171,10 @@ merges and the host rebuilds.
   stopped, its clones, their branches and PR state.
 - **Stop**: when the agent exits the container stops. `make stop-<session>`
   (a running session; `make session-stop S=<name>` names one)
-  stops it from outside. However the agent ended, its terminal is put back
-  afterwards: line editing, and off the mouse, focus and keyboard reporting
-  it may have left on. The last session to stop stops the shared services
+  stops it from outside. However the agent ended, the terminal the session
+  ran in is put back afterwards, when there is one (standard output is a
+  terminal): line editing, and off the mouse, focus and keyboard reporting
+  the agent may have left on. The last session to stop stops the shared services
   (#59), unless a workbench or L2 engine from `up` still runs. A session
   that starts with no workbench or L2 engine running restarts the shared
   services a `build` or `pull` left on an older image; otherwise it names
