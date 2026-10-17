@@ -2113,10 +2113,50 @@ session_settle() {
   fi
 }
 
+# How long before an unattended session's cap its agent is asked to exit.
+CAP_GRACE=120
+
+# Ask the agent in workbench $1 (its binary $2) to exit CAP_GRACE seconds
+# before the end of its $3 hours, with SIGTERM. Claude Code takes that as a
+# clean exit and puts the terminal back while it still holds it. The cap
+# itself (timeout, in session_run) kills only the podman exec client, and
+# the container goes from under the agent, so a terminal the agent left in
+# raw mode, reporting the mouse and focus, stayed that way: the shell after
+# it printed escape sequences in a loop. Run in the background; stopping it
+# (cap_end) stops its sleep too, so nothing is left behind.
+session_cap() {
+  local t=""
+  trap 'kill ${t} 2>/dev/null; exit 0' TERM
+  sleep $(($3 * 3600 - CAP_GRACE)) &
+  t=$!
+  wait "${t}"
+  podman exec "$1" pkill -TERM -f "^[^ ]*agent-clis/[^ ]*$2( |$)" >/dev/null 2>&1 || true
+}
+
+# Stop session_cap, background job $1 (none when empty), and wait for it.
+cap_end() {
+  [ -n "$1" ] || return 0
+  kill "$1" 2>/dev/null || true
+  wait "$1" 2>/dev/null || true
+}
+
+# Put this terminal back the way a shell expects it, after an agent that may
+# not have: killed at its cap, or its container removed under it (session
+# stop, a hangup). Line editing and echo, and off every mode a terminal agent
+# turns on: mouse and focus reporting, bracketed paste, extended keyboard
+# reporting (kitty's and xterm's), a hidden cursor. A terminal that never had
+# them on ignores these. Only on a terminal; WORKBENCH_TTY=1 as if on one,
+# for the tests.
+terminal_restore() {
+  [ -t 1 ] || [ "${WORKBENCH_TTY:-}" = 1 ] || return 0
+  stty sane 2>/dev/null || true
+  printf '\e[?1000l\e[?1002l\e[?1003l\e[?1006l\e[?1004l\e[?2004l\e[=0;1u\e[>4m\e[?25h\e[0m'
+}
+
 # Run the session's agent, attached to this terminal, and take the session
 # down when it exits. $1: new or resume; $2: remote or empty.
 session_run() {
-  local how="$1" remote="$2" name bin cmd=() rc=0
+  local how="$1" remote="$2" name bin cmd=() rc=0 cap=""
   name="$(wb_name "${S_WS}" "${S_AGENT}")"
   bin="$(agent_of "${S_AGENT}")"
   cmd=("${bin}")
@@ -2139,9 +2179,14 @@ session_run() {
   # Its record's time is when it was last used, for session names --recent.
   touch "$(session_dir "${SESSION}")/session"
   echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS}$(level_note))"
+  # An unattended session's agent is asked to exit shortly before its cap.
+  if [ -n "${S_HOURS}" ]; then
+    session_cap "${name}" "${bin}" "${S_HOURS}" &
+    cap=$!
+  fi
   # Its terminal closing (a hangup) stops the session too, as the agent
   # exiting does, rather than leaving its containers running with no agent.
-  trap 'session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
+  trap 'cap_end "${cap}"; session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
   (
     # Not unattended: nobody is there to talk, and the hour cap below has to
     # hold the only way the agent is started.
@@ -2149,13 +2194,16 @@ session_run() {
       voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
     fi
     # An unattended session ends after the hours it was given, when the key
-    # it unlocked runs out too.
+    # it unlocked runs out too. session_cap has asked the agent to exit by
+    # then; this is the backstop, for an agent that did not.
     if [ -n "${S_HOURS}" ]; then
       exec timeout --foreground --kill-after=60 "${S_HOURS}h" \
         podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
     fi
     exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
   ) || rc=$?
+  cap_end "${cap}"
+  terminal_restore
   session_settle "${name}"
   session_down "${S_WS}"
   echo "workbench: session ${SESSION} stopped; make attach-${SESSION} resumes it"
