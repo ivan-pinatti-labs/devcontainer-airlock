@@ -65,8 +65,10 @@ menu you move through with the arrow keys and Enter: 8, 12 (the default),
    level by the managed settings (`disableBypassPermissionsMode`).
 
 The hours are the key's, not the session's. Nothing ends the session but
-the agent exiting, `make stop-<session>` or its terminal closing; when the
-hours are up only the key locks again, so pushes fail until `make unlock`.
+the agent exiting, `make stop-<session>` or its terminal closing. When the
+key's unlock runs out (these hours, or longer if a later `make unlock` or
+another session extended it) only the key locks again, so pushes fail until
+`make unlock`.
 
 It has voice, as `make claude` does (`VOICE=0`: without), since a run is
 often started with you still at the keyboard.
