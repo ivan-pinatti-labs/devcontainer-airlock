@@ -50,28 +50,29 @@ would only stall the run, so nothing asks:
   pushes, skipping hooks, `--admin` merges and anything that reads
   credentials.
 
-`make claude-unattended` asks how long the run is, from a menu you move
-through with the arrow keys and Enter: 8, 12 (the default), 24 or 48 hours.
-`make claude-unattended HOURS=24` skips the menu. Then it:
+`make claude-unattended` asks how long to unlock the ssh key for, from a
+menu you move through with the arrow keys and Enter: 8, 12 (the default),
+24 or 48 hours. `make claude-unattended HOURS=24` skips the menu. Then it:
 
-1. asks for the ssh key's passphrase once and unlocks the key for that
-   long, so a push near the end does not find it locked. Every session
-   shares one ssh-agent, and adding the key again replaces its lifetime, so
-   an unlock (this one or `make unlock`) never ends before an unattended
-   session still due to run does: each records when it ends (`ends=`);
+1. asks for the key's passphrase once and unlocks the key for that long,
+   so a push late in the run does not find it locked. Every session shares
+   one ssh-agent, and adding the key again replaces its lifetime, so an
+   unlock (this one or `make unlock`) never ends before an unattended
+   session's own hours do: each records when its key runs out (`ends=`);
 2. runs Claude Code in its own auto mode (`--permission-mode auto`), where
    its classifier judges what no rule names. Permission checks are never
    bypassed: `--dangerously-skip-permissions` is turned off for every
-   level by the managed settings (`disableBypassPermissionsMode`);
-3. ends the session when the hours are up, as if the agent had exited. Two
-   minutes before, the agent is asked to exit (SIGTERM), so it puts the
-   terminal back itself; the cap stops one that has not.
+   level by the managed settings (`disableBypassPermissionsMode`).
+
+The hours are the key's, not the session's. Nothing ends the session but
+the agent exiting, `make stop-<session>` or its terminal closing; when the
+hours are up only the key locks again, so pushes fail until `make unlock`.
 
 It has voice, as `make claude` does (`VOICE=0`: without), since a run is
-often started with you still at the keyboard; the cap holds either way.
+often started with you still at the keyboard.
 
-`make attach-<session>` brings an unattended session back with the same
-cap. The key is not unlocked again; `make unlock HOURS=<n>` does that.
+`make attach-<session>` brings an unattended session back at the same
+level. The key is not unlocked again; `make unlock HOURS=<n>` does that.
 
 An agent waiting on a pull request (checks, a review, the merge queue) uses
 `gh wait pr` in the background, so it wakes on the change instead of
@@ -85,7 +86,7 @@ file, sit in `/usr/local/share/workbench/levels/`. For a session of another
 level, `host/workbench` copies that level's two files out of the image once
 per image, into `~/.local/share/workbench/levels/`, which no container
 mounts, and mounts them read only over the hardened ones. The session
-record keeps the level (`level=`), and an unattended one its hours
+record keeps the level (`level=`), and an unattended one its key's hours
 (`hours=`), so attach starts it the same way. The workbench sees its level
 as `AIRLOCK_LEVEL`.
 

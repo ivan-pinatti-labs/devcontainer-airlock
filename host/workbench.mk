@@ -30,8 +30,9 @@ RESUME ?= $(resume)
 # Through the environment, so no quote in it can break the recipe's shell.
 export RESUME
 RESUME_ARG = $(if $(RESUME),--resume "$$RESUME")
-# `make claude-unattended HOURS=24` skips its menu; `make unlock HOURS=24`
-# unlocks for that long instead of 12 hours (at most 48).
+# `make claude-unattended HOURS=24` skips its menu of how long the key stays
+# unlocked; `make unlock HOURS=24` unlocks for that long instead of 12 hours
+# (at most 48).
 HOURS ?=
 export HOURS
 HOURS_ARG = $(if $(HOURS),--hours "$$HOURS")
@@ -45,7 +46,7 @@ workbench-help:
 		'  claude-remote               The same as claude, whatever REMOTE says.' \
 		'  claude-plain                Claude Code with neither voice nor remote control.' \
 		'  claude-assisted             Claude Code that asks less about reads, with you there (docs/MODES.md).' \
-		'  claude-unattended           Claude Code with nobody to ask, for 8 to 48 hours (a menu, or HOURS=).' \
+		'  claude-unattended           Claude Code with nobody to ask, the ssh key unlocked 8 to 48 hours (a menu, or HOURS=).' \
 		'  codex                       A new Codex session, here.' \
 		'  sessions                    Every session: running or stopped, and its clones and branches.' \
 		'  attach-<session>            Resume a running or recent session (shell-, stop- for running ones).' \
