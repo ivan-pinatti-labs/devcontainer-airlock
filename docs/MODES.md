@@ -11,7 +11,7 @@ hardened for now.
 | ------------ | ------------------------ | ---------------------- | ----------------------------------------------- |
 | `hardened`   | `make claude`            | you, at every step     | asks as the policy is written                   |
 | `assisted`   | `make claude-assisted`   | you, nearby            | also reads paths it cannot resolve, unasked     |
-| `unattended` | `make claude-unattended` | nobody, for a set time | never asks; does the cycle, refuses the rest    |
+| `unattended` | `make claude-unattended` | nobody                 | never asks; does the cycle, refuses the rest    |
 
 The rules behind each level are agent-policy's modes; its `docs/POLICY.md`,
 "Modes", lists them one by one.
