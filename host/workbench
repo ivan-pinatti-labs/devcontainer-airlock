@@ -2239,8 +2239,8 @@ cmd_session_start() {
   [ -z "${hours}" ] || printf 'hours=%s\nends=%s\n' "${hours}" "$(($(date +%s) + hours * 3600))" >>"${d}/session"
   session_read "${SESSION}"
   session_up "${S_WS}" "${S_AGENT}"
-  # The key is unlocked afresh for the hours picked, so a push that late does
-  # not find it locked. Only the key runs out then; the session goes on.
+  # The key is unlocked afresh for the hours picked, so a push within them
+  # does not find it locked. Only the key runs out then; the session goes on.
   # Its passphrase is asked here, with someone still at the keyboard.
   if [ -n "${hours}" ] && ! unlock_key "${hours}"; then
     session_down "${S_WS}"

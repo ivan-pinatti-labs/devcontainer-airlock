@@ -198,7 +198,9 @@ refute "copied once per image" "--entrypoint cat localhost"
 unrule
 
 # Unattended: hours the key is unlocked for, auto mode, and nothing that
-# ends the session but the agent.
+# ends the session but the agent. timeout is stubbed, so a call to it is
+# logged (and fails) and the refutes below would see one.
+stub timeout 'exit 125'
 # expire: every unattended session so far past its end, so the next unlock
 # lasts only as long as it asks for.
 expire() { sed -i 's/^ends=.*/ends=0/' "${sessions}"/*/session; }
@@ -225,6 +227,7 @@ check "the voice session runs the agent itself" 0 calls \
 refute "with no time limit" "timeout"
 check "and when it exits, the microphone pipe is unloaded" 0 calls "pactl unload-module 101"
 unset WORKBENCH_VOICE
+rm "${__scratch}/bin/timeout"
 stub stty
 export WORKBENCH_TTY=1
 run "${wb}" session attach "${u}"

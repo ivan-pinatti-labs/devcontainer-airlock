@@ -55,7 +55,7 @@ menu you move through with the arrow keys and Enter: 8, 12 (the default),
 24 or 48 hours. `make claude-unattended HOURS=24` skips the menu. Then it:
 
 1. asks for the key's passphrase once and unlocks the key for that long,
-   so a push late in the run does not find it locked. Every session shares
+   so a push within those hours does not find it locked. Every session shares
    one ssh-agent, and adding the key again replaces its lifetime, so an
    unlock (this one or `make unlock`) never ends before an unattended
    session's own hours do: each records when its key runs out (`ends=`);
