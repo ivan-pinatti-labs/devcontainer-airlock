@@ -40,9 +40,9 @@
                                     conversation instead of a new one.
                                     --level picks how far the agent goes
                                     without asking (docs/MODES.md); an
-                                    unattended one runs N hours (a menu
-                                    asks when not given), with the key
-                                    unlocked as long
+                                    unattended one unlocks the key for N
+                                    hours (a menu asks when not given) and
+                                    runs until the agent exits
     host/workbench session attach|shell|stop|prune NAME
     host/workbench session list|prune
                                     resume one (the same conversation), a
@@ -1574,8 +1574,8 @@ cmd_unlock() {
   unlock_key "${1:-${DEFAULT_HOURS}}"
 }
 
-# How long the key stays unlocked, and an unattended session runs, in hours:
-# twelve by default, two days at most (a weekend run).
+# How long the key stays unlocked, in hours, an unattended session's pick
+# too: twelve by default, two days at most (a weekend run).
 DEFAULT_HOURS=12
 MAX_HOURS=48
 hours_ok() { [[ "$1" =~ ^[1-9][0-9]?$ ]] && [ "$1" -le "${MAX_HOURS}" ]; }
@@ -1643,9 +1643,6 @@ cmd_shell() {
 # microphone routed into the pipe (voice_listen). Nothing in the workbench
 # can talk to the host's audio server. When voice cannot be set up, this
 # says why and returns, and the session starts without it.
-# What the agent's podman exec runs under: nothing, or an unattended
-# session's cap (session_run).
-AGENT_CAP=()
 voice_session() {
   local name="$1" dir ctl sink reader
   shift
@@ -1671,7 +1668,7 @@ voice_session() {
   voice_listen "$$" "${ctl}" &
   reader=$!
   trap 'kill "${reader}" 2>/dev/null; wait "${reader}" 2>/dev/null; pactl unload-module "${sink}" 2>/dev/null; rm -f "${dir}/mic-$$" "${ctl}"' EXIT
-  "${AGENT_CAP[@]}" podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
+  podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="/run/workbench-voice/mic-$$" \
     -e WORKBENCH_VOICE_CTL="/run/workbench-voice/ctl-$$" "$@" || exit
   exit $?
 }
@@ -1994,14 +1991,15 @@ session_down() {
 # Session levels (docs/MODES.md): how far the agent may go without asking.
 # hardened is the policy as written and the default; assisted asks less
 # about reads, with you there; unattended asks nothing, for runs with nobody
-# at the keyboard, and is capped in hours.
+# at the keyboard, with the ssh key unlocked for the hours picked. Nothing
+# ends it but the agent exiting (or session stop).
 LEVELS="hardened assisted unattended"
 
 # ", <level>" for a session's start line, nothing for hardened.
 level_note() {
   if [ "${S_LEVEL:-hardened}" = hardened ]; then return 0; fi
   printf ', %s' "${S_LEVEL}"
-  if [ -n "${S_HOURS}" ]; then printf ' for %sh' "${S_HOURS}"; fi
+  if [ -n "${S_HOURS}" ]; then printf ', key for %sh' "${S_HOURS}"; fi
 }
 
 # The unattended session's length, picked from a menu with the arrow keys
@@ -2014,7 +2012,7 @@ choose_hours() {
     return 0
   fi
   while true; do
-    printf '\rworkbench: run unattended for (arrows, Enter):' >&2
+    printf '\rworkbench: unlock the key for (arrows, Enter):' >&2
     for j in "${!options[@]}"; do
       if [ "${j}" = "${i}" ]; then printf ' [%sh]' "${options[j]}" >&2; else printf '  %sh ' "${options[j]}" >&2; fi
     done
@@ -2116,36 +2114,10 @@ session_settle() {
   fi
 }
 
-# How long before an unattended session's cap its agent is asked to exit.
-CAP_GRACE=120
-
-# Ask the agent in workbench $1 (its binary $2) to exit CAP_GRACE seconds
-# before the end of its $3 hours, with SIGTERM. Claude Code takes that as a
-# clean exit and puts the terminal back while it still holds it. The cap
-# itself (timeout, in session_run) kills only the podman exec client, and
-# the container goes from under the agent, so a terminal the agent left in
-# raw mode, reporting the mouse and focus, stayed that way: the shell after
-# it printed escape sequences in a loop. Run in the background; stopping it
-# (cap_end) stops its sleep too, so nothing is left behind.
-session_cap() {
-  local t=""
-  trap 'kill ${t} 2>/dev/null; exit 0' TERM
-  sleep $(($3 * 3600 - CAP_GRACE)) &
-  t=$!
-  wait "${t}"
-  podman exec "$1" pkill -TERM -f "^[^ ]*agent-clis/[^ ]*$2( |$)" >/dev/null 2>&1 || true
-}
-
-# Stop session_cap, background job $1 (none when empty), and wait for it.
-cap_end() {
-  [ -n "$1" ] || return 0
-  kill "$1" 2>/dev/null || true
-  wait "$1" 2>/dev/null || true
-}
-
 # Put this terminal back the way a shell expects it, after an agent that may
-# not have: killed at its cap, or its container removed under it (session
-# stop, a hangup). Line editing and echo, and off every mode a terminal agent
+# not have: its container removed under it (session stop, a hangup), so it
+# never undid the modes it had turned on and the shell after it would print
+# escape sequences in a loop. Line editing and echo, and off every mode a terminal agent
 # turns on: mouse and focus reporting, bracketed paste, extended keyboard
 # reporting (kitty's and xterm's), a hidden cursor. A terminal that never had
 # them on ignores these. Only on a terminal; WORKBENCH_TTY=1 as if on one,
@@ -2159,7 +2131,7 @@ terminal_restore() {
 # Run the session's agent, attached to this terminal, and take the session
 # down when it exits. $1: new or resume; $2: remote or empty.
 session_run() {
-  local how="$1" remote="$2" name bin cmd=() rc=0 cap=""
+  local how="$1" remote="$2" name bin cmd=() rc=0
   name="$(wb_name "${S_WS}" "${S_AGENT}")"
   bin="$(agent_of "${S_AGENT}")"
   cmd=("${bin}")
@@ -2182,27 +2154,17 @@ session_run() {
   # Its record's time is when it was last used, for session names --recent.
   touch "$(session_dir "${SESSION}")/session"
   echo "workbench: session ${SESSION} (${S_AGENT}, ${S_WS}$(level_note))"
-  # An unattended session's agent is asked to exit shortly before its cap.
-  if [ -n "${S_HOURS}" ]; then
-    session_cap "${name}" "${bin}" "${S_HOURS}" &
-    cap=$!
-  fi
   # Its terminal closing (a hangup) stops the session too, as the agent
   # exiting does, rather than leaving its containers running with no agent.
-  trap 'cap_end "${cap}"; session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
+  trap 'session_settle "${name}"; session_down "${S_WS}"; exit 129' HUP
   (
-    # An unattended session ends after the hours it was given, when the key
-    # it unlocked runs out too: its agent runs under timeout, with voice or
-    # without (an unattended run you start at the keyboard has you there to
-    # talk until you leave). session_cap has asked the agent to exit by then;
-    # this is the backstop, for an agent that did not.
-    [ -z "${S_HOURS}" ] || AGENT_CAP=(timeout --foreground --kill-after=60 "${S_HOURS}h")
+    # Voice for every level: an unattended run you start at the keyboard has
+    # you there to talk until you leave.
     if [ "${bin}" = claude ] && voice_on; then
       voice_session "${name}" -w "${S_WS}" "${name}" "${cmd[@]}"
     fi
-    exec "${AGENT_CAP[@]}" podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
+    exec podman exec -it -e TERM -e COLORTERM -w "${S_WS}" "${name}" "${cmd[@]}"
   ) || rc=$?
-  cap_end "${cap}"
   terminal_restore
   session_settle "${name}"
   session_down "${S_WS}"
@@ -2277,9 +2239,9 @@ cmd_session_start() {
   [ -z "${hours}" ] || printf 'hours=%s\nends=%s\n' "${hours}" "$(($(date +%s) + hours * 3600))" >>"${d}/session"
   session_read "${SESSION}"
   session_up "${S_WS}" "${S_AGENT}"
-  # The key is unlocked afresh for exactly as long as the session runs, so a
-  # push near the end does not find it locked. Its passphrase is asked here,
-  # with someone still at the keyboard.
+  # The key is unlocked afresh for the hours picked, so a push within them
+  # does not find it locked. Only the key runs out then; the session goes on.
+  # Its passphrase is asked here, with someone still at the keyboard.
   if [ -n "${hours}" ] && ! unlock_key "${hours}"; then
     session_down "${S_WS}"
     die "the ssh key was not unlocked, so an unattended session could not push; nothing was started"

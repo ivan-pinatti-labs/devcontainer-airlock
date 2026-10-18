@@ -197,8 +197,10 @@ check "attach keeps the level" 0 calls "-v ${levels}/assisted/50-agent-policy.js
 refute "copied once per image" "--entrypoint cat localhost"
 unrule
 
-# Unattended: hours, a fresh unlock for as long, auto mode and a cap.
-stub timeout 'shift 3; exec "$@"'
+# Unattended: hours the key is unlocked for, auto mode, and nothing that
+# ends the session but the agent. timeout is stubbed, so a call to it is
+# logged (and fails) and the refutes below would see one.
+stub timeout 'exit 125'
 # expire: every unattended session so far past its end, so the next unlock
 # lasts only as long as it asks for.
 expire() { sed -i 's/^ends=.*/ends=0/' "${sessions}"/*/session; }
@@ -206,39 +208,26 @@ expire() { sed -i 's/^ends=.*/ends=0/' "${sessions}"/*/session; }
 hours_of() { sed -n 's/^hours=//p' "${sessions}/$(session_name)/session"; }
 run "${wb}" session start claude --level unattended --hours 24
 u="$(session_name)"
-check "an unattended session says for how long" 0 out "workbench: session ${u} (claude, ${app}, unattended for 24h)"
+check "an unattended session says how long its key lasts" 0 out "workbench: session ${u} (claude, ${app}, unattended, key for 24h)"
 assert "and records it" grep -qx "hours=24" "${sessions}/${u}/session"
 check "the key is unlocked for as long, in seconds" 0 calls "ssh-add -t 86400 /key/id"
-assert "and the record says when it ends" grep -qE '^ends=[0-9]+$' "${sessions}/${u}/session"
+assert "and the record says when it runs out" grep -qE '^ends=[0-9]+$' "${sessions}/${u}/session"
 check "Claude Code runs in auto mode" 0 calls "claude --session-id"
 check "never with permission checks bypassed" 0 calls "--permission-mode auto"
-check "and the session ends when the hours do" 0 calls \
-  "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -w ${app} workbench-claude-s-${u} claude"
+check "and nothing but its own exit ends it" 0 calls \
+  "podman exec -it -e TERM -e COLORTERM -w ${app} workbench-claude-s-${u} claude"
+refute "no time limit on the session" "timeout"
 run "${wb}" session attach "${u}"
-check "attach caps it again" 0 calls "timeout --foreground --kill-after=60 24h"
+refute "attach puts none on it either" "timeout"
 export WORKBENCH_VOICE=1
 run "${wb}" session attach "${u}"
 check "with voice too, someone may still be there" 0 calls "pactl load-module module-pipe-sink"
-check "and the cap holds over the voice session" 0 calls \
-  "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC=/run/workbench-voice/mic-"
+check "the voice session runs the agent itself" 0 calls \
+  "podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC=/run/workbench-voice/mic-"
+refute "with no time limit" "timeout"
+check "and when it exits, the microphone pipe is unloaded" 0 calls "pactl unload-module 101"
 unset WORKBENCH_VOICE
-# The cap tests below swap lib.sh's short sleep for others; it comes back
-# after them.
-cp "${__scratch}/bin/sleep" "${__scratch}/short-sleep"
-# Before the cap, the agent is asked to exit, so it puts the terminal back
-# itself: a sleep that returns at once, and an agent that runs until asked.
-stub sleep
-# shellcheck disable=SC2016 # expanded by the podman stub
-rule '*exec -it -e TERM*' 'for _ in $(seq 1 100); do grep -q "pkill -TERM" "${STUB_LOG}" && exit 0; "${REAL_SLEEP}" 0.05; done; exit 1'
-run "${wb}" session attach "${u}"
-check "two minutes before the cap" 0 calls "sleep 86280"
-check "the agent is asked to exit, with SIGTERM" 0 calls "podman exec workbench-claude-s-${u} pkill -TERM -f ^[^ ]*agent-clis/[^ ]*claude( |$)"
-unrule
-# The real sleep from here to the end of the cap tests: the cap's timer
-# must not go off while they run.
-rm "${__scratch}/bin/sleep"
-run "${wb}" session attach "${u}"
-refute "an agent that exits first is not asked" "pkill"
+rm "${__scratch}/bin/timeout"
 stub stty
 export WORKBENCH_TTY=1
 run "${wb}" session attach "${u}"
@@ -252,56 +241,22 @@ refute "not when it is no terminal" "stty"
 # until the hangup has been sent, as a closing terminal ends it too.
 # shellcheck disable=SC2016 # expanded by the podman stub
 rule '*exec -it -e TERM*' 'touch "${PODMAN_STATE}/agent-up"; for _ in $(seq 1 400); do [ -e "${PODMAN_STATE}/hung-up" ] && exit 0; "${REAL_SLEEP}" 0.05; done; exit 1'
-# timer_running, timer_gone: whether a cap timer's sleep is running.
-# From /proc, in bash alone: kcov's image has no pgrep.
-timer_running() {
-  local c a=()
-  for c in /proc/[0-9]*/cmdline; do
-    mapfile -d '' -t a 2>/dev/null <"${c}" || continue
-    [ "${a[*]}" = "sleep 86280" ] && return 0
-  done
-  return 1
-}
-timer_gone() { ! timer_running; }
 : >"${STUB_LOG}"
 bash "${__repo}/${wb}" session attach "${u}" >"${__scratch}/out" 2>"${__scratch}/err" &
 hup=$!
-# Both, as each starts on its own: slower under kcov, so a while.
+# Slower under kcov, so a while.
 for _ in $(seq 1 400); do
-  [ -e "${PODMAN_STATE}/agent-up" ] && timer_running && break
+  [ -e "${PODMAN_STATE}/agent-up" ] && break
   "${REAL_SLEEP}" 0.05
 done
-assert "an unattended agent runs with its cap's timer" timer_running
 kill -HUP "${hup}"
 touch "${PODMAN_STATE}/hung-up"
 __status=0
 wait "${hup}" || __status=$?
 check "a hangup stops the session, exiting 129" 129 calls "podman ps -a --filter label=workbench.session=${u} --format {{.Names}}"
-assert "and stops the cap's timer with its sleep" timer_gone
+check "its engine too" 129 calls "podman rm -f -t 5 l2-engine-s-${u}"
 unrule
 rm -f "${PODMAN_STATE}/agent-up" "${PODMAN_STATE}/hung-up"
-# The cap expiring: an agent that did not exit when asked. timeout has
-# signalled the podman exec client and exits 124, as coreutils' does.
-stub timeout 'exit 124'
-run "${wb}" session attach "${u}"
-check "the cap expiring ends the session as an exit does, with timeout's status" 124 calls \
-  "podman ps -a --filter label=workbench.session=${u} --format {{.Names}}"
-check "its workbench and engine go" 124 calls "podman rm -f -t 5 l2-engine-s-${u}"
-check "saying how to resume it" 124 out "workbench: session ${u} stopped; make attach-${u} resumes it"
-assert "and no cap timer is left" timer_gone
-# With voice, the microphone is the host's: its pipe goes too, and the
-# terminal is put back.
-export WORKBENCH_VOICE=1 WORKBENCH_TTY=1
-stub stty
-run "${wb}" session attach "${u}"
-check "with voice, the cap still ends it" 124 calls "timeout --foreground --kill-after=60 24h podman exec -it -e TERM -e COLORTERM -e WORKBENCH_VOICE_MIC="
-check "and the microphone pipe is unloaded" 124 calls "pactl unload-module 101"
-check "the terminal put back" 124 calls "stty sane"
-check "and the session down" 124 calls "podman rm -f -t 5 l2-engine-s-${u}"
-unset WORKBENCH_VOICE WORKBENCH_TTY
-rm "${__scratch}/bin/stty"
-stub timeout 'shift 3; exec "$@"'
-cp "${__scratch}/short-sleep" "${__scratch}/bin/sleep"
 expire
 rule 'exec -it -e SSH_AUTH_SOCK=/sock/agent.sock devcontainer-ssh-agent ssh-add *' 'exit 1'
 run "${wb}" session start claude --level unattended --hours 8
@@ -316,7 +271,7 @@ expire
 export WORKBENCH_MENU=1
 run "${wb}" session start claude --level unattended <<<$'\e[C\e[C\e[C\e[X'
 check "the menu: right arrows, past the end, then Enter" 0 calls "ssh-add -t 172800 /key/id"
-check "drawn on standard error" 0 err "run unattended for (arrows, Enter):"
+check "drawn on standard error" 0 err "unlock the key for (arrows, Enter):"
 run "${wb}" session start claude --level unattended <<<$'\e[D\e[Dq'
 assert "left arrows stop at the first" test "$(hours_of)" = 8
 assert "and an eight hour session leaves the key for the 48 hour one still running" \
@@ -325,7 +280,6 @@ expire
 run "${wb}" session start claude --level unattended </dev/null
 assert "and no input keeps the default" test "$(hours_of)" = 12
 unset WORKBENCH_MENU
-rm "${__scratch}/bin/timeout"
 
 # shell and stop
 run "${wb}" session shell

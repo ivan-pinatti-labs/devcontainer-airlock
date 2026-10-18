@@ -99,7 +99,7 @@ make claude              # a new Claude Code session over the folder you are in,
                          # with voice and remote control (REMOTE=0: without)
 make claude-plain        # neither voice nor remote control
 make claude-assisted     # asks less about reads, with you there (docs/MODES.md)
-make claude-unattended   # nobody to ask, for 8 to 48 hours (docs/MODES.md)
+make claude-unattended   # nobody to ask, the key unlocked 8 to 48 hours (docs/MODES.md)
 make codex               # a new Codex session (no voice)
 make sessions            # every session, running or stopped, and its branches
 make claude resume=<id>  # continue that conversation in a new session
@@ -642,7 +642,7 @@ login without ever handing over the key. The connection runs to
 `ssh.github.com` on port 443 through the egress proxy, and GitHub's host key
 is checked against keys fetched from GitHub's own API. `host/workbench
 unlock` adds the key for twelve hours at a time, or as many as you give it
-up to 48 (an unattended session unlocks it for its own length).
+up to 48 (an unattended session unlocks it for the hours it was given).
 
 ## Network
 
