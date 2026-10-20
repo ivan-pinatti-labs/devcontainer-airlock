@@ -44,6 +44,7 @@
     ]
   },
   "env": {
-    "DISABLE_AUTOUPDATER": "1"
+    "DISABLE_AUTOUPDATER": "1",
+    "CLAUDE_CODE_AUTO_MODE_SERVER": "0"
   }
 }

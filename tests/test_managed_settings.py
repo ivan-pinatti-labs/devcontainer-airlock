@@ -49,3 +49,14 @@ def test_permission_checks_cannot_be_bypassed():
     with open(SETTINGS, encoding="utf-8") as handle:
         permissions = json.load(handle)["permissions"]
     assert permissions["disableBypassPermissionsMode"] == "disable"
+
+
+def test_managed_settings_turn_the_server_classifier_off():
+    """The managed settings set CLAUDE_CODE_AUTO_MODE_SERVER to 0.
+
+    This reads the configuration only. Why it is set, and how the image build
+    checks the pinned CLI still knows the variable, is in docs/MODES.md.
+    """
+    with open(SETTINGS, encoding="utf-8") as handle:
+        env = json.load(handle)["env"]
+    assert env["CLAUDE_CODE_AUTO_MODE_SERVER"] == "0"

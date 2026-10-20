@@ -1,5 +1,7 @@
 # Session levels
 
+<!-- cspell:words anthropics -->
+
 A Claude Code session runs at one of three levels. The level decides how far
 the agent may go without asking you. It does not move the boundary: at every
 level the agent runs in the workbench, holds no GitHub token and no ssh key,
@@ -63,6 +65,22 @@ menu you move through with the arrow keys and Enter: 8, 12 (the default),
    its classifier judges what no rule names. Permission checks are never
    bypassed: `--dangerously-skip-permissions` is turned off for every
    level by the managed settings (`disableBypassPermissionsMode`).
+   That classifier runs locally: the managed settings set
+   `CLAUDE_CODE_AUTO_MODE_SERVER=0`, which turns off Claude Code's
+   server-side classifier. On the server path a classifier outage ("gave no
+   verdict") blocked every Bash call, allow listed ones such as `sleep` and
+   `date` included, so an unattended agent could not even arm a wait
+   (anthropics/claude-code#97870 and #97854, measured with Claude Code
+   2.1.294). On the local path, allow rules resolve before any classifier
+   call. Claude Code reads the variable when it starts, and the managed
+   settings are baked into the workbench image, so it takes a new image
+   (`make workbench-build`, or `make workbench-pull` once it is published)
+   and a new session; a session already running stays on the server path.
+   Nothing promises the variable survives a CLI update, so the image build
+   checks that the pinned CLI still names it and fails if not. That only
+   proves the name is still there: a release that kept the name and changed
+   what it does would pass, which is why the CLI's release notes are worth
+   reading on each bump.
 
 The hours are the key's, not the session's. Nothing ends the session but
 the agent exiting, `make stop-<session>` or its terminal closing. When the

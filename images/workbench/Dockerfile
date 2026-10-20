@@ -228,7 +228,12 @@ RUN set -eu; \
   rm -rf /tmp/npm-cache; \
   mkdir -p /root/version-check; \
   HOME=/root/version-check /opt/agent-clis/node_modules/.bin/claude --version; \
-  rm -rf /root/version-check
+  rm -rf /root/version-check; \
+  # The managed settings turn the server-side auto mode classifier off with
+  # CLAUDE_CODE_AUTO_MODE_SERVER (docs/MODES.md). A CLI that stopped reading
+  # it would go back to that path without a word, so the build stops instead.
+  grep -aq CLAUDE_CODE_AUTO_MODE_SERVER \
+    "$(readlink -f /opt/agent-clis/node_modules/.bin/claude)"
 # SoX, which Claude Code's voice mode records with (`rec`), and a rec of our
 # own in front of it that reads a voice session's microphone pipe. There is
 # no audio device and no audio server here; without a voice session
