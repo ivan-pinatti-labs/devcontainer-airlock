@@ -51,14 +51,11 @@ def test_permission_checks_cannot_be_bypassed():
     assert permissions["disableBypassPermissionsMode"] == "disable"
 
 
-def test_auto_mode_classifies_locally():
-    """Auto mode's server side classifier is off, which leaves the local one.
+def test_managed_settings_turn_the_server_classifier_off():
+    """The managed settings set CLAUDE_CODE_AUTO_MODE_SERVER to 0.
 
-    On the server path a classifier outage blocks every Bash call, allow
-    listed ones too (`sleep`, `date`), so an unattended agent cannot even arm
-    a bounded wait (anthropics/claude-code#97870, #97854). On the local path,
-    allow rules resolve before any classifier call. Claude Code reads this
-    variable at startup; re-check it on each CLI bump (docs/MODES.md).
+    This reads the configuration only. Why it is set, and how the image build
+    checks the pinned CLI still knows the variable, is in docs/MODES.md.
     """
     with open(SETTINGS, encoding="utf-8") as handle:
         env = json.load(handle)["env"]
