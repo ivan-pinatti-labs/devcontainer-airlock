@@ -1,0 +1,257 @@
+#!/bin/bash
+: <<'USAGE'
+  Find the secrets agents wrote into their transcripts and redact them
+  (docs/SCRUB.md). host/workbench runs it at the start and end of every
+  session, and for make scrub, scrub-check and scrub-rotated. Runs on the
+  host, and does nothing there but list and copy files and call podman:
+  the scan runs in a container with no network, on copies.
+
+  Usage:
+    host/scrub scan CONTEXT [--full] [--check] [--manual]
+                        look at the files in the homes CONTEXT names that
+                        changed since the last scan (--full: every one),
+                        redact what no live session holds and report the
+                        rest; --check redacts nothing and keeps nothing;
+                        --manual waits for another scan instead of skipping
+                        and reports more
+    host/scrub rotated ID
+                        mark secret ID of the ledger rotated
+
+  CONTEXT, which host/workbench writes, holds one fact a line:
+    home host|workbench claude|codex PATH
+                        a folder an agent keeps its history in
+    busy PATH, busy-all PATH, live ID, closed ID, quiet SECONDS
+                        what is live there (host/scrub-scan)
+    secret NAME PODMAN_SECRET, known NAME FILE, env FILE
+                        secrets the host holds, searched for as they are:
+                        a podman secret, a file that is one, a file of
+                        KEY=value lines
+
+  State: ${XDG_STATE_HOME}/workbench/scrub (the ledger of secrets found, its
+  key, and the size and time of every file scanned). Never mounted into a
+  workbench.
+
+  Exit status codes:
+    0  done, whatever was found
+    1  the scan failed (the message says why); nothing was changed
+    2  usage error
+USAGE
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+die() {
+  echo "scrub: $*" >&2
+  exit 1
+}
+usage() {
+  sed -n '7,17p' "$0" >&2
+  exit 2
+}
+
+# cspell:words showsecret
+HERE="$(cd "$(dirname "$0")" && pwd)"
+STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/workbench/scrub"
+IMAGE="${SCRUB_IMAGE:-localhost/airlock-base:${WORKBENCH_TAG:-local}}"
+# renovate: datasource=docker depName=docker.io/zricethezav/gitleaks
+GITLEAKS_IMAGE="docker.io/zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
+# What each agent keeps that a secret can land in. Not its settings or its
+# login, which hold credentials on purpose, and not Claude Code's sessions/
+# (the records of running processes).
+CLAUDE_PATHS="projects file-history history.jsonl debug shell-snapshots todos paste-cache"
+CODEX_PATHS="sessions history.jsonl log"
+TAB="$(printf '\t')"
+
+# One scan at a time. The lock is held on a descriptor no container gets.
+lock() {
+  exec {LOCK}>"${STATE}/lock"
+  flock -n "${LOCK}" && return 0
+  [ "$1" = wait ] || return 1
+  echo "scrub: waiting for another scan to finish"
+  flock -w 900 "${LOCK}" || die "another scan has run for fifteen minutes; try again later"
+}
+
+# host/scrub-scan in the scan image, with the state folder and what else is
+# given, on standard input so nothing of this checkout is mounted.
+scan_container() {
+  local color=()
+  # SCRUB_TTY=1 as if on a terminal, for the tests.
+  if { [ -t 1 ] || [ "${SCRUB_TTY:-}" = 1 ]; } && [ -z "${NO_COLOR:-}" ]; then color=(--color); fi
+  podman image exists "${IMAGE}" ||
+    die "no image ${IMAGE}; host/workbench build (or pull) makes it"
+  podman run --rm -i --network=none --cap-drop=all --security-opt no-new-privileges \
+    --read-only --tmpfs /tmp --userns=keep-id:uid=1000,gid=1000 \
+    -v "${STATE}:/state:Z" "${MOUNTS[@]}" "${IMAGE}" \
+    python3 -I - "${color[@]}" "$@" <"${HERE}/scrub-scan" {LOCK}>&-
+}
+
+# The files of each home, with their size and time, as
+# size, mtime, kind, home and path lines. A name holding a tab or a newline
+# is left out: it would split its line.
+list_files() {
+  local kind agent home paths p fmt
+  while read -r kind agent home; do
+    paths="${CLAUDE_PATHS}"
+    [ "${agent}" != codex ] || paths="${CODEX_PATHS}"
+    fmt="${home//\\/\\\\}"
+    fmt="${fmt//%/%%}"
+    for p in ${paths}; do
+      [ -e "${home}/${p}" ] || continue
+      find "${home}/${p}" -type f ! -name "*${TAB}*" ! -name "*"$'\n'"*" \
+        -printf "%s\t%T@\t${kind}\t${fmt}\t%p\n" 2>/dev/null || true
+    done
+  done <"${WORK}/homes" | awk -F'\t' -v OFS='\t' '{ sub(/\..*/, "", $2); print }'
+}
+
+# Read CONTEXT: the homes that exist, once each by their real path, into
+# homes; the live facts, paths made real, into the context host/scrub-scan
+# reads; the secrets the host holds into known/ and known-env/.
+read_context() {
+  local key a b c real n=0
+  : >"${WORK}/homes"
+  while read -r key a b c || [ -n "${key}" ]; do
+    case "${key}" in
+    home)
+      [ -d "${c}" ] || continue
+      real="$(realpath -e -- "${c}")"
+      cut -d ' ' -f 3- "${WORK}/homes" | grep -qxF -- "${real}" || echo "${a} ${b} ${real}" >>"${WORK}/homes"
+      ;;
+    busy | busy-all) echo "${key} $(realpath -m -- "${a}${b:+ ${b}}${c:+ ${c}}")" >>"${WORK}/context" ;;
+    live | closed | quiet) echo "${key} ${a}" >>"${WORK}/context" ;;
+    secret)
+      safe_name "${a}"
+      podman secret inspect --showsecret --format '{{.SecretData}}' "${b}" >"${WORK}/known/${a}" 2>/dev/null || {
+        rm -f "${WORK}/known/${a}"
+        echo "scrub: could not read podman secret ${b}, so its value is not searched for" >&2
+      }
+      ;;
+    known)
+      safe_name "${a}"
+      cp -- "${b}" "${WORK}/known/${a}" 2>/dev/null || echo "scrub: no ${b}, so its value is not searched for" >&2
+      ;;
+    env)
+      n=$((n + 1))
+      cp -- "${a}" "${WORK}/known-env/${n}" 2>/dev/null || echo "scrub: no ${a}, so its values are not searched for" >&2
+      ;;
+    '' | '#'*) ;;
+    *) die "unknown line in the context: ${key}" ;;
+    esac
+  done <"$1"
+}
+safe_name() {
+  [[ "$1" =~ ^[A-Za-z0-9_.-]+$ ]] || die "a secret name holds more than A-Za-z0-9_.-: $1"
+}
+
+# The files held open by any process this user can see, among those listed.
+open_files() {
+  find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -type l -printf '%l\n' 2>/dev/null |
+    awk -F'\t' 'FILENAME == ARGV[1] { listed[$5] = 1; next } ($0 in listed) && !seen[$0]++ { print "open " $0 }' \
+      "${WORK}/listing" - || true
+}
+
+# Put a redacted copy in place of its original, if the original is as it was
+# listed: rewritten through a file beside it, with its mode and time kept.
+replace() {
+  local n="$1" size mtime path now tmp
+  IFS="${TAB}" read -r size mtime path < <(awk -F'\t' -v n="${n}" '$1 == n { print $2 "\t" $3 "\t" $6 }' "${WORK}/manifest")
+  now="$(stat -c "%s${TAB}%Y" -- "${path}" 2>/dev/null || true)"
+  if [ "${now}" != "${size}${TAB}${mtime}" ]; then
+    echo "scrub: ${path} changed while it was scanned, so it is left for the next scan"
+    return 1
+  fi
+  tmp="${path}.scrub-$$"
+  if cp -- "${WORK}/out/redacted/${n}" "${tmp}" && chmod --reference="${path}" -- "${tmp}" &&
+    touch -r "${path}" -- "${tmp}" && mv -f -- "${tmp}" "${path}"; then
+    return 0
+  fi
+  rm -f -- "${tmp}"
+  echo "scrub: ${path} could not be rewritten, so it still holds what was found" >&2
+  return 1
+}
+
+cmd_scan() {
+  local context="${1:-}" full="" check="" manual="" wait=skip args=() n=0 size mtime kind home path verb m s
+  [ -f "${context}" ] || usage
+  shift
+  for a in "$@"; do
+    case "${a}" in
+    --full) full=1 ;;
+    --check) check=1 ;;
+    --manual) manual=1 wait=wait ;;
+    *) usage ;;
+    esac
+  done
+  mkdir -p "${STATE}"
+  chmod 700 "${STATE}"
+  # The first scan reads all the history there is, which can take minutes:
+  # not at a session's start or end, unasked.
+  if [ -z "${full}" ] && [ ! -f "${STATE}/index" ]; then
+    echo "scrub: no secret scan has run here yet; make scrub runs the first, over all the history (it can take a while), and from then on every session start and end looks at what changed"
+    return 0
+  fi
+  if ! lock "${wait}"; then
+    echo "scrub: another scan is running, so this one is skipped"
+    return 0
+  fi
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "${WORK}"' EXIT
+  mkdir "${WORK}/files" "${WORK}/known" "${WORK}/known-env" "${WORK}/out"
+  : >"${WORK}/context"
+  : >"${WORK}/manifest"
+  read_context "${context}"
+  list_files >"${WORK}/listing"
+  touch "${STATE}/index"
+  # The files new or changed since they were last scanned, or every one.
+  awk -F'\t' -v full="${full}" 'FILENAME == ARGV[1] { seen[$3] = $1 "\t" $2; next } full || seen[$5] != $1 "\t" $2' "${STATE}/index" "${WORK}/listing" >"${WORK}/changed"
+  while IFS="${TAB}" read -r size mtime kind home path; do
+    n=$((n + 1))
+    cp -- "${path}" "${WORK}/files/${n}" 2>/dev/null || continue
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${n}" "${size}" "${mtime}" "${kind}" "${home}" "${path}" >>"${WORK}/manifest"
+  done <"${WORK}/changed"
+  open_files >>"${WORK}/context"
+  cp "${HERE}/scrub-gitleaks.toml" "${WORK}/gitleaks.toml"
+  if ! podman image exists "${GITLEAKS_IMAGE}"; then
+    podman pull -q "${GITLEAKS_IMAGE}" >/dev/null || die "could not pull ${GITLEAKS_IMAGE}"
+  fi
+  if [ -n "${check}" ]; then args+=(--check); fi
+  if [ -n "${manual}" ]; then args+=(--manual); fi
+  MOUNTS=(-v "${WORK}:/work:Z" --mount "type=image,source=${GITLEAKS_IMAGE},destination=/gitleaks")
+  scan_container scan "${args[@]}" || die "nothing was changed"
+  [ -z "${check}" ] || return 0
+  [ -f "${WORK}/out/actions" ] || die "the scan wrote no result, so nothing was changed"
+  : >"${WORK}/done"
+  while read -r verb m s; do
+    case "${verb}" in
+    replace) replace "${m}" || echo "${m}" >>"${WORK}/failed" ;;
+    done)
+      grep -qx -- "${m}" "${WORK}/failed" 2>/dev/null ||
+        awk -F'\t' -v n="${m}" -v s="${s}" '$1 == n { print s "\t" $3 "\t" $6 }' "${WORK}/manifest" >>"${WORK}/done"
+      ;;
+    esac
+  done <"${WORK}/out/actions"
+  # The index: every file still there that was scanned now, or before and
+  # has not changed since. One whose redaction waits for its session to end
+  # stays out, so the next scan looks at it again.
+  awk -F'\t' 'FILENAME == ARGV[1] { done[$3] = $0; next } FILENAME == ARGV[2] { old[$3] = $1 "\t" $2; next } $5 in done { print done[$5]; next } old[$5] == $1 "\t" $2 { print $1 "\t" $2 "\t" $5 }' \
+    "${WORK}/done" "${STATE}/index" "${WORK}/listing" >"${STATE}/index.new"
+  mv -f "${STATE}/index.new" "${STATE}/index"
+}
+
+cmd_rotated() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]] || usage
+  mkdir -p "${STATE}"
+  chmod 700 "${STATE}"
+  lock wait
+  MOUNTS=()
+  scan_container rotated "$1"
+}
+
+case "${1:-}" in
+scan)
+  shift
+  cmd_scan "$@"
+  ;;
+rotated) cmd_rotated "${2:-}" ;;
+*) usage ;;
+esac

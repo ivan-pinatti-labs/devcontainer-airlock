@@ -1,0 +1,539 @@
+#!/usr/bin/env python3
+"""Find the secrets agents wrote into their transcripts, and redact them.
+
+host/scrub runs this in a container with no network (docs/SCRUB.md). It
+gets copies of the files to look at, never the files themselves, and says
+which copies to put back:
+
+- /work/manifest: one copy a line, N, size, mtime, kind (host or
+  workbench), home and path of the original, tab separated; the copy is
+  /work/files/N.
+- /work/context: what is live, `busy HOME`, `busy-all HOME`, `live ID`,
+  `closed ID`, `open PATH`, `now EPOCH`, `quiet SECONDS`.
+- /work/known/: a file per secret whose value the host holds, named for it.
+- /work/known-env/: files of KEY=value lines, each value a secret.
+- /work/gitleaks.toml.
+- /work/out/: what it writes back, redacted/N (the redacted copies) and
+  actions (`replace N` and `done N SIZE` lines).
+- /state: the ledger of the secrets found, and the key its HMACs are made
+  with.
+
+Tier 1 is the secrets the host holds, searched for as they are. Tiers 2 and
+3 are gitleaks, run over a view of each file in which every JSON string is
+decoded, so a rule sees `api_key: "..."` rather than its escaped form. A
+hit from a rule in REPORT_ONLY is reported, never redacted or kept.
+"""
+
+# cspell:words argparse CREAT fdopen findall fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
+from __future__ import annotations
+
+import argparse
+import hashlib
+import hmac
+import json
+import os
+import re
+import secrets
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import NamedTuple
+
+GITLEAKS = "/gitleaks/usr/bin/gitleaks"
+# Long random looking strings with no known format: reported until their
+# hits on real history are measured (make scrub-check), never redacted.
+REPORT_ONLY = {"generic-high-entropy"}
+# Shorter hits are noise; a secret this long or longer keeps its last four
+# characters in its placeholder, so a rotation can be checked against it.
+MIN_LENGTH = 8
+TAIL_FROM = 20
+TAIL_SAFE = re.compile(r"[A-Za-z0-9+/=_.-]{4}")
+# A Claude Code conversation id, which names a conversation's own files.
+CONVERSATION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+RED = "\033[1;31m"
+RESET = "\033[0m"
+ENCODING = {"encoding": "utf-8", "errors": "surrogateescape"}
+
+
+class ScrubError(Exception):
+    """A scan that cannot go on; nothing is put back."""
+
+
+class Entry(NamedTuple):
+    n: str
+    size: int
+    mtime: int
+    kind: str
+    home: str
+    path: str
+
+
+class Context:
+    """What is live: homes in use, conversations running and ended, files
+    held open, and how recently a host file may have been written."""
+
+    def __init__(self, now: int = 0, quiet: int = 600, **sets: set[str]):
+        self.now = now
+        self.quiet = quiet
+        self.busy = sets.get("busy", set())
+        self.busy_all = sets.get("busy_all", set())
+        self.live = sets.get("live", set())
+        self.closed = sets.get("closed", set())
+        self.open = sets.get("open", set())
+
+
+class Output:
+    def __init__(self, color: bool):
+        self.color = color
+
+    def say(self, text: str, alarm: bool = False) -> None:
+        if alarm and self.color:
+            text = f"{RED}{text}{RESET}"
+        print(f"scrub: {text}", flush=True)
+
+
+def read_manifest(path: Path) -> list[Entry]:
+    entries = []
+    if not path.exists():
+        return entries
+    for line in path.read_text(**ENCODING).splitlines():
+        if not line:
+            continue
+        n, size, mtime, kind, home, original = line.split("\t", 5)
+        entries.append(Entry(n, int(size), int(mtime), kind, home, original))
+    return entries
+
+
+def read_context(path: Path) -> Context:
+    ctx = Context(now=int(time.time()))
+    if not path.exists():
+        return ctx
+    for line in path.read_text(**ENCODING).splitlines():
+        key, _, value = line.partition(" ")
+        match key:
+            case "busy":
+                ctx.busy.add(value)
+            case "busy-all":
+                ctx.busy_all.add(value)
+            case "live":
+                ctx.live.add(value)
+            case "closed":
+                ctx.closed.add(value)
+            case "open":
+                ctx.open.add(value)
+            case "now":
+                ctx.now = int(value)
+            case "quiet":
+                ctx.quiet = int(value)
+            case _:
+                raise ScrubError(f"unknown context line: {key}")
+    return ctx
+
+
+def is_live(entry: Entry, ctx: Context) -> bool:
+    """Whether a session may still write the file, so it is only read.
+
+    A file some process holds open is live, and so is everything in a home a
+    session of unknown conversations uses. In a home a session uses, a file
+    that names no conversation (history.jsonl, paste-cache) is live, and one
+    that names a conversation is live while that conversation is. A file in
+    a host home written in the last `quiet` seconds counts as live too,
+    unless it names a conversation known to have ended."""
+    if entry.path in ctx.open or entry.home in ctx.busy_all:
+        return True
+    relative = entry.path.removeprefix(entry.home)
+    ids = set(CONVERSATION.findall(relative))
+    if ids & ctx.live:
+        return True
+    if entry.home in ctx.busy and not ids:
+        return True
+    recent = ctx.now - entry.mtime < ctx.quiet
+    return entry.kind == "host" and recent and not ids & ctx.closed
+
+
+def env_values(text: str) -> dict[str, str]:
+    """The values of KEY=value lines, as a .env file holds them."""
+    values = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.removeprefix("export ").split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        values[key.strip()] = value
+    return values
+
+
+def read_known(work: Path) -> dict[str, str]:
+    """Tier 1: name to value, for the secrets the host holds."""
+    known = {}
+    folder = work / "known"
+    if folder.is_dir():
+        for path in sorted(folder.iterdir()):
+            known[path.name] = path.read_text(**ENCODING).strip()
+    folder = work / "known-env"
+    if folder.is_dir():
+        for path in sorted(folder.iterdir()):
+            for key, value in env_values(path.read_text(**ENCODING)).items():
+                known[f"env:{key}"] = value
+    return {name: value for name, value in known.items() if len(value) >= MIN_LENGTH}
+
+
+def is_json_lines(path: str) -> bool:
+    return path.endswith(".jsonl")
+
+
+def is_json(path: str) -> bool:
+    return path.endswith(".json")
+
+
+def strings(value, key: str | None = None):
+    """Every string in a decoded JSON value, a string under a key as
+    `key: value`, so a rule that wants the name beside the value sees both."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            yield from strings(v, k)
+    elif isinstance(value, list):
+        for v in value:
+            yield from strings(v)
+    elif isinstance(value, str):
+        yield f"{key}: {value}" if key else value
+
+
+def parses(text: str) -> bool:
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
+
+
+def view(path: str, text: str) -> str:
+    """What gitleaks scans for a file: its JSON strings decoded, one a line
+    (a line that is not JSON as it is); any other file as it is."""
+    if is_json(path) and parses(text):
+        return "\n".join(strings(json.loads(text)))
+    if not (is_json(path) or is_json_lines(path)):
+        return text
+    out = []
+    for line in text.splitlines():
+        if parses(line):
+            out.extend(strings(json.loads(line)))
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def gitleaks(work: Path, binary: str) -> list[dict]:
+    report = work / "out" / "gitleaks.json"
+    result = subprocess.run(
+        [
+            binary,
+            "dir",
+            str(work / "view"),
+            "--config",
+            str(work / "gitleaks.toml"),
+            "--max-decode-depth",
+            "0",
+            "--no-banner",
+            "--no-color",
+            "--log-level",
+            "error",
+            "--exit-code",
+            "0",
+            "--report-format",
+            "json",
+            "--report-path",
+            str(report),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ScrubError(f"gitleaks failed: {result.stderr.strip()}")
+    findings = json.loads(report.read_text())
+    report.unlink()
+    return findings or []
+
+
+def forms(value: str) -> list[str]:
+    """The ways a value is written in a file: as it is, and as a JSON string
+    holds it. Longest first, so no form is replaced inside another."""
+    found = {value, json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]}
+    return sorted(found, key=len, reverse=True)
+
+
+def tail(value: str) -> str:
+    end = value[-4:]
+    if len(value) >= TAIL_FROM and TAIL_SAFE.fullmatch(end):
+        return end
+    return ""
+
+
+def placeholder(rule: str, value: str) -> str:
+    end = tail(value)
+    return f"[REDACTED:{rule}:...{end}]" if end else f"[REDACTED:{rule}]"
+
+
+def plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def shown(rule: str, value: str) -> str:
+    end = tail(value)
+    return f"{rule} ...{end}" if end else rule
+
+
+def still_valid(path: str, before: str, after: str) -> bool:
+    """A redacted JSON file still parses, and in JSON lines every line that
+    parsed before still does."""
+    if is_json(path) and parses(before):
+        return parses(after)
+    if is_json_lines(path):
+        old, new = before.split("\n"), after.split("\n")
+        if len(old) != len(new):
+            return False
+        return all(parses(b) for a, b in zip(old, new, strict=True) if parses(a))
+    return True
+
+
+class Ledger:
+    """One entry per distinct secret, by the HMAC of its value under a key
+    that stays on the host, kept until the secret is rotated."""
+
+    def __init__(self, state: Path, writable: bool):
+        self.path = state / "ledger.json"
+        self.writable = writable
+        self.data = {"next": 1, "entries": []}
+        if self.path.exists():
+            self.data = json.loads(self.path.read_text())
+        self.key = self.load_key(state / "key")
+
+    def load_key(self, path: Path) -> bytes:
+        if path.exists():
+            return bytes.fromhex(path.read_text().strip())
+        key = secrets.token_bytes(32)
+        if self.writable:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(key.hex())
+        return key
+
+    def digest(self, value: str) -> str:
+        return hmac.new(self.key, value.encode(**ENCODING), hashlib.sha256).hexdigest()
+
+    def entry(self, value: str) -> dict | None:
+        mac = self.digest(value)
+        return next((e for e in self.data["entries"] if e["hmac"] == mac), None)
+
+    def by_id(self, number: int) -> dict | None:
+        return next((e for e in self.data["entries"] if e["id"] == number), None)
+
+    def seen(self, value: str, rule: str, path: str, known: str | None, out: Output) -> dict:
+        today = time.strftime("%Y-%m-%d")
+        entry = self.entry(value)
+        if entry is None:
+            entry = {
+                "id": self.data["next"],
+                "hmac": self.digest(value),
+                "rule": rule,
+                "tail": tail(value),
+                "known": known,
+                "first_seen": today,
+                "files": [],
+                "status": "open",
+            }
+            self.data["next"] += 1
+            self.data["entries"].append(entry)
+        elif entry["status"] == "rotated" and path not in entry["files"]:
+            # Found again somewhere new, not a copy already counted that
+            # waits for its session to end.
+            entry["status"] = "open"
+            entry.pop("rotated", None)
+            out.say(f"secret #{entry['id']} ({shown(rule, value)}) was marked rotated, and is found again", alarm=True)
+        entry["known"] = entry["known"] or known
+        entry["last_seen"] = today
+        if path not in entry["files"]:
+            entry["files"].append(path)
+        return entry
+
+    def rotate_changed(self, known: dict[str, str], out: Output) -> None:
+        """Tier 1 secrets whose value the host no longer holds are rotated."""
+        current = {name: self.digest(value) for name, value in known.items()}
+        for entry in self.data["entries"]:
+            name = entry["known"]
+            if entry["status"] == "open" and name in current and current[name] != entry["hmac"]:
+                self.mark_rotated(entry)
+                out.say(f"secret #{entry['id']} ({name}) has a new value now, so it is marked rotated")
+
+    def mark_rotated(self, entry: dict) -> None:
+        entry["status"] = "rotated"
+        entry["rotated"] = time.strftime("%Y-%m-%d")
+
+    def report_open(self, out: Output) -> None:
+        for e in self.data["entries"]:
+            if e["status"] != "open":
+                continue
+            what = f"{e['rule']} ...{e['tail']}" if e["tail"] else e["rule"]
+            files = plural(len(e["files"]), "file")
+            then = (
+                f"it is marked rotated on its own once {e['known']} changes"
+                if e["known"]
+                else f"then: make scrub-rotated ID={e['id']}"
+            )
+            out.say(
+                f"secret #{e['id']} ({what}), first seen {e['first_seen']} in {files}, is not rotated yet. Rotate it; {then}",
+                alarm=True,
+            )
+
+    def save(self) -> None:
+        if not self.writable:
+            return
+        tmp = self.path.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(self.data, f, indent=1)
+        os.replace(tmp, self.path)
+
+
+def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], findings: list[dict]):
+    """For each copy, its secrets: value to (rule, known name or None), the
+    tier 1 ones first; and the report only hits apart."""
+    redact: dict[str, dict[str, tuple[str, str | None]]] = {e.n: {} for e in entries}
+    report: dict[str, set[str]] = {e.n: set() for e in entries}
+    for e in entries:
+        for name, value in known.items():
+            if any(f in texts[e.n] for f in forms(value)):
+                redact[e.n][value] = (name, name)
+    for finding in findings:
+        n = Path(finding["File"]).name
+        value = finding["Secret"]
+        if n not in redact or len(value) < MIN_LENGTH:
+            continue
+        if finding["RuleID"] in REPORT_ONLY:
+            report[n].add(value)
+        else:
+            redact[n].setdefault(value, (finding["RuleID"], None))
+    for n, values in report.items():
+        values -= {v for v in values if any(v in r or r in v for r in redact[n])}
+    return redact, report
+
+
+def redacted(text: str, found: dict[str, tuple[str, str | None]]) -> tuple[str, list[str]]:
+    """The text with every secret replaced, and the secrets not in it as
+    they were found (so not redacted)."""
+    missing = []
+    for value in sorted(found, key=len, reverse=True):
+        rule = found[value][0]
+        hit = False
+        for form in forms(value):
+            if form in text:
+                text = text.replace(form, placeholder(rule, value))
+                hit = True
+        if not hit:
+            missing.append(value)
+    return text, missing
+
+
+def scan(args, out: Output) -> int:
+    work, state = Path(args.work), Path(args.state)
+    entries = read_manifest(work / "manifest")
+    ctx = read_context(work / "context")
+    known = read_known(work)
+    ledger = Ledger(state, writable=not args.check)
+    texts = {e.n: (work / "files" / e.n).read_text(**ENCODING) for e in entries}
+    findings = []
+    if entries:
+        (work / "view").mkdir(exist_ok=True)
+        for e in entries:
+            (work / "view" / e.n).write_text(view(e.path, texts[e.n]), **ENCODING)
+        findings = gitleaks(work, args.gitleaks)
+    redact, report = hits_of(entries, texts, known, findings)
+    actions = []
+    (work / "out" / "redacted").mkdir(parents=True, exist_ok=True)
+    for e in entries:
+        found = redact[e.n]
+        if args.manual:
+            for value in sorted(report[e.n]):
+                out.say(f"{shown('generic-high-entropy', value)} in {e.path}: a random looking string, reported only (docs/SCRUB.md)")
+        live = is_live(e, ctx)
+        for value, (rule, name) in sorted(found.items()):
+            if not args.check:
+                ledger.seen(value, rule, e.path, name, out)
+            what = f"{shown(rule, value)} in {e.path}"
+            if args.check:
+                out.say(f"{what}: found (scrub-check redacts nothing). Rotate it", alarm=True)
+            elif live:
+                out.say(f"{what}: found in a file a running session holds. Rotate it now; it is redacted once the session ends", alarm=True)
+        if args.check or (live and found):
+            continue
+        if not found:
+            actions.append(f"done {e.n} {e.size}")
+            continue
+        text, missing = redacted(texts[e.n], found)
+        for value in missing:
+            out.say(f"{shown(found[value][0], value)} in {e.path}: found, but not as it is written there, so not redacted. Rotate it", alarm=True)
+        if text == texts[e.n]:
+            actions.append(f"done {e.n} {e.size}")
+            continue
+        if not still_valid(e.path, texts[e.n], text):
+            out.say(f"{e.path}: redacting it would break its JSON, so it is left as it is. Rotate what it holds", alarm=True)
+            continue
+        copy = work / "out" / "redacted" / e.n
+        copy.write_text(text, **ENCODING)
+        for value in found:
+            if value not in missing:
+                out.say(f"{shown(found[value][0], value)} in {e.path}: redacted. Rotate it: it reached the model provider when it was written", alarm=True)
+        actions.append(f"replace {e.n}")
+        actions.append(f"done {e.n} {copy.stat().st_size}")
+    if not args.check:
+        ledger.rotate_changed(known, out)
+        (work / "out" / "actions").write_text("".join(f"{a}\n" for a in actions))
+    ledger.report_open(out)
+    if args.manual:
+        out.say(f"{plural(len(entries), 'file')} looked at")
+    ledger.save()
+    return 0
+
+
+def rotated(args, out: Output) -> int:
+    ledger = Ledger(Path(args.state), writable=True)
+    entry = ledger.by_id(args.id)
+    if entry is None:
+        out.say(f"no secret #{args.id} in the ledger")
+        return 2
+    ledger.mark_rotated(entry)
+    ledger.save()
+    out.say(f"secret #{args.id} ({entry['rule']}) marked rotated")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="scrub-scan")
+    parser.add_argument("--state", default="/state")
+    parser.add_argument("--color", action="store_true")
+    sub = parser.add_subparsers(dest="command", required=True)
+    s = sub.add_parser("scan")
+    s.add_argument("--work", default="/work")
+    s.add_argument("--gitleaks", default=GITLEAKS)
+    s.add_argument("--check", action="store_true")
+    s.add_argument("--manual", action="store_true")
+    r = sub.add_parser("rotated")
+    r.add_argument("id", type=int)
+    args = parser.parse_args(argv)
+    out = Output(color=args.color)
+    try:
+        if args.command == "scan":
+            return scan(args, out)
+        return rotated(args, out)
+    except (ScrubError, OSError, ValueError) as error:
+        out.say(f"the scan failed, nothing was changed: {error}", alarm=True)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

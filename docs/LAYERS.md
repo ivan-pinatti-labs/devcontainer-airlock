@@ -107,6 +107,8 @@ make attach-<session>    # resume a running or recent one; stop-, shell- for run
 make session-attach S=x  # any session by name; session-shell, -stop, -prune too
 make prune               # remove stopped sessions holding nothing of their own
 make claude-shell        # or codex-shell: a terminal in the workspace workbench
+make scrub               # find and redact secrets agents wrote into their history
+                         # (docs/SCRUB.md); scrub-check only reports
 ```
 
 `make` alone lists the targets, and Tab completes them. They come from
@@ -208,6 +210,11 @@ its record, folders and engine stay, so `make attach-<name>` brings it back
 with the same conversation, after a reboot too. `make prune` removes the
 stopped ones whose clones hold no uncommitted change and no commit missing
 from every remote.
+
+Every session start and end also runs the secret scan (docs/SCRUB.md) over
+the history that changed: a secret an agent printed is redacted once no
+session writes that file any more, from the host side, in a container with
+no network working on copies, and stays listed until it is rotated.
 
 ### Several repositories at once
 

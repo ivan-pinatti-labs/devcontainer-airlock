@@ -242,7 +242,7 @@ repos:
             \.(py|sh|js)$
             | /bin/ | /backends/
             | ^\.coveragerc$ | ^Makefile$ | requirements\.txt$
-            | ^host/workbench$
+            | ^host/(workbench|scrub|scrub-scan)$
             | ^images/l2/engine-bin/podman$
             | ^images/l2-engine/containers/crun-without-masked-paths$
             | ^images/workbench/share/git-hook$
