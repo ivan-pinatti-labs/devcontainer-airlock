@@ -713,7 +713,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `ubuntu`, `nodesource`, `hashicorp` | apt repositories, for building images | |
 | `debian` | Debian's apt archive. Plain http apt gets it from the package mirror without this set; list it to reach Debian itself (https sources, or the mirror off) | |
 | `docker-hub`, `quay` | those registries and their download hosts (Docker Hub's blobs come from an S3 bucket) | |
-| `gcr` | Google Container Registry's API on `gcr.io`, enough to read a tag list and the upload time it gives each digest. Image pulls fetch their layers from another host, which is not measured and not in the set | |
+| `gcr` | every request to `gcr.io`, Google Container Registry (the proxy allows the host, not particular paths or methods). Added to read a tag list and the upload time it gives each digest; image pulls fetch their layers from another host, which is not measured and not in the set | |
 | `hashicorp`, `opentofu` | the Terraform and OpenTofu registries and downloads | |
 | `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages (and Alpine's GitLab, for aports issues), trivy's database, sigstore's trust root | |
 | `aws` | AWS service APIs, and ECR Public with its CloudFront download host | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
