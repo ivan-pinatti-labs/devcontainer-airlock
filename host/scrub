@@ -242,10 +242,11 @@ cmd_scan() {
     esac
   done <"${WORK}/out/actions"
   # The index: every file still there that was scanned now, or before and
-  # has not changed since. One whose redaction waits for its session to end
-  # stays out, so the next scan looks at it again.
-  awk -F'\t' 'FILENAME == ARGV[1] { done[$3] = $0; next } FILENAME == ARGV[2] { old[$3] = $1 "\t" $2; next } $5 in done { print done[$5]; next } old[$5] == $1 "\t" $2 { print $1 "\t" $2 "\t" $5 }' \
-    "${WORK}/done" "${index}" "${WORK}/listing" >"${STATE}/index.new"
+  # has not changed since. One looked at now and not finished (it waits for
+  # its session to end, or could not be redacted) stays out, even if it was
+  # in before, so the next scan looks at it again.
+  awk -F'\t' 'FILENAME == ARGV[1] { done[$3] = $0; next } FILENAME == ARGV[2] { old[$3] = $1 "\t" $2; next } FILENAME == ARGV[3] { looked[$6] = 1; next } $5 in done { print done[$5]; next } !($5 in looked) && old[$5] == $1 "\t" $2 { print $1 "\t" $2 "\t" $5 }' \
+    "${WORK}/done" "${index}" "${WORK}/manifest" "${WORK}/listing" >"${STATE}/index.new"
   mv -f "${STATE}/index.new" "${STATE}/index"
 }
 

@@ -240,6 +240,19 @@ check "and passes --check on" 0 calls "python3 -I - scan --check"
 assert "it changes nothing" grep -qF "${pat}" "${claude}/projects/-w/raced.jsonl"
 assert "not even the index" cmp -s "${state}/index" "${__scratch}/index"
 
+# A file already scanned clean, holding a value that only becomes a secret
+# the host holds later: a full scan finds it, and if it cannot be rewritten
+# its old index row must go, or the next scan would skip it.
+transcript "${claude}/projects/-w/later.jsonl" "LATER_VALUE_0123456789"
+run host/scrub scan "${ctx}"
+assert "it is indexed clean first" grep -qF later.jsonl "${state}/index"
+echo "LATER=LATER_VALUE_0123456789" >>"${__scratch}/env"
+CHMOD_FAILS=1 run host/scrub scan "${ctx}" --full
+check "a full scan finds it" 0 err "scrub: ${claude}/projects/-w/later.jsonl could not be rewritten"
+assert "and drops its old index row" bash -c "! grep -qF later.jsonl '${state}/index'"
+run host/scrub scan "${ctx}"
+assert "so the next scan redacts it" grep -q 'REDACTED:env:LATER' "${claude}/projects/-w/later.jsonl"
+
 # One scan at a time.
 FLOCK_BUSY=1 run host/scrub scan "${ctx}"
 check "a scan while another runs is skipped" 0 out "scrub: another scan is running, so this one is skipped"
