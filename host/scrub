@@ -67,7 +67,7 @@ TAB="$(printf '\t')"
 lock() {
   exec {LOCK}>"${STATE}/lock"
   flock -n "${LOCK}" && return 0
-  [ "$1" = wait ] || return 1
+  [[ "$1" = wait ]] || return 1
   echo "scrub: waiting for another scan to finish"
   flock -w 900 "${LOCK}" || die "another scan has run for fifteen minutes; try again later"
 }
@@ -77,7 +77,7 @@ lock() {
 scan_container() {
   local color=()
   # SCRUB_TTY=1 as if on a terminal, for the tests.
-  if { [ -t 1 ] || [ "${SCRUB_TTY:-}" = 1 ]; } && [ -z "${NO_COLOR:-}" ]; then color=(--color); fi
+  if { [[ -t 1 ]] || [[ "${SCRUB_TTY:-}" = 1 ]]; } && [[ -z "${NO_COLOR:-}" ]]; then color=(--color); fi
   podman image exists "${IMAGE}" ||
     die "no image ${IMAGE}; host/workbench build (or pull) makes it"
   podman run --rm -i --network=none --cap-drop=all --security-opt no-new-privileges \
@@ -93,11 +93,11 @@ list_files() {
   local kind agent home paths p fmt
   while read -r kind agent home; do
     paths="${CLAUDE_PATHS}"
-    [ "${agent}" != codex ] || paths="${CODEX_PATHS}"
+    [[ "${agent}" != codex ]] || paths="${CODEX_PATHS}"
     fmt="${home//\\/\\\\}"
     fmt="${fmt//%/%%}"
     for p in ${paths}; do
-      [ -e "${home}/${p}" ] || continue
+      [[ -e "${home}/${p}" ]] || continue
       find "${home}/${p}" -type f ! -name "*${TAB}*" ! -name "*"$'\n'"*" \
         -printf "%s\t%T@\t${kind}\t${fmt}\t%p\n" 2>/dev/null || true
     done
@@ -110,10 +110,10 @@ list_files() {
 read_context() {
   local key a b c real n=0
   : >"${WORK}/homes"
-  while read -r key a b c || [ -n "${key}" ]; do
+  while read -r key a b c || [[ -n "${key}" ]]; do
     case "${key}" in
     home)
-      [ -d "${c}" ] || continue
+      [[ -d "${c}" ]] || continue
       real="$(realpath -e -- "${c}")"
       cut -d ' ' -f 3- "${WORK}/homes" | grep -qxF -- "${real}" || echo "${a} ${b} ${real}" >>"${WORK}/homes"
       ;;
@@ -156,7 +156,7 @@ replace() {
   local n="$1" size mtime path now tmp
   IFS="${TAB}" read -r size mtime path < <(awk -F'\t' -v n="${n}" '$1 == n { print $2 "\t" $3 "\t" $6 }' "${WORK}/manifest")
   now="$(stat -c "%s${TAB}%Y" -- "${path}" 2>/dev/null || true)"
-  if [ "${now}" != "${size}${TAB}${mtime}" ]; then
+  if [[ "${now}" != "${size}${TAB}${mtime}" ]]; then
     echo "scrub: ${path} changed while it was scanned, so it is left for the next scan"
     return 1
   fi
@@ -172,7 +172,7 @@ replace() {
 
 cmd_scan() {
   local context="${1:-}" full="" check="" manual="" wait=skip args=() n=0 size mtime kind home path verb m s
-  [ -f "${context}" ] || usage
+  [[ -f "${context}" ]] || usage
   shift
   for a in "$@"; do
     case "${a}" in
@@ -186,7 +186,7 @@ cmd_scan() {
   chmod 700 "${STATE}"
   # The first scan reads all the history there is, which can take minutes:
   # not at a session's start or end, unasked.
-  if [ -z "${full}" ] && [ ! -f "${STATE}/index" ]; then
+  if [[ -z "${full}" ]] && [[ ! -f "${STATE}/index" ]]; then
     echo "scrub: no secret scan has run here yet; make scrub runs the first, over all the history (it can take a while), and from then on every session start and end looks at what changed"
     return 0
   fi
@@ -214,12 +214,12 @@ cmd_scan() {
   if ! podman image exists "${GITLEAKS_IMAGE}"; then
     podman pull -q "${GITLEAKS_IMAGE}" >/dev/null || die "could not pull ${GITLEAKS_IMAGE}"
   fi
-  if [ -n "${check}" ]; then args+=(--check); fi
-  if [ -n "${manual}" ]; then args+=(--manual); fi
+  if [[ -n "${check}" ]]; then args+=(--check); fi
+  if [[ -n "${manual}" ]]; then args+=(--manual); fi
   MOUNTS=(-v "${WORK}:/work:Z" --mount "type=image,source=${GITLEAKS_IMAGE},destination=/gitleaks")
   scan_container scan "${args[@]}" || die "nothing was changed"
-  [ -z "${check}" ] || return 0
-  [ -f "${WORK}/out/actions" ] || die "the scan wrote no result, so nothing was changed"
+  [[ -z "${check}" ]] || return 0
+  [[ -f "${WORK}/out/actions" ]] || die "the scan wrote no result, so nothing was changed"
   : >"${WORK}/done"
   while read -r verb m s; do
     case "${verb}" in

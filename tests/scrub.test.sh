@@ -77,12 +77,11 @@ if [ -n "${PODMAN_RUN:-}" ]; then
   WORK="${work}" STATE="${state}" bash -c "${PODMAN_RUN}" sh "${rest[@]}"
   exit
 fi
-args=(--state "${state}")
-for r in "${rest[@]}"; do
-  args+=("${r}")
-  if [ "${r}" = scan ]; then args+=(--work "${work}" --gitleaks "${FAKE_GITLEAKS}"); fi
-done
-exec python3 -I -c "${script}" "${args[@]}"
+# Its fixed folders, where this stub found them mounted.
+script="$(sed -e "s|^WORK = Path(\"/work\")|WORK = Path(\"${work}\")|" \
+  -e "s|^STATE = Path(\"/state\")|STATE = Path(\"${state}\")|" \
+  -e "s|^GITLEAKS = .*|GITLEAKS = \"${FAKE_GITLEAKS}\"|" <<<"${script}")"
+exec python3 -I -c "${script}" "${rest[@]}"
 PODMAN
 "${REAL_CHMOD}" +x "${__scratch}/bin/podman"
 

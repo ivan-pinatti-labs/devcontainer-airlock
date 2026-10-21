@@ -40,6 +40,10 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+# Where host/scrub mounts what the scan works on; fixed, never taken from
+# the command line.
+WORK = Path("/work")
+STATE = Path("/state")
 GITLEAKS = "/gitleaks/usr/bin/gitleaks"
 # Long random looking strings with no known format: reported until their
 # hits on real history are measured (make scrub-check), never redacted.
@@ -440,7 +444,7 @@ def redacted(text: str, found: dict[str, tuple[str, str | None]]) -> tuple[str, 
 
 
 def scan(args, out: Output) -> int:
-    work, state = Path(args.work), Path(args.state)
+    work, state = WORK, STATE
     entries = read_manifest(work / "manifest")
     ctx = read_context(work / "context")
     known = read_known(work)
@@ -451,7 +455,7 @@ def scan(args, out: Output) -> int:
         (work / "view").mkdir(exist_ok=True)
         for e in entries:
             (work / "view" / e.n).write_text(view(e.path, texts[e.n]), **ENCODING)
-        findings = gitleaks(work, args.gitleaks)
+        findings = gitleaks(work, GITLEAKS)
     redact, report = hits_of(entries, texts, known, findings)
     actions = []
     (work / "out" / "redacted").mkdir(parents=True, exist_ok=True)
@@ -501,7 +505,7 @@ def scan(args, out: Output) -> int:
 
 
 def rotated(args, out: Output) -> int:
-    ledger = Ledger(Path(args.state), writable=True)
+    ledger = Ledger(STATE, writable=True)
     entry = ledger.by_id(args.id)
     if entry is None:
         out.say(f"no secret #{args.id} in the ledger")
@@ -514,12 +518,9 @@ def rotated(args, out: Output) -> int:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="scrub-scan")
-    parser.add_argument("--state", default="/state")
     parser.add_argument("--color", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
     s = sub.add_parser("scan")
-    s.add_argument("--work", default="/work")
-    s.add_argument("--gitleaks", default=GITLEAKS)
     s.add_argument("--check", action="store_true")
     s.add_argument("--manual", action="store_true")
     r = sub.add_parser("rotated")

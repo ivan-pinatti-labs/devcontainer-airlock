@@ -101,12 +101,8 @@ class Work:
         (self.work / "known-env" / "1").write_text(text)
 
     def run(self, gitleaks, *args, color=False):
-        argv = ["--state", str(self.state)]
-        if color:
-            argv.append("--color")
-        return scrub.main(
-            [*argv, "scan", "--work", str(self.work), "--gitleaks", gitleaks, *args]
-        )
+        scrub.GITLEAKS = gitleaks
+        return scrub.main([*(["--color"] if color else []), "scan", *args])
 
     def actions(self):
         return (self.work / "out" / "actions").read_text().split("\n")[:-1]
@@ -119,9 +115,14 @@ class Work:
 
 
 @pytest.fixture
-def w(tmp_path):
+def w(tmp_path, monkeypatch):
     work = Work(tmp_path)
     work.context("now 100000", "quiet 600")
+    # The scan's folders are fixed (where host/scrub mounts them): here,
+    # the test's own.
+    monkeypatch.setattr(scrub, "WORK", work.work)
+    monkeypatch.setattr(scrub, "STATE", work.state)
+    monkeypatch.setattr(scrub, "GITLEAKS", scrub.GITLEAKS)
     return work
 
 
@@ -404,7 +405,7 @@ def test_a_multi_line_key_is_found_escaped_in_json(w, gitleaks):
 def test_rotated_by_hand_then_found_somewhere_new_reopens(w, gitleaks, capsys):
     w.add("a.jsonl", transcript(PAT))
     w.run(gitleaks)
-    assert scrub.main(["--state", str(w.state), "rotated", "1"]) == 0
+    assert scrub.main(["rotated", "1"]) == 0
     assert "secret #1 (github-pat) marked rotated" in capsys.readouterr().out
     assert w.ledger()["entries"][0]["status"] == "rotated"
     w.run(gitleaks)  # the same file again: still rotated
@@ -417,7 +418,7 @@ def test_rotated_by_hand_then_found_somewhere_new_reopens(w, gitleaks, capsys):
 
 
 def test_rotated_needs_an_entry(w, capsys):
-    assert scrub.main(["--state", str(w.state), "rotated", "7"]) == 2
+    assert scrub.main(["rotated", "7"]) == 2
     assert "no secret #7 in the ledger" in capsys.readouterr().out
 
 
@@ -529,14 +530,15 @@ def test_a_ledger_on_disk_is_read(w, gitleaks):
     assert w.ledger()["entries"][0]["id"] == 5
 
 
-def test_main_guard_runs_main(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        sys, "argv", ["scrub-scan", "--state", str(tmp_path), "rotated", "1"]
-    )
+def test_main_guard_runs_main(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["scrub-scan"])
     with pytest.raises(SystemExit) as exit_:
         load("host/scrub-scan", "__main__")
-    assert exit_.value.code == 2
+    assert exit_.value.code == 2  # no command
 
 
-def test_runs_with_no_environment_of_its_own():
+def test_its_folders_are_fixed_not_given():
+    assert (str(scrub.WORK), str(scrub.STATE)) == ("/work", "/state")
     assert os.path.basename(scrub.GITLEAKS) == "gitleaks"
+    with pytest.raises(SystemExit):
+        scrub.main(["scan", "--work", "/elsewhere"])
