@@ -111,6 +111,12 @@ assert "the end knows its conversation ended" grep -qx "closed ${id}" "${got}/co
 SCAN_EXIT=1 run "${wb}" session attach "${s}"
 check "a failed scan never stops a session" 0 err "workbench: the secret scan failed (above); make scrub-check shows what is left"
 check "which runs" 0 calls "workbench-claude-s-${s} claude --resume ${id}"
+mkdir "${__scratch}/ctx-tmp"
+TMPDIR="${__scratch}/ctx-tmp" WORKBENCH_SCRUB_QUIET=10m run "${wb}" session attach "${s}"
+check "nor does a setting the scan refuses" 0 err "workbench: WORKBENCH_SCRUB_QUIET is '10m'; use a whole number of minutes"
+check "the session runs all the same" 0 calls "workbench-claude-s-${s} claude --resume ${id}"
+check "and ends as it should" 0 out "workbench: session ${s} stopped; make attach-${s} resumes it"
+assert "leaving no context file behind" test -z "$(ls "${__scratch}/ctx-tmp")"
 container "workbench-claude-s-${s}" running workbench.session="${s}" workbench.agent=claude
 rm -rf "${got}"
 run "${wb}" session stop "${s}"

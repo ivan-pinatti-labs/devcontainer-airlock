@@ -93,10 +93,13 @@ redacted by the first scan after its session ends.
 
 gitleaks reads a view of each file in which every JSON string is decoded and
 written beside its key, so a rule sees `api_key: "..."` rather than its
-escaped form. Not secrets, whatever their entropy: git object names,
-`sha256` digests, UUIDs and numbers (run and job ids). A hit shorter than
-eight characters is ignored. gitleaks does not decode base64 here, so a
-secret inside a base64 blob is not found.
+escaped form. Tier 3 never counts git object names, `sha256` digests,
+UUIDs or numbers (run and job ids), and its entropy threshold keeps them
+out anyway; gitleaks' own rules keep only their own allowlists, so a
+credential with one of those shapes (a 32 hex character API key, a UUID
+key) is still found. A hit shorter than eight characters is ignored.
+gitleaks does not decode base64 here, so a secret inside a base64 blob is
+not found.
 
 ## Redaction
 

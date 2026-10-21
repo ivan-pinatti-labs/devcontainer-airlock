@@ -2038,7 +2038,11 @@ scrub_pass() {
   local closed="$1" ctx rc=0
   shift
   ctx="$(mktemp)"
-  scrub_context "${closed}" >"${ctx}"
+  # In a shell of its own, so a setting it refuses ends only the scan.
+  if ! (scrub_context "${closed}") >"${ctx}"; then
+    rm -f "${ctx}"
+    return 1
+  fi
   SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" scan "${ctx}" "$@" || rc=$?
   rm -f "${ctx}"
   return "${rc}"

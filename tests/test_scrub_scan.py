@@ -23,6 +23,7 @@ scrub = load("host/scrub-scan", "scrub_scan")
 
 PAT = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"  # pragma: allowlist secret
 AWS = "AKIA" + "ABCDEFGHIJKLMN23"
+API = "Zq8Kd93L" + "mx0Pw2Rt"
 KNOWN = "known-secret-value-0123456789"
 SHA = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 DIGEST = "sha256:" + "ab" * 32
@@ -141,19 +142,14 @@ def test_every_tier_is_redacted_and_identifiers_are_not(w, gitleaks, capsys):
     w.known("gh-broker-token", KNOWN)
     text = transcript(
         f"export GITHUB_TOKEN={PAT}",
-        f'config: api_key: "Zq8Kd93Lmx0Pw2Rt"\nand {AWS}',  # pragma: allowlist secret
+        f'config: api_key: "{API}"\nand {AWS}',
         f"echo {KNOWN}",
         f"commit {SHA} image {DIGEST} id {UUID_A} run 18712345678",
     )
     n = w.add(f"projects/-w/{UUID_A}.jsonl", text)
     assert w.run(gitleaks, "--manual") == 0
     out = w.redacted(n)
-    assert (
-        PAT not in out
-        and AWS not in out
-        and KNOWN not in out
-        and "Zq8Kd93Lmx0Pw2Rt" not in out
-    )
+    assert PAT not in out and AWS not in out and KNOWN not in out and API not in out
     assert f"[REDACTED:github-pat:...{PAT[-4:]}]" in out
     # 20 characters and more keep their last four.
     assert f"[REDACTED:aws-access-token:...{AWS[-4:]}]" in out

@@ -14,7 +14,9 @@ export XDG_STATE_HOME="${__scratch}/state"
 mkdir -p "${HOME}"
 unset NO_COLOR SCRUB_IMAGE WORKBENCH_TAG
 state="${XDG_STATE_HOME}/workbench/scrub"
-pat="ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" # pragma: allowlist secret
+# Made up, and split so the literal has no token's shape.
+pat="ghp_"
+pat+="A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" # pragma: allowlist secret
 known="known-secret-value-0123456789"
 live_id=11111111-2222-4333-8444-555555555555
 done_id=3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d41
@@ -151,6 +153,10 @@ run host/scrub scan "${ctx}"
 check "the first scan is not one a session runs" 0 out "scrub: no secret scan has run here yet; make scrub runs the first"
 refute "so nothing is looked at" "podman"
 assert "nor kept" test ! -e "${state}/index"
+SECRET_VALUE="${known}" run host/scrub scan "${ctx}" --full --check
+assert "a check does not count as the first scan" test ! -e "${state}/index"
+PODMAN_RUN='exit 1' run host/scrub scan "${ctx}" --full
+assert "nor does one that failed" test ! -e "${state}/index"
 SECRET_VALUE="${known}" run host/scrub scan "${ctx}" --full
 check "a scan redacts what no session holds" 0 out \
   "scrub: github-pat ...Q7r8 in ${claude}/projects/-w/${done_id}.jsonl: redacted. Rotate it"

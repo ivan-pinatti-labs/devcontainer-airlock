@@ -1,7 +1,10 @@
 # gitleaks configuration for host/scrub (docs/SCRUB.md): gitleaks' own rules,
 # plus a rule for long random looking strings that have no known format,
-# which host/scrub reports and never redacts, and an allowlist of the
-# identifiers agent transcripts are full of.
+# which host/scrub reports and never redacts. That rule alone skips the
+# identifiers agent transcripts are full of (their entropy is below its
+# threshold today, so this only matters if the threshold is lowered); the
+# default rules keep their own allowlists, so a credential shaped like one
+# (a 32 hex API key, a UUID key) is still found.
 title = "devcontainer-airlock scrub"
 
 [extend]
@@ -17,7 +20,7 @@ regex = '''(?:^|[^A-Za-z0-9+/=_.-])([A-Za-z0-9_-]{32,200})(?:[^A-Za-z0-9+/=_.-]|
 secretGroup = 1
 entropy = 4.5
 
-[[allowlists]]
+[[rules.allowlists]]
 description = "Identifiers, not secrets: git object names, sha256 digests, UUIDs, numeric ids" # pragma: allowlist secret
 regexTarget = "secret"
 regexes = [
