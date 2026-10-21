@@ -226,7 +226,15 @@ cmd_scan() {
   : >"${WORK}/done"
   while read -r verb m s; do
     case "${verb}" in
-    replace) replace "${m}" || echo "${m}" >>"${WORK}/failed" ;;
+    # What a copy's redaction is, said only once it has replaced the file.
+    say) printf '%s\n' "${s}" >>"${WORK}/said.${m}" ;;
+    replace)
+      if replace "${m}"; then
+        cat "${WORK}/said.${m}" 2>/dev/null || true
+      else
+        echo "${m}" >>"${WORK}/failed"
+      fi
+      ;;
     done)
       grep -qx -- "${m}" "${WORK}/failed" 2>/dev/null ||
         awk -F'\t' -v n="${m}" -v s="${s}" '$1 == n { print s "\t" $3 "\t" $6 }' "${WORK}/manifest" >>"${WORK}/done"

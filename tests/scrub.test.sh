@@ -217,10 +217,11 @@ transcript "${claude}/projects/-w/raced.jsonl" "${pat}"
 # shellcheck disable=SC2016 # expanded by the stub
 PODMAN_RUN='mkdir -p "${WORK}/out/redacted"; : >"${WORK}/out/actions"
   while IFS="$(printf "\t")" read -r n _ _ _ _ p; do
-    touch "${p}"; echo x >"${WORK}/out/redacted/${n}"; printf "replace %s\ndone %s 2\n" "${n}" "${n}" >>"${WORK}/out/actions"
+    touch "${p}"; echo x >"${WORK}/out/redacted/${n}"; printf "say %s scrub: %s redacted to X\nreplace %s\ndone %s 2\n" "${n}" "${p}" "${n}" "${n}" >>"${WORK}/out/actions"
   done <"${WORK}/manifest"' run host/scrub scan "${ctx}"
 check "a file written while it was scanned is left" 0 out \
   "scrub: ${claude}/projects/-w/raced.jsonl changed while it was scanned, so it is left for the next scan"
+assert "and not said to be redacted" bash -c "! grep -q 'raced.jsonl redacted to' '${__scratch}/out'"
 assert "as it is" grep -qF "${pat}" "${claude}/projects/-w/raced.jsonl"
 assert "and looked at again next time" bash -c "! grep -qF raced.jsonl '${state}/index'"
 old "${claude}/projects/-w/raced.jsonl"

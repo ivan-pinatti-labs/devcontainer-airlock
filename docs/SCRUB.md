@@ -152,7 +152,7 @@ root, given the copies, the scratch folder for its results and the state
 folder; gitleaks (pinned by digest, Renovate moves it) is mounted into it
 as an image. A redacted copy goes back only if the original still has the
 size and time it had when it was copied, through a file beside it renamed
-over it.
+over it, and only then does the scan say it was redacted.
 
 ## Settings
 

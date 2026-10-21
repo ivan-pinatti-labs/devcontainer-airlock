@@ -91,10 +91,13 @@ class Output:
     def __init__(self, color: bool):
         self.color = color
 
-    def say(self, text: str, alarm: bool = False) -> None:
+    def line(self, text: str, alarm: bool = False) -> str:
         if alarm and self.color:
             text = f"{RED}{text}{RESET}"
-        print(f"scrub: {text}", flush=True)
+        return f"scrub: {text}"
+
+    def say(self, text: str, alarm: bool = False) -> None:
+        print(self.line(text, alarm), flush=True)
 
 
 def read_manifest(path: Path) -> list[Entry]:
@@ -458,9 +461,9 @@ def scan(args, out: Output) -> int:
         findings = gitleaks(work, GITLEAKS)
     redact, report = hits_of(entries, texts, known, findings)
     actions = []
-    # What a check says it would do, and what a scan says it did: the same
-    # decisions either way, only a check writes nothing.
-    done = "would be redacted to" if args.check else "redacted to"
+    # A check says what a scan would do: the same decisions, nothing written.
+    # What a scan redacted is said by host/scrub once each file is replaced
+    # (its `say` actions), since it can still refuse a file that changed.
     wait = "it would wait" if args.check else "it waits"
     counts = {"redacted": 0, "waiting": 0, "kept": 0}
     (work / "out" / "redacted").mkdir(parents=True, exist_ok=True)
@@ -494,7 +497,15 @@ def scan(args, out: Output) -> int:
         for value in sorted(found):
             if value not in missing:
                 rule = found[value][0]
-                out.say(f"{shown(rule, value)} in {e.path}: {done} {placeholder(rule, value)}. Rotate it: it reached the model provider when it was written", alarm=True)
+                done = "would be redacted to" if args.check else "redacted to"
+                said = out.line(
+                    f"{shown(rule, value)} in {e.path}: {done} {placeholder(rule, value)}. Rotate it: it reached the model provider when it was written",
+                    alarm=True,
+                )
+                if args.check:
+                    print(said, flush=True)
+                else:
+                    actions.append(f"say {e.n} {said}")
                 counts["redacted"] += 1
         if args.check:
             continue
@@ -507,9 +518,9 @@ def scan(args, out: Output) -> int:
         (work / "out" / "actions").write_text("".join(f"{a}\n" for a in actions))
     ledger.report_open(out)
     if args.manual:
-        verb = "would be" if args.check else "were"
+        verb = "would be redacted" if args.check else "to redact"
         out.say(
-            f"{plural(len(entries), 'file')} looked at: {counts['redacted']} {verb} redacted, "
+            f"{plural(len(entries), 'file')} looked at: {counts['redacted']} {verb}, "
             f"{counts['waiting']} wait for a session to end, {counts['kept']} cannot be redacted"
             + ("; dry run, nothing was changed" if args.check else "")
         )

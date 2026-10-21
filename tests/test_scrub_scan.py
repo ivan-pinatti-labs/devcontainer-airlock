@@ -159,7 +159,9 @@ def test_every_tier_is_redacted_and_identifiers_are_not(w, gitleaks, capsys):
         assert keep in out
     for row in out.splitlines():
         json.loads(row)
-    assert w.actions() == ["replace 1", f"done 1 {len(out.encode())}"]
+    said = [a for a in w.actions() if a.startswith("say 1 ")]
+    assert len(said) == 4  # one line each, for host/scrub to say once replaced
+    assert w.actions()[4:] == ["replace 1", f"done 1 {len(out.encode())}"]
     ledger = w.ledger()
     assert sorted(e["rule"] for e in ledger["entries"]) == [
         "aws-access-token",
@@ -172,9 +174,10 @@ def test_every_tier_is_redacted_and_identifiers_are_not(w, gitleaks, capsys):
     )
     printed = capsys.readouterr().out
     assert (
-        f"github-pat ...{PAT[-4:]} in {w.home}/projects/-w/{UUID_A}.jsonl: redacted to [REDACTED:github-pat:...{PAT[-4:]}]. Rotate it"
-        in printed
+        f"say 1 scrub: github-pat ...{PAT[-4:]} in {w.home}/projects/-w/{UUID_A}.jsonl: redacted to [REDACTED:github-pat:...{PAT[-4:]}]. Rotate it"
+        in "\n".join(said)
     )
+    assert "redacted to" not in printed  # not before the file is replaced
     assert "is not rotated yet" in printed
     assert "1 file looked at" in printed
     assert KNOWN not in printed and PAT not in printed
@@ -281,7 +284,7 @@ def test_a_dry_run_says_what_a_scan_would_do(w, gitleaks, monkeypatch, capsys):
     assert not list((w.work / "out" / "redacted").iterdir())
     assert {n: (w.work / "files" / n).read_text() for n in "1234"} == before
     w.run(gitleaks, "--manual")
-    assert "1 were redacted" in capsys.readouterr().out
+    assert "1 to redact" in capsys.readouterr().out
 
 
 # The view gitleaks reads, and redaction.
