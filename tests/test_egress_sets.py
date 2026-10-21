@@ -31,6 +31,10 @@ def domains(name):
         ("aws", "d2glxqk2uabbnd.cloudfront.net"),
         ("golang", "vuln.go.dev"),
         ("alpine", "gitlab.alpinelinux.org"),
+        # A registry's own record of when a digest was pushed, which is what
+        # docker-torrent-box-with-vpn's manual image releases check for an
+        # image Renovate cannot age (its issue 321).
+        ("gcr", "gcr.io"),
     ],
 )
 def test_the_set_holds_the_destination(name, domain):

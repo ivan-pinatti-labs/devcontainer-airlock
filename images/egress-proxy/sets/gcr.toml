@@ -1,0 +1,2 @@
+description = "Google Container Registry (gcr.io): its registry API, including the tag list that carries each digest's upload time."
+domains = ["gcr.io"]
