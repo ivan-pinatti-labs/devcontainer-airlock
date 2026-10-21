@@ -458,22 +458,24 @@ def scan(args, out: Output) -> int:
         findings = gitleaks(work, GITLEAKS)
     redact, report = hits_of(entries, texts, known, findings)
     actions = []
+    # What a check says it would do, and what a scan says it did: the same
+    # decisions either way, only a check writes nothing.
+    done = "would be redacted to" if args.check else "redacted to"
+    wait = "it would wait" if args.check else "it waits"
+    counts = {"redacted": 0, "waiting": 0, "kept": 0}
     (work / "out" / "redacted").mkdir(parents=True, exist_ok=True)
     for e in entries:
         found = redact[e.n]
         if args.manual:
             for value in sorted(report[e.n]):
                 out.say(f"{shown('generic-high-entropy', value)} in {e.path}: a random looking string, reported only (docs/SCRUB.md)")
-        live = is_live(e, ctx)
-        for value, (rule, name) in sorted(found.items()):
-            if not args.check:
+        if not args.check:
+            for value, (rule, name) in sorted(found.items()):
                 ledger.seen(value, rule, e.path, name, out)
-            what = f"{shown(rule, value)} in {e.path}"
-            if args.check:
-                out.say(f"{what}: found (scrub-check redacts nothing). Rotate it", alarm=True)
-            elif live:
-                out.say(f"{what}: found in a file a running session holds. Rotate it now; it is redacted once the session ends", alarm=True)
-        if args.check or (live and found):
+        if is_live(e, ctx) and found:
+            for value, (rule, _) in sorted(found.items()):
+                out.say(f"{shown(rule, value)} in {e.path}: in a file a running session holds, so {wait} for the session to end. Rotate it now", alarm=True)
+            counts["waiting"] += len(found)
             continue
         if not found:
             actions.append(f"done {e.n} {e.size}")
@@ -481,17 +483,23 @@ def scan(args, out: Output) -> int:
         text, missing = redacted(texts[e.n], found)
         for value in missing:
             out.say(f"{shown(found[value][0], value)} in {e.path}: found, but not as it is written there, so not redacted. Rotate it", alarm=True)
+        counts["kept"] += len(missing)
         if text == texts[e.n]:
             actions.append(f"done {e.n} {e.size}")
             continue
         if not still_valid(e.path, texts[e.n], text):
             out.say(f"{e.path}: redacting it would break its JSON, so it is left as it is. Rotate what it holds", alarm=True)
+            counts["kept"] += len(found) - len(missing)
+            continue
+        for value in sorted(found):
+            if value not in missing:
+                rule = found[value][0]
+                out.say(f"{shown(rule, value)} in {e.path}: {done} {placeholder(rule, value)}. Rotate it: it reached the model provider when it was written", alarm=True)
+                counts["redacted"] += 1
+        if args.check:
             continue
         copy = work / "out" / "redacted" / e.n
         copy.write_text(text, **ENCODING)
-        for value in found:
-            if value not in missing:
-                out.say(f"{shown(found[value][0], value)} in {e.path}: redacted. Rotate it: it reached the model provider when it was written", alarm=True)
         actions.append(f"replace {e.n}")
         actions.append(f"done {e.n} {copy.stat().st_size}")
     if not args.check:
@@ -499,7 +507,12 @@ def scan(args, out: Output) -> int:
         (work / "out" / "actions").write_text("".join(f"{a}\n" for a in actions))
     ledger.report_open(out)
     if args.manual:
-        out.say(f"{plural(len(entries), 'file')} looked at")
+        verb = "would be" if args.check else "were"
+        out.say(
+            f"{plural(len(entries), 'file')} looked at: {counts['redacted']} {verb} redacted, "
+            f"{counts['waiting']} wait for a session to end, {counts['kept']} cannot be redacted"
+            + ("; dry run, nothing was changed" if args.check else "")
+        )
     ledger.save()
     return 0
 

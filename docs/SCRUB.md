@@ -18,7 +18,7 @@ finding says "rotate it".
 | A session starts (before its workbench) | files new or changed since the last scan | redacts what no session holds, reports the rest |
 | A session ends (`make claude` exiting, `make stop-<name>`) | the same, and that session's conversation counts as ended | the same |
 | `make scrub` | every file | the same |
-| `make scrub-check` | every file | nothing: reports only, keeps nothing |
+| `make scrub-check` | every file | nothing: a dry run, see below |
 
 Every run ends by listing the secrets found and not rotated yet. After
 rotating one, `make scrub-rotated ID=<n>` takes it off the list. The GitHub
@@ -30,6 +30,24 @@ session start or end does not run it: until `make scrub` (or
 `make scrub-check`, which keeps nothing, so it does not count) has run once,
 they only say so. Run `make scrub-check` first to see what the first
 `make scrub` would change.
+
+### Dry run
+
+`make scrub-check` makes every decision `make scrub` would and changes
+nothing: no file, no ledger entry, no index. For each secret it says which
+file holds it and what would happen to it:
+
+```text
+scrub: github-pat ...Q7r8 in <file>: would be redacted to [REDACTED:github-pat:...Q7r8]. Rotate it: ...
+scrub: aws-access-token ...MN23 in <file>: in a file a running session holds, so it would wait for the session to end. Rotate it now
+scrub: <file>: redacting it would break its JSON, so it is left as it is. Rotate what it holds
+scrub: generic-high-entropy ...xfCQ in <file>: a random looking string, reported only (docs/SCRUB.md)
+scrub: 812 files looked at: 3 would be redacted, 1 wait for a session to end, 1 cannot be redacted; dry run, nothing was changed
+```
+
+It also lists the secrets already in the ledger and not rotated. The
+values themselves are never printed, only their rule and last four
+characters.
 
 A scan at session start or end never stops the session: if it fails, it
 says so and the session goes on. `WORKBENCH_SCRUB=0` turns those two off;

@@ -159,7 +159,7 @@ PODMAN_RUN='exit 1' run host/scrub scan "${ctx}" --full
 assert "nor does one that failed" test ! -e "${state}/index"
 SECRET_VALUE="${known}" run host/scrub scan "${ctx}" --full
 check "a scan redacts what no session holds" 0 out \
-  "scrub: github-pat ...Q7r8 in ${claude}/projects/-w/${done_id}.jsonl: redacted. Rotate it"
+  "scrub: github-pat ...Q7r8 in ${claude}/projects/-w/${done_id}.jsonl: redacted to [REDACTED:github-pat:...Q7r8]. Rotate it"
 assert "the token is gone from it" grep -q "REDACTED:github-pat:...Q7r8" "${claude}/projects/-w/${done_id}.jsonl"
 assert "which stays valid JSON" python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "${claude}/projects/-w/${done_id}.jsonl"
 assert "with its mode" test "$(stat -c %a "${claude}/projects/-w/${done_id}.jsonl")" = 600
@@ -177,7 +177,7 @@ assert "and its logs" grep -q REDACTED "${codex}/log/codex.log"
 assert "a workbench's own folder too" grep -q REDACTED "${wb_home}/file-history/${done_id}/a"
 assert "a folder whose name holds % and a backslash" grep -q REDACTED "${odd}/projects/x/t.jsonl"
 check "a live conversation is only reported" 0 out \
-  "${claude}/projects/-w/${live_id}.jsonl: found in a file a running session holds"
+  "${claude}/projects/-w/${live_id}.jsonl: in a file a running session holds, so it waits for the session to end"
 assert "and left as it is" grep -qF "${pat}" "${claude}/projects/-w/${live_id}.jsonl"
 assert "so is a folder a session holds whole" grep -qF "${pat}" "${HOME}/sp ace/.claude/history.jsonl"
 assert "Claude Code's process records are not looked at" grep -qF "${pat}" "${claude}/sessions/1.key"
@@ -205,7 +205,7 @@ transcript "${claude}/projects/-w/open.jsonl" "${pat}"
 holder=$!
 "${REAL_SLEEP}" 0.2
 SECRET_FAILS=1 run host/scrub scan "${ctx}"
-check "a file held open is only reported" 0 out "${claude}/projects/-w/open.jsonl: found in a file a running session holds"
+check "a file held open is only reported" 0 out "${claude}/projects/-w/open.jsonl: in a file a running session holds, so it waits"
 kill "${holder}"
 wait "${holder}" 2>/dev/null || true
 check "a secret podman cannot give is said" 0 err "scrub: could not read podman secret gh-devcontainer"
@@ -234,7 +234,7 @@ assert "a file that cannot be copied is skipped" bash -c "! grep -q raced '${__s
 # --check and --full.
 cp "${state}/index" "${__scratch}/index"
 run host/scrub scan "${ctx}" --full --check
-check "check looks at every file" 0 out "found (scrub-check redacts nothing)"
+check "check looks at every file" 0 out "would be redacted to [REDACTED:github-pat:...Q7r8]"
 check "and passes --check on" 0 calls "python3 -I - scan --check"
 assert "it changes nothing" grep -qF "${pat}" "${claude}/projects/-w/raced.jsonl"
 assert "not even the index" cmp -s "${state}/index" "${__scratch}/index"

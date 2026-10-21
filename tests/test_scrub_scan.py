@@ -172,7 +172,7 @@ def test_every_tier_is_redacted_and_identifiers_are_not(w, gitleaks, capsys):
     )
     printed = capsys.readouterr().out
     assert (
-        f"github-pat ...{PAT[-4:]} in {w.home}/projects/-w/{UUID_A}.jsonl: redacted. Rotate it"
+        f"github-pat ...{PAT[-4:]} in {w.home}/projects/-w/{UUID_A}.jsonl: redacted to [REDACTED:github-pat:...{PAT[-4:]}]. Rotate it"
         in printed
     )
     assert "is not rotated yet" in printed
@@ -234,17 +234,54 @@ def test_a_live_file_is_reported_and_not_written(w, gitleaks, capsys):
     w.run(gitleaks)
     assert w.actions() == [f"done 2 {w.manifest[1].split(chr(9))[1]}"]
     assert not (w.work / "out" / "redacted" / "1").exists()
-    assert "a running session holds. Rotate it now" in capsys.readouterr().out
+    assert (
+        "a running session holds, so it waits for the session to end. Rotate it now"
+        in capsys.readouterr().out
+    )
     assert len(w.ledger()["entries"]) == 1
 
 
 def test_check_reports_and_keeps_nothing(w, gitleaks, capsys):
     w.add("a.jsonl", transcript(PAT))
     assert w.run(gitleaks, "--check") == 0
-    assert "found (scrub-check redacts nothing)" in capsys.readouterr().out
+    assert (
+        f"would be redacted to [REDACTED:github-pat:...{PAT[-4:]}]"
+        in capsys.readouterr().out
+    )
     assert not (w.work / "out" / "actions").exists()
     assert not (w.state / "ledger.json").exists()
     assert not (w.state / "key").exists()
+
+
+def test_a_dry_run_says_what_a_scan_would_do(w, gitleaks, monkeypatch, capsys):
+    # One file of each outcome: redacted, waiting for its session, a hit not
+    # written as found, a redaction that would break the JSON.
+    monkeypatch.setenv(
+        "FAKE_RULES", json.dumps([*RULES, ["odd", r"(t: SPLITVALUE12)"]])
+    )
+    w.context("now 100000", f"live {UUID_B}")
+    w.known("cut", "n0123456789")
+    w.add("a.jsonl", transcript(PAT))
+    w.add(f"p/{UUID_B}.jsonl", transcript(PAT))
+    w.add("b.jsonl", line(t="SPLITVALUE12") + "\n")
+    w.add("c.jsonl", line(t="a\n0123456789") + "\n")
+    before = {n: (w.work / "files" / n).read_text() for n in "1234"}
+    assert w.run(gitleaks, "--check", "--manual") == 0
+    printed = capsys.readouterr().out
+    assert (
+        f"a.jsonl: would be redacted to [REDACTED:github-pat:...{PAT[-4:]}]" in printed
+    )
+    assert "so it would wait for the session to end" in printed
+    assert "not as it is written there" in printed
+    assert "would break its JSON" in printed
+    assert (
+        "4 files looked at: 1 would be redacted, 1 wait for a session to end, "
+        "2 cannot be redacted; dry run, nothing was changed"
+    ) in printed
+    assert not list((w.work / "out" / "redacted").iterdir())
+    assert {n: (w.work / "files" / n).read_text() for n in "1234"} == before
+    w.run(gitleaks, "--manual")
+    assert "1 were redacted" in capsys.readouterr().out
 
 
 # The view gitleaks reads, and redaction.

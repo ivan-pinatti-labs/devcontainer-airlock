@@ -56,8 +56,8 @@
     host/workbench scrub [--check]  look for secrets the agents wrote into
                                     their history, redact them where no
                                     session runs, and list the ones not
-                                    rotated yet (docs/SCRUB.md); --check
-                                    only reports. Every session start and
+                                    rotated yet (docs/SCRUB.md); --check is
+                                    a dry run. Every session start and
                                     end runs it over what changed
     host/workbench scrub rotated ID mark secret ID rotated
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
