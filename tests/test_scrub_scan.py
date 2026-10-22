@@ -359,8 +359,21 @@ def test_report_only_hits_are_reported_on_manual_runs_only(w, gitleaks, capsys):
     w.run(gitleaks)
     assert "random looking" not in capsys.readouterr().out
     w.run(gitleaks, "--manual")
-    assert f"generic-high-entropy ...{loud[-4:]}" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert f"generic-high-entropy ...{loud[-4:]}" not in printed  # counted only
+    assert "1 random looking string in 1 file, reported only" in printed
+    assert "ENTROPY=1 (or --entropy) lists them" in printed
+    w.run(gitleaks, "--manual", "--entropy")
+    printed = capsys.readouterr().out
+    assert f"generic-high-entropy ...{loud[-4:]}" in printed
+    assert "ENTROPY=1 (or --entropy) lists them" not in printed
     assert all(e["rule"] != "generic-high-entropy" for e in w.ledger()["entries"])
+
+
+def test_no_report_only_hits_no_count(w, gitleaks, capsys):
+    w.add("a.jsonl", transcript("nothing random"))
+    w.run(gitleaks, "--manual")
+    assert "random looking" not in capsys.readouterr().out
 
 
 def test_hits_of_skips_short_values_and_unknown_files_and_overlaps():

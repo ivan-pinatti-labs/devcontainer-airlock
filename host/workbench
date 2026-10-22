@@ -53,12 +53,15 @@
                                     copy the local L2 images into the shared L2
                                     store now (up does it when they differ)
     host/workbench status           what is running
-    host/workbench scrub [--check]  look for secrets the agents wrote into
+    host/workbench scrub [--check] [--entropy]
+                                    look for secrets the agents wrote into
                                     their history, redact them where no
                                     session runs, and list the ones not
                                     rotated yet (docs/SCRUB.md); --check is
-                                    a dry run. Every session start and
-                                    end runs it over what changed
+                                    a dry run; --entropy lists each random
+                                    looking string, not just their count.
+                                    Every session start and end runs it
+                                    over what changed
     host/workbench scrub rotated ID mark secret ID rotated
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
                                     engine and network) and take it off the
@@ -2056,18 +2059,22 @@ scrub_auto() {
 }
 
 cmd_scrub() {
-  case "${1:-}" in
-  '') scrub_pass "" --full --manual ;;
-  --check) scrub_pass "" --full --manual --check ;;
-  rotated)
+  local a args=(--full --manual)
+  if [ "${1:-}" = rotated ]; then
     [ -n "${2:-}" ] || die "which secret? host/workbench scrub rotated ID"
     SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" rotated "$2"
-    ;;
-  *)
-    echo "workbench: host/workbench scrub [--check] | scrub rotated ID" >&2
-    exit 2
-    ;;
-  esac
+    return
+  fi
+  for a in "$@"; do
+    case "${a}" in
+    --check | --entropy) args+=("${a}") ;;
+    *)
+      echo "workbench: host/workbench scrub [--check] [--entropy] | scrub rotated ID" >&2
+      exit 2
+      ;;
+    esac
+  done
+  scrub_pass "" "${args[@]}"
 }
 
 # Bring session SESSION's containers up for workspace $1, agent $2: the
