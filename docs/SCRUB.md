@@ -20,10 +20,22 @@ finding says "rotate it".
 | `make scrub` | every file | the same |
 | `make scrub-check` | every file | nothing: a dry run, see below |
 
-Every run ends by listing the secrets found and not rotated yet. After
-rotating one, `make scrub-rotated ID=<n>` takes it off the list. The GitHub
-token, the ssh key and the values of the files in `WORKBENCH_SCRUB_SECRETS`
-are taken off on their own, once the value the host holds changes.
+Each secret is one line, whatever number of files it is in: where it was
+redacted, where it waits for a session to end, where it cannot be redacted.
+In `make scrub` a secret that was redacted in some files and waits or
+cannot be redacted in others has two: what was redacted is said once the
+files are replaced, after the rest (and a file that changed meanwhile is
+said to still hold it, with its number).
+`make scrub` and `make scrub-check` then list every secret found before and
+not rotated yet; a session start or end only counts them (and the secrets
+waiting for a running session or that cannot be redacted), and says each
+secret it redacted just then, which for the few files changed since the
+last scan is usually none or a handful. After rotating,
+`make scrub-rotated ID=<n>` takes a secret off the list; `ID="3 5 8"` takes
+several, `ID=all` every one (for false positives, or after rotating them
+all). The GitHub token, the ssh key and the values of the files in
+`WORKBENCH_SCRUB_SECRETS` are taken off on their own, once the value the
+host holds changes.
 
 The first scan reads all the history there is, which can take minutes, so a
 session start or end does not run it: until `make scrub` (or
@@ -34,16 +46,20 @@ they only say so. Run `make scrub-check` first to see what the first
 ### Dry run
 
 `make scrub-check` makes every decision `make scrub` would and changes
-nothing: no file, no ledger entry, no index. For each secret it says which
-file holds it and what would happen to it:
+nothing: no file, no ledger entry, no index. For each secret it says where
+it is and what would happen to it there:
 
 ```text
-scrub: github-pat ...Q7r8 in <file>: would be redacted to [REDACTED:github-pat:...Q7r8]. Rotate it: ...
-scrub: aws-access-token ...MN23 in <file>: in a file a running session holds, so it would wait for the session to end. Rotate it now
-scrub: <file>: redacting it would break its JSON, so it is left as it is. Rotate what it holds
+scrub: secret #4 (github-pat ...Q7r8): would be redacted in 9 files; would wait for a session to end in <file>. Rotate it
+scrub: aws-access-token ...MN23: would be redacted in <file>. Rotate it
+scrub: <file>: redacting it would break its JSON, so it is left as it is
+scrub: generic-api-key ...e74a: cannot be redacted in <file>. Rotate it
 scrub: 412 random looking strings in 37 files, reported only, not redacted (docs/SCRUB.md); ENTROPY=1 (or --entropy) lists them
-scrub: 812 files looked at: 3 would be redacted, 1 wait for a session to end, 1 cannot be redacted; dry run, nothing was changed
+scrub: 812 files looked at, 5 secrets in them: 10 would be redacted, 1 wait for a session to end, 2 keep something that cannot be redacted; dry run, nothing was changed
 ```
+
+A secret already in the ledger carries its number (`secret #4`), the one
+`make scrub-rotated` takes.
 
 It also lists the secrets already in the ledger and not rotated. The
 values themselves are never printed, only their rule and last four

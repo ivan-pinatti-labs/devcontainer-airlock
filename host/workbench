@@ -62,7 +62,8 @@
                                     looking string, not just their count.
                                     Every session start and end runs it
                                     over what changed
-    host/workbench scrub rotated ID mark secret ID rotated
+    host/workbench scrub rotated ID... | all
+                                    mark those secrets rotated, or every one
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
                                     engine and network) and take it off the
                                     egress proxy. When no other workspace is
@@ -2061,15 +2062,16 @@ scrub_auto() {
 cmd_scrub() {
   local a args=(--full --manual)
   if [ "${1:-}" = rotated ]; then
-    [ -n "${2:-}" ] || die "which secret? host/workbench scrub rotated ID"
-    SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" rotated "$2"
+    shift
+    [ "$#" -gt 0 ] || die "which secret? host/workbench scrub rotated ID... (or all)"
+    SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" rotated "$@"
     return
   fi
   for a in "$@"; do
     case "${a}" in
     --check | --entropy) args+=("${a}") ;;
     *)
-      echo "workbench: host/workbench scrub [--check] [--entropy] | scrub rotated ID" >&2
+      echo "workbench: host/workbench scrub [--check] [--entropy] | scrub rotated ID... | all" >&2
       exit 2
       ;;
     esac

@@ -159,8 +159,8 @@ def test_every_tier_is_redacted_and_identifiers_are_not(w, gitleaks, capsys):
         assert keep in out
     for row in out.splitlines():
         json.loads(row)
-    said = [a for a in w.actions() if a.startswith("say 1 ")]
-    assert len(said) == 4  # one line each, for host/scrub to say once replaced
+    said = [a for a in w.actions() if a.startswith("hit 1 ")]
+    assert len(said) == 4  # one each, for host/scrub to say once replaced
     assert w.actions()[4:] == ["replace 1", f"done 1 {len(out.encode())}"]
     ledger = w.ledger()
     assert sorted(e["rule"] for e in ledger["entries"]) == [
@@ -173,13 +173,12 @@ def test_every_tier_is_redacted_and_identifiers_are_not(w, gitleaks, capsys):
         len(e["hmac"]) == 64 and e["status"] == "open" for e in ledger["entries"]
     )
     printed = capsys.readouterr().out
-    assert (
-        f"say 1 scrub: github-pat ...{PAT[-4:]} in {w.home}/projects/-w/{UUID_A}.jsonl: redacted to [REDACTED:github-pat:...{PAT[-4:]}]. Rotate it"
-        in "\n".join(said)
+    assert re.search(
+        rf"hit 1 secret #\d \(github-pat \.\.\.{PAT[-4:]}\)", "\n".join(said)
     )
-    assert "redacted to" not in printed  # not before the file is replaced
-    assert "is not rotated yet" in printed
-    assert "1 file looked at" in printed
+    assert "redacted" not in printed.split("looked at")[0]  # host/scrub says it
+    assert "make scrub-rotated ID=<n>" in printed
+    assert "1 file looked at, 4 secrets in them: 1 to redact" in printed
     assert KNOWN not in printed and PAT not in printed
 
 
@@ -237,8 +236,13 @@ def test_a_live_file_is_reported_and_not_written(w, gitleaks, capsys):
     w.run(gitleaks)
     assert w.actions() == [f"done 2 {w.manifest[1].split(chr(9))[1]}"]
     assert not (w.work / "out" / "redacted" / "1").exists()
+    # A session start or end counts them; a manual run lists each.
+    printed = capsys.readouterr().out
+    assert "1 secret in files a running session holds, redacted once it ends" in printed
+    assert "waits for a session" not in printed
+    w.run(gitleaks, "--manual")
     assert (
-        "a running session holds, so it waits for the session to end. Rotate it now"
+        f"waits for a session to end in {w.home}/projects/-w/{UUID_B}.jsonl. Rotate it"
         in capsys.readouterr().out
     )
     assert len(w.ledger()["entries"]) == 1
@@ -248,7 +252,7 @@ def test_check_reports_and_keeps_nothing(w, gitleaks, capsys):
     w.add("a.jsonl", transcript(PAT))
     assert w.run(gitleaks, "--check") == 0
     assert (
-        f"would be redacted to [REDACTED:github-pat:...{PAT[-4:]}]"
+        f"github-pat ...{PAT[-4:]}: would be redacted in {w.home}/a.jsonl. Rotate it"
         in capsys.readouterr().out
     )
     assert not (w.work / "out" / "actions").exists()
@@ -271,15 +275,17 @@ def test_a_dry_run_says_what_a_scan_would_do(w, gitleaks, monkeypatch, capsys):
     before = {n: (w.work / "files" / n).read_text() for n in "1234"}
     assert w.run(gitleaks, "--check", "--manual") == 0
     printed = capsys.readouterr().out
+    # The same token in two files is one line, with what happens in each.
     assert (
-        f"a.jsonl: would be redacted to [REDACTED:github-pat:...{PAT[-4:]}]" in printed
-    )
-    assert "so it would wait for the session to end" in printed
-    assert "not as it is written there" in printed
+        f"github-pat ...{PAT[-4:]}: would be redacted in {w.home}/a.jsonl; "
+        f"would wait for a session to end in {w.home}/p/{UUID_B}.jsonl. Rotate it"
+    ) in printed
+    assert f"odd: cannot be redacted in {w.home}/b.jsonl" in printed
+    assert f"cut: cannot be redacted in {w.home}/c.jsonl" in printed
     assert "would break its JSON" in printed
     assert (
-        "4 files looked at: 1 would be redacted, 1 wait for a session to end, "
-        "2 cannot be redacted; dry run, nothing was changed"
+        "4 files looked at, 3 secrets in them: 1 would be redacted, 1 wait for a "
+        "session to end, 2 keep something that cannot be redacted; dry run, nothing was changed"
     ) in printed
     assert not list((w.work / "out" / "redacted").iterdir())
     assert {n: (w.work / "files" / n).read_text() for n in "1234"} == before
@@ -348,9 +354,13 @@ def test_a_hit_not_written_as_found_is_reported_not_redacted(
     w.add("b.jsonl", line(t="SPLITVALUE12") + "\n")
     w.run(gitleaks)
     printed = capsys.readouterr().out
-    assert "not as it is written there, so not redacted" in printed
+    # A session start or end counts them; a manual run says where.
+    assert "1 secret that cannot be redacted; make scrub-check lists them" in printed
+    assert "cannot be redacted in" not in printed
     assert PAT not in w.redacted(n)
     assert "done 3" not in w.actions() and w.actions()[-1].startswith("done 2 ")
+    w.run(gitleaks, "--manual")
+    assert "(odd): cannot be redacted in 2 files. Rotate it" in capsys.readouterr().out
 
 
 def test_report_only_hits_are_reported_on_manual_runs_only(w, gitleaks, capsys):
@@ -468,7 +478,9 @@ def test_rotated_by_hand_then_found_somewhere_new_reopens(w, gitleaks, capsys):
 
 def test_rotated_needs_an_entry(w, capsys):
     assert scrub.main(["rotated", "7"]) == 2
-    assert "no secret #7 in the ledger" in capsys.readouterr().out
+    assert (
+        "no secret #7 in the ledger, so nothing was marked" in capsys.readouterr().out
+    )
 
 
 def test_a_tier_one_secret_is_rotated_once_its_value_changes(w, gitleaks, capsys):
@@ -476,8 +488,16 @@ def test_a_tier_one_secret_is_rotated_once_its_value_changes(w, gitleaks, capsys
     w.env("OTHER=" + "another-known-value-99")
     w.add("a.jsonl", transcript(KNOWN, "another-known-value-99", PAT))
     w.run(gitleaks)
-    printed = capsys.readouterr().out
-    assert "marked rotated on its own once gh-broker-token changes" in printed
+    assert (
+        "3 secrets not rotated yet; make scrub-check lists them"
+        in capsys.readouterr().out
+    )
+    (w.work / "manifest").write_text("\n")
+    w.run(gitleaks, "--manual")
+    assert (
+        "marked rotated on its own once gh-broker-token changes"
+        in capsys.readouterr().out
+    )
     w.known("gh-broker-token", "a-new-value-0000000000")
     (w.work / "known-env" / "1").unlink()
     w.add("b.jsonl", transcript("clean"))
@@ -522,8 +542,50 @@ def test_no_files_still_lists_open_secrets(w, gitleaks, capsys):
     (w.work / "manifest").write_text("\n")
     capsys.readouterr()
     assert w.run(gitleaks) == 0
-    assert "secret #1 (github-pat" in capsys.readouterr().out
+    # A session start or end: the count only, to keep it short.
+    assert (
+        capsys.readouterr().out
+        == "scrub: 1 secret not rotated yet; make scrub-check lists them\n"
+    )
     assert w.actions() == []
+    assert w.run(gitleaks, "--manual") == 0
+    printed = capsys.readouterr().out
+    assert f"secret #1 (github-pat ...{PAT[-4:]}): found before, first on" in printed
+    assert "in 1 file, and not rotated yet. Rotate it\n" in printed
+
+
+def test_nothing_open_says_nothing(w, gitleaks, capsys):
+    w.add("a.jsonl", transcript("clean"))
+    w.run(gitleaks)
+    assert "not rotated" not in capsys.readouterr().out
+
+
+def test_rotated_takes_several_ids_or_all(w, gitleaks, capsys):
+    w.add("a.jsonl", transcript(PAT, AWS))
+    w.add("b.jsonl", transcript(KNOWN))
+    w.known("gh-broker-token", KNOWN)
+    w.run(gitleaks)
+    capsys.readouterr()
+    assert scrub.main(["rotated", "1", "2"]) == 0
+    printed = capsys.readouterr().out
+    assert "secret #1" in printed and "secret #2" in printed
+    statuses = {e["id"]: e["status"] for e in w.ledger()["entries"]}
+    assert statuses == {1: "rotated", 2: "rotated", 3: "open"}
+    assert scrub.main(["rotated", "all"]) == 0
+    assert "secret #3" in capsys.readouterr().out
+    assert all(e["status"] == "rotated" for e in w.ledger()["entries"])
+    assert scrub.main(["rotated", "all"]) == 0
+    assert "no secret is open, so nothing was marked" in capsys.readouterr().out
+
+
+def test_rotated_marks_nothing_when_one_id_is_wrong(w, gitleaks, capsys):
+    w.add("a.jsonl", transcript(PAT))
+    w.run(gitleaks)
+    assert scrub.main(["rotated", "1", "x"]) == 2
+    assert (
+        "no secret #x in the ledger, so nothing was marked" in capsys.readouterr().out
+    )
+    assert w.ledger()["entries"][0]["status"] == "open"
 
 
 def test_missing_inputs_are_empty(tmp_path):

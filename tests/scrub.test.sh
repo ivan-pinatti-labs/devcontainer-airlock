@@ -159,14 +159,14 @@ PODMAN_RUN='exit 1' run host/scrub scan "${ctx}" --full
 assert "nor does one that failed" test ! -e "${state}/index"
 SECRET_VALUE="${known}" run host/scrub scan "${ctx}" --full
 check "a scan redacts what no session holds" 0 out \
-  "scrub: github-pat ...Q7r8 in ${claude}/projects/-w/${done_id}.jsonl: redacted to [REDACTED:github-pat:...Q7r8]. Rotate it"
+  "(github-pat ...Q7r8): redacted in "
 assert "the token is gone from it" grep -q "REDACTED:github-pat:...Q7r8" "${claude}/projects/-w/${done_id}.jsonl"
 assert "which stays valid JSON" python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "${claude}/projects/-w/${done_id}.jsonl"
 assert "with its mode" test "$(stat -c %a "${claude}/projects/-w/${done_id}.jsonl")" = 600
 assert "and its time" test "$(stat -c %Y "${claude}/projects/-w/${done_id}.jsonl")" = "${mtime}"
-check "the podman secret is searched for" 0 out "scrub: gh-broker-token ...6789 in ${claude}/history.jsonl: redacted"
-check "so is the ssh key" 0 out "scrub: ssh-key ...6789 in ${claude}/history.jsonl: redacted"
-check "and each KEY=value file" 0 out "scrub: env:TOKEN ...6789 in ${claude}/history.jsonl: redacted"
+check "the podman secret is searched for" 0 out "(gh-broker-token ...6789): redacted in ${claude}/history.jsonl. Rotate it"
+check "so is the ssh key" 0 out "(ssh-key ...6789): redacted in ${claude}/history.jsonl. Rotate it"
+check "and each KEY=value file" 0 out "(env:TOKEN ...6789): redacted in ${claude}/history.jsonl. Rotate it"
 check "the secret is read, never passed as an argument" 0 calls \
   "podman secret inspect --showsecret --format {{.SecretData}} gh-devcontainer"
 refute "its value is in no call" "${known}"
@@ -177,7 +177,7 @@ assert "and its logs" grep -q REDACTED "${codex}/log/codex.log"
 assert "a workbench's own folder too" grep -q REDACTED "${wb_home}/file-history/${done_id}/a"
 assert "a folder whose name holds % and a backslash" grep -q REDACTED "${odd}/projects/x/t.jsonl"
 check "a live conversation is only reported" 0 out \
-  "${claude}/projects/-w/${live_id}.jsonl: in a file a running session holds, so it waits for the session to end"
+  "scrub: 1 secret in files a running session holds, redacted once it ends; make scrub-check lists them"
 assert "and left as it is" grep -qF "${pat}" "${claude}/projects/-w/${live_id}.jsonl"
 assert "so is a folder a session holds whole" grep -qF "${pat}" "${HOME}/sp ace/.claude/history.jsonl"
 assert "Claude Code's process records are not looked at" grep -qF "${pat}" "${claude}/sessions/1.key"
@@ -194,7 +194,8 @@ refute "nothing is pulled when the image is there" "podman pull"
 
 SECRET_VALUE="${known}" run host/scrub scan "${ctx}" --manual
 check "the next scan looks only at what changed or waits" 0 out "scrub: 2 files looked at"
-check "and lists what is not rotated" 0 out "is not rotated yet"
+check "and lists each secret found before and not rotated" 0 out "): found before, first on"
+check "with how to mark them rotated" 0 out "once rotated: make scrub-rotated ID=<n>"
 
 # A file some process holds open is live.
 transcript "${claude}/projects/-w/open.jsonl" "${pat}"
@@ -205,23 +206,24 @@ transcript "${claude}/projects/-w/open.jsonl" "${pat}"
 holder=$!
 "${REAL_SLEEP}" 0.2
 SECRET_FAILS=1 run host/scrub scan "${ctx}"
-check "a file held open is only reported" 0 out "${claude}/projects/-w/open.jsonl: in a file a running session holds, so it waits"
+check "a file held open is only reported" 0 out "scrub: 1 secret in files a running session holds, redacted once it ends"
 kill "${holder}"
 wait "${holder}" 2>/dev/null || true
 check "a secret podman cannot give is said" 0 err "scrub: could not read podman secret gh-devcontainer"
 SECRET_FAILS=1 run host/scrub scan "${ctx}"
-check "and redacted once it is closed" 0 out "${claude}/projects/-w/open.jsonl: redacted"
+check "and redacted once it is closed" 0 out "(github-pat ...Q7r8): redacted in ${claude}/projects/-w/open.jsonl. Rotate it"
 
 # Put back only what has not changed meanwhile.
 transcript "${claude}/projects/-w/raced.jsonl" "${pat}"
 # shellcheck disable=SC2016 # expanded by the stub
 PODMAN_RUN='mkdir -p "${WORK}/out/redacted"; : >"${WORK}/out/actions"
   while IFS="$(printf "\t")" read -r n _ _ _ _ p; do
-    touch "${p}"; echo x >"${WORK}/out/redacted/${n}"; printf "say %s scrub: %s redacted to X\nreplace %s\ndone %s 2\n" "${n}" "${p}" "${n}" "${n}" >>"${WORK}/out/actions"
+    touch "${p}"; echo x >"${WORK}/out/redacted/${n}"; printf "hit %s secret #9 (raced %s)\nreplace %s\ndone %s 2\n" "${n}" "${n}" "${n}" "${n}" >>"${WORK}/out/actions"
   done <"${WORK}/manifest"' run host/scrub scan "${ctx}"
 check "a file written while it was scanned is left" 0 out \
   "scrub: ${claude}/projects/-w/raced.jsonl changed while it was scanned, so it is left for the next scan"
-assert "and not said to be redacted" bash -c "! grep -q 'raced.jsonl redacted to' '${__scratch}/out'"
+assert "and not said to be redacted" bash -c "! grep -q 'redacted in' '${__scratch}/out'"
+check "but said to be still there, with its number" 0 out "secret #9 (raced 1): still there, the next scan tries again, in "
 assert "as it is" grep -qF "${pat}" "${claude}/projects/-w/raced.jsonl"
 assert "and looked at again next time" bash -c "! grep -qF raced.jsonl '${state}/index'"
 old "${claude}/projects/-w/raced.jsonl"
@@ -235,7 +237,7 @@ assert "a file that cannot be copied is skipped" bash -c "! grep -q raced '${__s
 # --check and --full.
 cp "${state}/index" "${__scratch}/index"
 run host/scrub scan "${ctx}" --full --check
-check "check looks at every file" 0 out "would be redacted to [REDACTED:github-pat:...Q7r8]"
+check "check looks at every file" 0 out "(github-pat ...Q7r8): would be redacted in "
 check "and passes --check on" 0 calls "python3 -I - scan --check"
 assert "it changes nothing" grep -qF "${pat}" "${claude}/projects/-w/raced.jsonl"
 assert "not even the index" cmp -s "${state}/index" "${__scratch}/index"
@@ -300,5 +302,11 @@ run host/scrub rotated 1
 check "rotated marks a secret of the ledger" 0 out "scrub: secret #1 ("
 check "in the same container, with only the state" 0 calls "python3 -I - rotated 1"
 refute "and nothing to scan" "/work:Z"
+run host/scrub rotated 2 3
+check "several at once" 0 calls "python3 -I - rotated 2 3"
+run host/scrub rotated all
+check "or every open one" 0 calls "python3 -I - rotated all"
+run host/scrub rotated 2 three
+check "each one a number or all" 2 err "host/scrub rotated ID... | all"
 
 finish
