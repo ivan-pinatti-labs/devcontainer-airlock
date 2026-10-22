@@ -17,6 +17,9 @@
                         looking string instead of counting them
     host/scrub rotated ID... | all
                         mark those secrets of the ledger rotated, or every one
+    host/scrub list [--all] [--files]
+                        the ledger as a table: the secrets not rotated yet
+                        (--all: every one; --files: with the files each was in)
 
   CONTEXT, which host/workbench writes, holds one fact a line:
     home host|workbench claude|codex PATH
@@ -47,7 +50,7 @@ die() {
   exit 1
 }
 usage() {
-  sed -n '9,19p' "$0" >&2
+  sed -n '9,22p' "$0" >&2
   exit 2
 }
 
@@ -185,7 +188,7 @@ replace() {
 said() {
   colors
   awk -F'\t' -v red="${RED}" -v reset="${RESET}" -v what="$2" 'FILENAME == ARGV[1] { ok[$1] = 1; next } FILENAME == ARGV[2] { path[$1] = $6; next } $1 in ok { n[$2]++; last[$2] = path[$1] } END { for (s in n) print red "scrub: " s ": " what " " (n[s] == 1 ? "in " last[s] : "in " n[s] " files") ". Rotate it" reset }' \
-    "$1" "${WORK}/manifest" "${WORK}/hits" | sort
+    "$1" "${WORK}/manifest" "${WORK}/hits" | sort -V
 }
 
 cmd_scan() {
@@ -290,6 +293,21 @@ cmd_rotated() {
   scan_container rotated "$@"
 }
 
+cmd_list() {
+  local a
+  for a in "$@"; do
+    [[ "${a}" = --all || "${a}" = --files ]] || usage
+  done
+  mkdir -p "${STATE}"
+  chmod 700 "${STATE}"
+  # Read only, so no wait for a scan; the ledger is replaced whole, never
+  # half written. scan_container closes LOCK for the container, so it has
+  # to name a descriptor.
+  exec {LOCK}</dev/null
+  MOUNTS=()
+  scan_container list "$@"
+}
+
 case "${1:-}" in
 scan)
   shift
@@ -298,6 +316,10 @@ scan)
 rotated)
   shift
   cmd_rotated "$@"
+  ;;
+list)
+  shift
+  cmd_list "$@"
   ;;
 *) usage ;;
 esac

@@ -31,13 +31,15 @@ scan_rule() {
 scan_rule
 
 run "${wb}" scrub bogus
-check "scrub takes --check or rotated" 2 err "workbench: host/workbench scrub [--check] [--entropy] | scrub rotated ID"
+check "scrub takes --check or rotated" 2 err "workbench: host/workbench scrub [--check] [--entropy] | scrub list [--all] [--files] | scrub rotated ID"
 run "${wb}" scrub rotated
 check "rotated needs an id" 1 err "workbench: which secret? host/workbench scrub rotated ID"
 run "${wb}" scrub rotated 3
 check "rotated goes to host/scrub" 0 calls "localhost/airlock-base:local python3 -I - rotated 3"
 run "${wb}" scrub rotated 3 4 all
 check "several, or all" 0 calls "localhost/airlock-base:local python3 -I - rotated 3 4 all"
+run "${wb}" scrub list --all --files
+check "list goes to host/scrub" 0 calls "localhost/airlock-base:local python3 -I - list --all --files"
 WORKBENCH_SCRUB_QUIET=10m run "${wb}" scrub
 check "the quiet time is whole minutes" 1 err "workbench: WORKBENCH_SCRUB_QUIET is '10m'; use a whole number of minutes"
 

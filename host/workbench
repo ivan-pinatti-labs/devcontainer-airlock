@@ -64,6 +64,9 @@
                                     over what changed
     host/workbench scrub rotated ID... | all
                                     mark those secrets rotated, or every one
+    host/workbench scrub list [--all] [--files]
+                                    the secrets not rotated yet as a table
+                                    (--all: every one; --files: where)
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
                                     engine and network) and take it off the
                                     egress proxy. When no other workspace is
@@ -2067,11 +2070,16 @@ cmd_scrub() {
     SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" rotated "$@"
     return
   fi
+  if [ "${1:-}" = list ]; then
+    shift
+    SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" list "$@"
+    return
+  fi
   for a in "$@"; do
     case "${a}" in
     --check | --entropy) args+=("${a}") ;;
     *)
-      echo "workbench: host/workbench scrub [--check] [--entropy] | scrub rotated ID... | all" >&2
+      echo "workbench: host/workbench scrub [--check] [--entropy] | scrub list [--all] [--files] | scrub rotated ID... | all" >&2
       exit 2
       ;;
     esac

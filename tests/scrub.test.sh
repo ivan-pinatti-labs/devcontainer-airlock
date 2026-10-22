@@ -308,5 +308,15 @@ run host/scrub rotated all
 check "or every open one" 0 calls "python3 -I - rotated all"
 run host/scrub rotated 2 three
 check "each one a number or all" 2 err "host/scrub rotated ID... | all"
+run host/scrub list
+check "list shows the open secrets, here none" 0 out "scrub: no secret is open; make scrub-list ALL=1 shows the rotated ones"
+check "from the same container, with only the state" 0 calls "python3 -I - list"
+refute "and nothing to scan" "/work:Z"
+run host/scrub list --all --files
+check "every secret, and where" 0 calls "python3 -I - list --all --files"
+check "the rotated ones too, as a table" 0 out "ID  TYPE"
+check "with their date" 0 out "rotated 20"
+run host/scrub list --bogus
+check "only --all and --files" 2 err "host/scrub list [--all] [--files]"
 
 finish

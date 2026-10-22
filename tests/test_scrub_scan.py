@@ -588,6 +588,60 @@ def test_rotated_marks_nothing_when_one_id_is_wrong(w, gitleaks, capsys):
     assert w.ledger()["entries"][0]["status"] == "open"
 
 
+def test_list_is_a_table_of_the_open_secrets(w, gitleaks, capsys):
+    w.add("a.jsonl", transcript(PAT, AWS))
+    w.add("b.jsonl", transcript(PAT))
+    w.run(gitleaks)
+    scrub.main(["rotated", "2"])
+    capsys.readouterr()
+    assert scrub.main(["list"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == [
+        "ID",
+        "TYPE",
+        "ENDS",
+        "IN",
+        "FIRST",
+        "SEEN",
+        "LAST",
+        "SEEN",
+        "FILES",
+        "STATUS",
+    ]
+    assert lines[1].split()[:3] == ["1", "aws-access-token", AWS[-4:]]
+    assert lines[1].split()[-2:] == ["1", "open"]
+    assert not any(line.split()[0] == "2" for line in lines[1:-1])  # rotated
+    assert (
+        lines[-1]
+        == "scrub: 1 secret open, 1 secret rotated; once rotated: make scrub-rotated ID=<n>"
+    )
+    assert scrub.main(["list", "--all", "--files"]) == 0
+    printed = capsys.readouterr().out
+    assert re.search(
+        rf"^2 +github-pat +{PAT[-4:]} .* 2 +rotated \d{{4}}-\d\d-\d\d$",
+        printed,
+        re.MULTILINE,
+    )
+    assert f"      {w.home}/a.jsonl\n      {w.home}/b.jsonl\n" in printed
+
+
+def test_list_with_nothing_to_show(w, gitleaks, capsys):
+    assert scrub.main(["list"]) == 0
+    assert "no secret in the ledger yet" in capsys.readouterr().out
+    w.add("a.jsonl", transcript(KNOWN))
+    w.known("gh-broker-token", KNOWN)
+    w.run(gitleaks)
+    scrub.main(["rotated", "all"])
+    capsys.readouterr()
+    assert scrub.main(["list"]) == 0
+    assert (
+        "no secret is open; make scrub-list ALL=1 shows the rotated ones"
+        in capsys.readouterr().out
+    )
+    assert scrub.main(["list", "--all"]) == 0
+    assert "gh-broker-token" in capsys.readouterr().out
+
+
 def test_missing_inputs_are_empty(tmp_path):
     assert scrub.read_manifest(tmp_path / "none") == []
     ctx = scrub.read_context(tmp_path / "none")

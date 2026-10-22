@@ -108,7 +108,8 @@ make session-attach S=x  # any session by name; session-shell, -stop, -prune too
 make prune               # remove stopped sessions holding nothing of their own
 make claude-shell        # or codex-shell: a terminal in the workspace workbench
 make scrub               # find and redact secrets agents wrote into their history
-                         # (docs/SCRUB.md); scrub-check is a dry run
+                         # (docs/SCRUB.md); scrub-check is a dry run, scrub-list
+                         # the secrets still to rotate
 ```
 
 `make` alone lists the targets, and Tab completes them. They come from
