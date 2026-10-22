@@ -523,7 +523,7 @@ def scan(args, out: Output) -> int:
     if args.manual and loud and not args.entropy:
         out.say(
             f"{plural(sum(loud.values()), 'random looking string')} in {plural(len(loud), 'file')}, "
-            "reported only, not redacted (docs/SCRUB.md); ENTROPY=1 lists them"
+            "reported only, not redacted (docs/SCRUB.md); ENTROPY=1 (or --entropy) lists them"
         )
     if args.manual:
         verb = "would be redacted" if args.check else "to redact"

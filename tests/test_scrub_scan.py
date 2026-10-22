@@ -362,11 +362,11 @@ def test_report_only_hits_are_reported_on_manual_runs_only(w, gitleaks, capsys):
     printed = capsys.readouterr().out
     assert f"generic-high-entropy ...{loud[-4:]}" not in printed  # counted only
     assert "1 random looking string in 1 file, reported only" in printed
-    assert "ENTROPY=1 lists them" in printed
+    assert "ENTROPY=1 (or --entropy) lists them" in printed
     w.run(gitleaks, "--manual", "--entropy")
     printed = capsys.readouterr().out
     assert f"generic-high-entropy ...{loud[-4:]}" in printed
-    assert "ENTROPY=1 lists them" not in printed
+    assert "ENTROPY=1 (or --entropy) lists them" not in printed
     assert all(e["rule"] != "generic-high-entropy" for e in w.ledger()["entries"])
 
 

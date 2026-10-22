@@ -41,7 +41,7 @@ file holds it and what would happen to it:
 scrub: github-pat ...Q7r8 in <file>: would be redacted to [REDACTED:github-pat:...Q7r8]. Rotate it: ...
 scrub: aws-access-token ...MN23 in <file>: in a file a running session holds, so it would wait for the session to end. Rotate it now
 scrub: <file>: redacting it would break its JSON, so it is left as it is. Rotate what it holds
-scrub: 412 random looking strings in 37 files, reported only, not redacted (docs/SCRUB.md); ENTROPY=1 lists them
+scrub: 412 random looking strings in 37 files, reported only, not redacted (docs/SCRUB.md); ENTROPY=1 (or --entropy) lists them
 scrub: 812 files looked at: 3 would be redacted, 1 wait for a session to end, 1 cannot be redacted; dry run, nothing was changed
 ```
 
