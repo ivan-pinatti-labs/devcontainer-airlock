@@ -252,6 +252,12 @@ check "a full scan finds it" 0 err "scrub: ${claude}/projects/-w/later.jsonl cou
 assert "and drops its old index row" bash -c "! grep -qF later.jsonl '${state}/index'"
 run host/scrub scan "${ctx}"
 assert "so the next scan redacts it" grep -q 'REDACTED:env:LATER' "${claude}/projects/-w/later.jsonl"
+# The same for a file a full scan cannot copy.
+assert "a file indexed" grep -qF clean.jsonl "${state}/index"
+CP_FAILS=clean.jsonl run host/scrub scan "${ctx}" --full
+assert "that a full scan cannot copy leaves the index" bash -c "! grep -qF clean.jsonl '${state}/index'"
+run host/scrub scan "${ctx}"
+assert "and the next scan looks at it again" grep -qF clean.jsonl "${state}/index"
 
 # One scan at a time.
 FLOCK_BUSY=1 run host/scrub scan "${ctx}"
