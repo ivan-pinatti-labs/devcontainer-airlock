@@ -376,6 +376,18 @@
       automerge: true,
       addLabels: ["automerge"],
     },
+    // Renovate's weekly refresh of the hash locked tests/requirements.txt
+    // ("Refresh pip-compile outputs") merges unattended as well. It is its
+    // own update type, lockFileMaintenance, which no grant above matches.
+    // The lock's own `--exclude-newer=P7D` keeps every release it resolves
+    // at least seven days old, and `Pin Only` grades it with
+    // hash_locked_requirements: the same packages, none added or removed,
+    // and every new hash one PyPI publishes for that release.
+    {
+      matchUpdateTypes: ["lockFileMaintenance"],
+      automerge: true,
+      addLabels: ["automerge"],
+    },
 
     // agent-policy decides what the agents in the workbench may run. A
     // release of it can loosen as well as tighten, so it is reviewed where
