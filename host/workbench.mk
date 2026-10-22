@@ -132,6 +132,9 @@ ENTROPY ?=
 # in; only the value 1 counts, so a repository's own ALL or FILES does not.
 ALL ?=
 FILES ?=
+# $(call scrub_flag,VALUE,FLAG): FLAG when VALUE is exactly 1, nothing otherwise
+# (not for "1 2", say).
+scrub_flag = $(if $(filter 1,$(1)),$(if $(word 2,$(1)),,$(2)))
 export ID
 scrub:
 	@$(WORKBENCH) scrub $(if $(ENTROPY),--entropy)
@@ -140,7 +143,7 @@ scrub-check:
 	@$(WORKBENCH) scrub --check $(if $(ENTROPY),--entropy)
 
 scrub-list:
-	@$(WORKBENCH) scrub list $(if $(filter 1,$(ALL)),--all) $(if $(filter 1,$(FILES)),--files)
+	@$(WORKBENCH) scrub list $(call scrub_flag,$(ALL),--all) $(call scrub_flag,$(FILES),--files)
 
 scrub-rotated:
 	@$(WORKBENCH) scrub rotated $(if $(ID),$$ID,$(error which secret? ID=<n>, several as ID="3 5", or ID=all))

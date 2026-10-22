@@ -66,3 +66,15 @@ def test_unattended_is_still_unattended() -> None:
         recipe = recipes()[target]
         assert "--level unattended" in recipe
         assert "HOURS_ARG)" in recipe
+
+
+def test_scrub_list_flags_take_exactly_1() -> None:
+    """ALL and FILES give their flag only for the value 1, so a repository's
+    own variable of that name (a list of files, say, or "1 2") does not.
+    Checked with make itself in the PR that added it; neither container
+    `make coverage` runs has make, so here the text stands in."""
+    assert recipes()["scrub-list"] == (
+        "@$(WORKBENCH) scrub list $(call scrub_flag,$(ALL),--all) $(call scrub_flag,$(FILES),--files)"
+    )
+    text = WORKBENCH_MK.read_text()
+    assert "scrub_flag = $(if $(filter 1,$(1)),$(if $(word 2,$(1)),,$(2)))\n" in text

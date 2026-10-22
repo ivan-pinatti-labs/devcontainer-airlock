@@ -95,7 +95,7 @@ scan_container() {
     die "no image ${IMAGE}; host/workbench build (or pull) makes it"
   podman run --rm -i --network=none --cap-drop=all --security-opt no-new-privileges \
     --read-only --tmpfs /tmp --userns=keep-id:uid=1000,gid=1000 \
-    -v "${STATE}:/state:Z" "${MOUNTS[@]}" "${IMAGE}" \
+    -v "${STATE_MOUNT:-${STATE}}:/state:Z" "${MOUNTS[@]}" "${IMAGE}" \
     python3 -I - "${color[@]}" "$@" <"${HERE}/scrub-scan" {LOCK}>&-
 }
 
@@ -298,12 +298,14 @@ cmd_list() {
   for a in "$@"; do
     [[ "${a}" = --all || "${a}" = --files ]] || usage
   done
-  mkdir -p "${STATE}"
-  chmod 700 "${STATE}"
-  # Read only, so no wait for a scan; the ledger is replaced whole, never
-  # half written. scan_container closes LOCK for the container, so it has
-  # to name a descriptor.
+  # Read only, so no wait for a scan: on a copy of the ledger (replaced
+  # whole, never half written), since mounting the state folder itself
+  # would relabel it under a scan that is running. scan_container closes
+  # LOCK for the container, so it has to name a descriptor.
   exec {LOCK}</dev/null
+  STATE_MOUNT="$(mktemp -d)"
+  trap 'rm -rf "${STATE_MOUNT}"' EXIT
+  if [[ -f "${STATE}/ledger.json" ]]; then cp "${STATE}/ledger.json" "${STATE_MOUNT}/"; fi
   MOUNTS=()
   scan_container list "$@"
 }

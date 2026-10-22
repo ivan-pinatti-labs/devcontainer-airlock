@@ -588,6 +588,20 @@ def test_rotated_marks_nothing_when_one_id_is_wrong(w, gitleaks, capsys):
     assert w.ledger()["entries"][0]["status"] == "open"
 
 
+def test_secrets_are_said_in_number_order(w, gitleaks, capsys):
+    """#9 before #10, in a scan's lines and in the list, not as text sorts."""
+    (w.state / "ledger.json").write_text(json.dumps({"next": 9, "entries": []}))
+    w.context("now 100000", f"live {UUID_B}")  # waiting, so the scan says them
+    w.add(f"p/{UUID_B}.jsonl", transcript(PAT, AWS))
+    w.run(gitleaks, "--manual")
+    printed = capsys.readouterr().out
+    nine, ten = printed.index("secret #9 ("), printed.index("secret #10 (")
+    assert nine < ten
+    scrub.main(["list"])
+    rows = [line.split()[0] for line in capsys.readouterr().out.splitlines()[1:-1]]
+    assert rows == ["9", "10"]
+
+
 def test_list_is_a_table_of_the_open_secrets(w, gitleaks, capsys):
     w.add("a.jsonl", transcript(PAT, AWS))
     w.add("b.jsonl", transcript(PAT))
