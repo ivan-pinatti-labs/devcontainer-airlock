@@ -24,7 +24,7 @@ decoded, so a rule sees `api_key: "..."` rather than its escaped form. A
 hit from a rule in REPORT_ONLY is reported, never redacted or kept.
 """
 
-# cspell:words argparse isdigit CREAT fdopen findall fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
+# cspell:words argparse isdigit ljust CREAT fdopen findall fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
 from __future__ import annotations
 
 import argparse
@@ -306,6 +306,7 @@ class Found:
     def __init__(self, rule: str, value: str, entry: dict | None):
         what = shown(rule, value)
         self.label = f"secret #{entry['id']} ({what})" if entry else what
+        self.number = entry["id"] if entry else 0
         self.redacted: list[str] = []
         self.waiting: list[str] = []
         self.kept: list[str] = []
@@ -548,7 +549,7 @@ def scan(args, out: Output) -> int:
         copy.write_text(text, **ENCODING)
         actions.append(f"replace {e.n}")
         actions.append(f"done {e.n} {copy.stat().st_size}")
-    for s in sorted(secrets_found.values(), key=lambda s: s.label):
+    for s in sorted(secrets_found.values(), key=lambda s: (s.number, s.label)):
         line = s.report(args.check, every=args.manual)
         if line:
             out.say(line, alarm=True)
@@ -577,6 +578,31 @@ def scan(args, out: Output) -> int:
             + ("; dry run, nothing was changed" if args.check else "")
         )
     ledger.save()
+    return 0
+
+
+def listing(args, out: Output) -> int:
+    """The ledger as a table: the secrets not rotated yet, or (--all) every
+    one, with (--files) the files each was found in."""
+    ledger = Ledger(STATE, writable=False)
+    entries = sorted(ledger.data["entries"], key=lambda e: e["id"])
+    rows = [e for e in entries if args.all or e["status"] == "open"]
+    still = sum(1 for e in entries if e["status"] == "open")
+    if not rows:
+        out.say("no secret in the ledger yet" if not entries else "no secret is open; make scrub-list ALL=1 shows the rotated ones")
+        return 0
+    table = [("ID", "TYPE", "ENDS IN", "FIRST SEEN", "LAST SEEN", "FILES", "STATUS")]
+    for e in rows:
+        status = f"rotated {e['rotated']}" if e["status"] == "rotated" else "open"
+        last = e.get("last_seen", e["first_seen"])
+        table.append((str(e["id"]), e["rule"], e["tail"] or "-", e["first_seen"], last, str(len(e["files"])), status))
+    widths = [max(len(row[i]) for row in table) for i in range(len(table[0]))]
+    for i, row in enumerate(table):
+        print("  ".join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)).rstrip())
+        if args.files and i:
+            for path in rows[i - 1]["files"]:
+                print(f"      {path}")
+    out.say(f"{plural(still, 'secret')} open, {plural(len(entries) - still, 'secret')} rotated; once rotated: make scrub-rotated ID=<n>")
     return 0
 
 
@@ -612,11 +638,16 @@ def main(argv: list[str]) -> int:
     s.add_argument("--entropy", action="store_true")
     r = sub.add_parser("rotated")
     r.add_argument("ids", nargs="+")
+    ls = sub.add_parser("list")
+    ls.add_argument("--all", action="store_true")
+    ls.add_argument("--files", action="store_true")
     args = parser.parse_args(argv)
     out = Output(color=args.color)
     try:
         if args.command == "scan":
             return scan(args, out)
+        if args.command == "list":
+            return listing(args, out)
         return rotated(args, out)
     except (ScrubError, OSError, ValueError) as error:
         out.say(f"the scan failed, nothing was changed: {error}", alarm=True)

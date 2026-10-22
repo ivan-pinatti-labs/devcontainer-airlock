@@ -19,6 +19,7 @@ finding says "rotate it".
 | A session ends (`make claude` exiting, `make stop-<name>`) | the same, and that session's conversation counts as ended | the same |
 | `make scrub` | every file | the same |
 | `make scrub-check` | every file | nothing: a dry run, see below |
+| `make scrub-list` | the ledger | nothing: the secrets still to rotate, see below |
 
 Each secret is one line, whatever number of files it is in: where it was
 redacted, where it waits for a session to end, where it cannot be redacted.
@@ -42,6 +43,23 @@ session start or end does not run it: until `make scrub` (or
 `make scrub-check`, which keeps nothing, so it does not count) has run once,
 they only say so. Run `make scrub-check` first to see what the first
 `make scrub` would change.
+
+### The list to rotate
+
+`make scrub-list` prints the ledger as a table, sorted by number, without
+scanning anything: the secrets not rotated yet. `ALL=1` adds the rotated
+ones, `FILES=1` the files each one was found in.
+
+```text
+ID  TYPE               ENDS IN  FIRST SEEN  LAST SEEN   FILES  STATUS
+2   aws-access-token   7R2Q     2026-10-22  2026-10-22  12     open
+33  slack-webhook-url  u3cC     2026-10-22  2026-10-22  4      open
+scrub: 2 secrets open, 0 secrets rotated; once rotated: make scrub-rotated ID=<n>
+```
+
+The value itself is gone; the four characters it ends in are what a
+provider's console shows to tell keys apart (AWS lists the whole access key
+id). After rotating, `make scrub-rotated ID=2` takes it off.
 
 ### Dry run
 

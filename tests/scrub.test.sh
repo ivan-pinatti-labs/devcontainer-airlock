@@ -218,12 +218,13 @@ transcript "${claude}/projects/-w/raced.jsonl" "${pat}"
 # shellcheck disable=SC2016 # expanded by the stub
 PODMAN_RUN='mkdir -p "${WORK}/out/redacted"; : >"${WORK}/out/actions"
   while IFS="$(printf "\t")" read -r n _ _ _ _ p; do
-    touch "${p}"; echo x >"${WORK}/out/redacted/${n}"; printf "hit %s secret #9 (raced %s)\nreplace %s\ndone %s 2\n" "${n}" "${n}" "${n}" "${n}" >>"${WORK}/out/actions"
+    touch "${p}"; echo x >"${WORK}/out/redacted/${n}"; printf "hit %s secret #10 (raced %s)\nhit %s secret #9 (raced %s)\nreplace %s\ndone %s 2\n" "${n}" "${n}" "${n}" "${n}" "${n}" "${n}" >>"${WORK}/out/actions"
   done <"${WORK}/manifest"' run host/scrub scan "${ctx}"
 check "a file written while it was scanned is left" 0 out \
   "scrub: ${claude}/projects/-w/raced.jsonl changed while it was scanned, so it is left for the next scan"
 assert "and not said to be redacted" bash -c "! grep -q 'redacted in' '${__scratch}/out'"
 check "but said to be still there, with its number" 0 out "secret #9 (raced 1): still there, the next scan tries again, in "
+assert "in number order, #9 before #10" test "$(grep -n "secret #9 (raced 1)" "${__scratch}/out" | cut -d: -f1)" -lt "$(grep -n "secret #10 (raced 1)" "${__scratch}/out" | cut -d: -f1)"
 assert "as it is" grep -qF "${pat}" "${claude}/projects/-w/raced.jsonl"
 assert "and looked at again next time" bash -c "! grep -qF raced.jsonl '${state}/index'"
 old "${claude}/projects/-w/raced.jsonl"
@@ -308,5 +309,16 @@ run host/scrub rotated all
 check "or every open one" 0 calls "python3 -I - rotated all"
 run host/scrub rotated 2 three
 check "each one a number or all" 2 err "host/scrub rotated ID... | all"
+run host/scrub list
+check "list shows the open secrets, here none" 0 out "scrub: no secret is open; make scrub-list ALL=1 shows the rotated ones"
+check "from the same container" 0 calls "python3 -I - list"
+refute "never mounting the live state, which a running scan holds" "${state}:/state:Z"
+refute "and nothing to scan" "/work:Z"
+run host/scrub list --all --files
+check "every secret, and where" 0 calls "python3 -I - list --all --files"
+check "the rotated ones too, as a table" 0 out "ID  TYPE"
+check "with their date" 0 out "rotated 20"
+run host/scrub list --bogus
+check "only --all and --files" 2 err "host/scrub list [--all] [--files]"
 
 finish
