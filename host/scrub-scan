@@ -24,7 +24,7 @@ decoded, so a rule sees `api_key: "..."` rather than its escaped form. A
 hit from a rule in REPORT_ONLY is reported, never redacted or kept.
 """
 
-# cspell:words argparse CREAT fdopen findall fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
+# cspell:words argparse isdigit CREAT fdopen findall fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
 from __future__ import annotations
 
 import argparse
@@ -295,6 +295,36 @@ def shown(rule: str, value: str) -> str:
     return f"{rule} ...{end}" if end else rule
 
 
+def where(paths: list[str]) -> str:
+    return f"in {paths[0]}" if len(paths) == 1 else f"in {len(paths)} files"
+
+
+class Found:
+    """A distinct secret this scan found, and the files it is redacted in,
+    waits for a session in, or cannot be redacted in."""
+
+    def __init__(self, rule: str, value: str, entry: dict | None):
+        what = shown(rule, value)
+        self.label = f"secret #{entry['id']} ({what})" if entry else what
+        self.redacted: list[str] = []
+        self.waiting: list[str] = []
+        self.kept: list[str] = []
+
+    def report(self, check: bool, every: bool = True) -> str:
+        """Its one line, or nothing when all it has is what a scan redacts and
+        leaves host/scrub to say, or (`every` false: a session start or
+        end) waiting, which the scan counts in one line instead."""
+        parts = []
+        if check and self.redacted:
+            parts.append(f"would be redacted {where(self.redacted)}")
+        if self.waiting and every:
+            verb = "would wait" if check else "waits"
+            parts.append(f"{verb} for a session to end {where(self.waiting)}")
+        if self.kept and every:
+            parts.append(f"cannot be redacted {where(self.kept)}")
+        return f"{self.label}: {'; '.join(parts)}. Rotate it" if parts else ""
+
+
 def still_valid(path: str, before: str, after: str) -> bool:
     """A redacted JSON file still parses, and in JSON lines every line that
     parsed before still does."""
@@ -381,21 +411,27 @@ class Ledger:
         entry["status"] = "rotated"
         entry["rotated"] = time.strftime("%Y-%m-%d")
 
-    def report_open(self, out: Output) -> None:
-        for e in self.data["entries"]:
-            if e["status"] != "open":
+    def report_open(self, out: Output, listed: set[str], every: bool) -> None:
+        """The secrets not rotated yet: each one not already said this run
+        (`listed`, by HMAC) on a manual run, only their count otherwise, so
+        a session start stays short."""
+        still = [e for e in self.data["entries"] if e["status"] == "open"]
+        if not still:
+            return
+        if not every:
+            out.say(f"{plural(len(still), 'secret')} not rotated yet; make scrub-check lists them", alarm=True)
+            return
+        for e in still:
+            if e["hmac"] in listed:
                 continue
             what = f"{e['rule']} ...{e['tail']}" if e["tail"] else e["rule"]
-            files = plural(len(e["files"]), "file")
-            then = (
-                f"it is marked rotated on its own once {e['known']} changes"
-                if e["known"]
-                else f"then: make scrub-rotated ID={e['id']}"
-            )
+            then = f"; it is marked rotated on its own once {e['known']} changes" if e["known"] else ""
             out.say(
-                f"secret #{e['id']} ({what}), first seen {e['first_seen']} in {files}, is not rotated yet. Rotate it; {then}",
+                f"secret #{e['id']} ({what}): found before, first on {e['first_seen']}, in {plural(len(e['files']), 'file')}, "
+                f"and not rotated yet. Rotate it{then}",
                 alarm=True,
             )
+        out.say('once rotated: make scrub-rotated ID=<n> (several: ID="3 5 8"; every one: ID=all)')
 
     def save(self) -> None:
         if not self.writable:
@@ -461,10 +497,11 @@ def scan(args, out: Output) -> int:
         findings = gitleaks(work, GITLEAKS)
     redact, report = hits_of(entries, texts, known, findings)
     actions = []
-    # A check says what a scan would do: the same decisions, nothing written.
-    # What a scan redacted is said by host/scrub once each file is replaced
-    # (its `say` actions), since it can still refuse a file that changed.
-    wait = "it would wait" if args.check else "it waits"
+    # One line per distinct secret, not per file it is in. A check says what
+    # a scan would do: the same decisions, nothing written. What a scan
+    # redacted is said by host/scrub once each file is replaced (its `hit`
+    # actions), since it can still refuse a file that changed.
+    secrets_found: dict[str, Found] = {}
     counts = {"redacted": 0, "waiting": 0, "kept": 0}
     (work / "out" / "redacted").mkdir(parents=True, exist_ok=True)
     for e in entries:
@@ -474,51 +511,57 @@ def scan(args, out: Output) -> int:
         if args.entropy:
             for value in sorted(report[e.n]):
                 out.say(f"{shown('generic-high-entropy', value)} in {e.path}: a random looking string, reported only (docs/SCRUB.md)")
-        if not args.check:
-            for value, (rule, name) in sorted(found.items()):
-                ledger.seen(value, rule, e.path, name, out)
+        for value, (rule, name) in sorted(found.items()):
+            entry = ledger.entry(value) if args.check else ledger.seen(value, rule, e.path, name, out)
+            secrets_found.setdefault(value, Found(rule, value, entry))
         if is_live(e, ctx) and found:
-            for value, (rule, _) in sorted(found.items()):
-                out.say(f"{shown(rule, value)} in {e.path}: in a file a running session holds, so {wait} for the session to end. Rotate it now", alarm=True)
-            counts["waiting"] += len(found)
+            for value in found:
+                secrets_found[value].waiting.append(e.path)
+            counts["waiting"] += 1
             continue
         if not found:
             actions.append(f"done {e.n} {e.size}")
             continue
         text, missing = redacted(texts[e.n], found)
         for value in missing:
-            out.say(f"{shown(found[value][0], value)} in {e.path}: found, but not as it is written there, so not redacted. Rotate it", alarm=True)
-        counts["kept"] += len(missing)
+            secrets_found[value].kept.append(e.path)
         if text == texts[e.n]:
+            counts["kept"] += 1
             actions.append(f"done {e.n} {e.size}")
             continue
         if not still_valid(e.path, texts[e.n], text):
-            out.say(f"{e.path}: redacting it would break its JSON, so it is left as it is. Rotate what it holds", alarm=True)
-            counts["kept"] += len(found) - len(missing)
+            out.say(f"{e.path}: redacting it would break its JSON, so it is left as it is", alarm=True)
+            for value in found.keys() - set(missing):
+                secrets_found[value].kept.append(e.path)
+            counts["kept"] += 1
             continue
+        counts["kept"] += bool(missing)
+        counts["redacted"] += 1
         for value in sorted(found):
             if value not in missing:
-                rule = found[value][0]
-                done = "would be redacted to" if args.check else "redacted to"
-                said = out.line(
-                    f"{shown(rule, value)} in {e.path}: {done} {placeholder(rule, value)}. Rotate it: it reached the model provider when it was written",
-                    alarm=True,
-                )
-                if args.check:
-                    print(said, flush=True)
-                else:
-                    actions.append(f"say {e.n} {said}")
-                counts["redacted"] += 1
+                secrets_found[value].redacted.append(e.path)
+                if not args.check:
+                    actions.append(f"hit {e.n} {secrets_found[value].label}")
         if args.check:
             continue
         copy = work / "out" / "redacted" / e.n
         copy.write_text(text, **ENCODING)
         actions.append(f"replace {e.n}")
         actions.append(f"done {e.n} {copy.stat().st_size}")
+    for s in sorted(secrets_found.values(), key=lambda s: s.label):
+        line = s.report(args.check, every=args.manual)
+        if line:
+            out.say(line, alarm=True)
+    waiting = sum(1 for s in secrets_found.values() if s.waiting)
+    kept = sum(1 for s in secrets_found.values() if s.kept)
+    if waiting and not args.manual:
+        out.say(f"{plural(waiting, 'secret')} in files a running session holds, redacted once it ends; make scrub-check lists them", alarm=True)
+    if kept and not args.manual:
+        out.say(f"{plural(kept, 'secret')} that cannot be redacted; make scrub-check lists them", alarm=True)
     if not args.check:
         ledger.rotate_changed(known, out)
         (work / "out" / "actions").write_text("".join(f"{a}\n" for a in actions))
-    ledger.report_open(out)
+    ledger.report_open(out, listed={ledger.digest(v) for v in secrets_found}, every=args.manual)
     loud = {n: len(values) for n, values in report.items() if values}
     if args.manual and loud and not args.entropy:
         out.say(
@@ -528,8 +571,9 @@ def scan(args, out: Output) -> int:
     if args.manual:
         verb = "would be redacted" if args.check else "to redact"
         out.say(
-            f"{plural(len(entries), 'file')} looked at: {counts['redacted']} {verb}, "
-            f"{counts['waiting']} wait for a session to end, {counts['kept']} cannot be redacted"
+            f"{plural(len(entries), 'file')} looked at, {plural(len(secrets_found), 'secret')} in them: "
+            f"{counts['redacted']} {verb}, {counts['waiting']} wait for a session to end, "
+            f"{counts['kept']} keep something that cannot be redacted"
             + ("; dry run, nothing was changed" if args.check else "")
         )
     ledger.save()
@@ -537,14 +581,24 @@ def scan(args, out: Output) -> int:
 
 
 def rotated(args, out: Output) -> int:
+    """Mark secrets rotated: by id, several at once, or every open one."""
     ledger = Ledger(STATE, writable=True)
-    entry = ledger.by_id(args.id)
-    if entry is None:
-        out.say(f"no secret #{args.id} in the ledger")
-        return 2
-    ledger.mark_rotated(entry)
+    if "all" in args.ids:
+        chosen = [e for e in ledger.data["entries"] if e["status"] == "open"]
+    else:
+        chosen = []
+        for raw in args.ids:
+            entry = ledger.by_id(int(raw)) if raw.isdigit() else None
+            if entry is None:
+                out.say(f"no secret #{raw} in the ledger, so nothing was marked")
+                return 2
+            chosen.append(entry)
+    for entry in chosen:
+        ledger.mark_rotated(entry)
+        out.say(f"secret #{entry['id']} ({entry['rule']}) marked rotated")
+    if not chosen:
+        out.say("no secret is open, so nothing was marked")
     ledger.save()
-    out.say(f"secret #{args.id} ({entry['rule']}) marked rotated")
     return 0
 
 
@@ -557,7 +611,7 @@ def main(argv: list[str]) -> int:
     s.add_argument("--manual", action="store_true")
     s.add_argument("--entropy", action="store_true")
     r = sub.add_parser("rotated")
-    r.add_argument("id", type=int)
+    r.add_argument("ids", nargs="+")
     args = parser.parse_args(argv)
     out = Output(color=args.color)
     try:
