@@ -182,7 +182,7 @@ assert "and left as it is" grep -qF "${pat}" "${claude}/projects/-w/${live_id}.j
 assert "so is a folder a session holds whole" grep -qF "${pat}" "${HOME}/sp ace/.claude/history.jsonl"
 assert "Claude Code's process records are not looked at" grep -qF "${pat}" "${claude}/sessions/1.key"
 check "the gitleaks image is mounted, and the state" 0 calls \
-  "--mount type=image,source=docker.io/zricethezav/gitleaks:v8.30.1@sha256:"
+  "--mount type=image,source=$(pinned host/scrub GITLEAKS_IMAGE)"
 check "in a container with no network" 0 calls "podman run --rm -i --network=none --cap-drop=all"
 check "the scan image" 0 calls "localhost/airlock-base:local python3 -I - scan"
 assert "the state is private" test "$(stat -c %a "${state}")" = 700
@@ -274,7 +274,7 @@ check "the scan image has to be there" 1 err "scrub: no image localhost/airlock-
 SCRUB_IMAGE=localhost/other:x NO_IMAGE=1 run host/scrub scan "${ctx}"
 check "host/workbench names it" 1 err "scrub: no image localhost/other:x"
 NO_GITLEAKS=1 run host/scrub scan "${ctx}"
-check "gitleaks is pulled when missing" 0 calls "podman pull -q docker.io/zricethezav/gitleaks:v8.30.1@sha256:"
+check "gitleaks is pulled when missing" 0 calls "podman pull -q $(pinned host/scrub GITLEAKS_IMAGE)"
 NO_GITLEAKS=1 PULL_FAILS=1 run host/scrub scan "${ctx}"
 check "and stops the scan when it cannot be" 1 err "scrub: could not pull docker.io/zricethezav/gitleaks"
 PODMAN_RUN='exit 1' run host/scrub scan "${ctx}"

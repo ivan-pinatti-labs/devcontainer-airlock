@@ -107,9 +107,12 @@
   // skopeo), host/workbench's mirror backend and host/scrub's gitleaks are
   // pinned by tag and digest in shell assignments, each under a
   // `# renovate:` annotation the dockerfileVersions preset does not look at,
-  // since it only reads Dockerfiles. Pin Only has no grammar for a shell
-  // assignment either (.github/pin-only.yml), so these bumps wait for a
-  // person, which is the point: they change what scans the images.
+  // since it only reads Dockerfiles. Pin Only grades them with its
+  // shell_image_pin grammar (.github/pin-only.yml): the variable, the image
+  // and the quoting have to stay as they are, and only the tag and the
+  // digest may move, so a patch or minor bump merges unattended like any
+  // other pin. A bump of the registry, trivy or skopeo still goes through
+  // the job that builds and scans the images with them before it merges.
   customManagers: [
     {
       customType: "regex",
@@ -350,13 +353,40 @@
       matchUpdateTypes: ["major", "minor", "patch"],
       enabled: false,
     },
+    // What those images do move by, their digest, merges unattended. digest
+    // is an update type of its own: the patch and minor grant above does not
+    // match it, and any other digest grant here is scoped to another file.
+    // Without this rule every one of these bumps arrived with no `automerge`
+    // label, bot-auto-merge.yml gave it no approval, and it sat open with
+    // every required check green. `Pin Only` grades the Makefile with its
+    // `digest` grammar (.github/pin-only.yml), so the bot lane still has to
+    // pass first.
+    //
+    // The seven day window still holds. These tags are rebuilt upstream every
+    // week or two, and Renovate dates a digest by when its tag last moved, so
+    // `renovate/stability-days` reads pending whenever a newer build is under
+    // seven days old. With internalChecksFilter strict that newer build is
+    // held back and the branch keeps the last one that did age: the status
+    // describes the next candidate, not the branch, and no branch protection
+    // requires it.
+    {
+      matchManagers: ["custom.regex"],
+      matchFileNames: ["Makefile"],
+      matchUpdateTypes: ["digest"],
+      automerge: true,
+      addLabels: ["automerge"],
+    },
 
-    // agent-policy decides what the agents in the workbench may run. Its
-    // releases are reviewed in their own repository, and a new one still
-    // waits for a person here: it can loosen as well as tighten.
+    // agent-policy decides what the agents in the workbench may run. A
+    // release of it can loosen as well as tighten, so it is reviewed where
+    // that is decided, in its own repository: a CodeRabbit review and the
+    // merge queue there, then a release cut from that merge. A patch or minor
+    // release then takes the same lane here as any other pin, through the
+    // automerge grant above and `Pin Only`'s arg_tag_commit grammar, which
+    // holds the tag and its commit together. A major still waits for a
+    // person. This rule only labels it, so a bump is easy to find.
     {
       matchDepNames: ["ivan-pinatti-labs/agent-policy"],
-      automerge: false,
       addLabels: ["agent-policy"],
     },
     // The organization's own releases (ivan-pinatti-labs/gh-actions,

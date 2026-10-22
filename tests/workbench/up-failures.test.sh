@@ -93,7 +93,8 @@ check "nor one that stops" 1 err "workbench: the package mirror's gate did not s
 rm "${PODMAN_STATE}/dies/mirror-gate" "${PODMAN_STATE}/start-logs/mirror-gate"
 
 gone mirror-gate mirror-nexus
-touch "${PODMAN_STATE}/img/docker.io_sonatype_nexus3_3.96.3_sha256_a406f4e9dc149e050723a93bf57964311f6d1c88e1dcbed2e42ea373319a1772"
+nexus="$(pinned "${wb}" NEXUS_IMAGE)"
+touch "${PODMAN_STATE}/img/${nexus//[\/:@]/_}"
 rule '*mirror-provision*' 'exit 1'
 run "${wb}" up
 check "a mirror that cannot be provisioned" 1 err \

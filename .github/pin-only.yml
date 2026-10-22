@@ -10,9 +10,9 @@
 # scoped to .github/workflows/: it applies on every path, which is why the
 # three action grammars carry it as default_grammars rather than as a rule.
 
-# Every image's Dockerfile. scripts/build-images.sh carries image pins too,
-# but no grammar here reads a shell assignment, so a bot bump of one of those
-# is left to a person on purpose.
+# Every image's Dockerfile, and the three scripts that pin an image in a
+# shell assignment: scripts/build-images.sh (a registry, trivy, skopeo),
+# host/workbench (the mirror backend) and host/scrub (gitleaks).
 allowed_paths:
   - .pre-commit-config.yaml
   - .github/workflows/
@@ -27,17 +27,41 @@ allowed_paths:
   - tests/requirements.in
   - tests/requirements.txt
   - Makefile
+  - scripts/build-images.sh
+  - host/workbench
+  - host/scrub
 
-# The coding agent CLI versions are annotated ARGs in the workbench's
-# Dockerfile.
+# The coding agent CLI versions and the agent-policy release are annotated
+# ARGs in the workbench's Dockerfile; the script images are annotated shell
+# assignments. Only a name an annotation on the default branch made eligible
+# is graded as a pin.
 arg_sources:
   - file: images/workbench/Dockerfile
     annotations:
       - '^#\s*renovate:'
+  - file: scripts/build-images.sh
+    annotations:
+      - '^#\s*renovate:'
+  - file: host/workbench
+    annotations:
+      - '^#\s*renovate:'
+  - file: host/scrub
+    annotations:
+      - '^#\s*renovate:'
 
 rules:
+  # arg_tag_commit is agent-policy's `ARG AGENT_POLICY_REF=<tag>@<commit>`:
+  # the tag and the commit it must resolve to move together.
   - path: "*Dockerfile"
-    grammars: [docker_image_pin, arg_pin]
+    grammars: [docker_image_pin, arg_pin, arg_tag_commit]
+  # `NAME=image:tag@sha256:<digest>`, alone on its line: only the tag and the
+  # digest may move.
+  - path: scripts/build-images.sh
+    grammars: [shell_image_pin]
+  - path: host/workbench
+    grammars: [shell_image_pin]
+  - path: host/scrub
+    grammars: [shell_image_pin]
   # The test suite's exact pins, and the hash lock compiled from them.
   # hash_locked_requirements grades the lock as a whole: same packages, only
   # versions and hashes moved, and every new hash one PyPI publishes for that
