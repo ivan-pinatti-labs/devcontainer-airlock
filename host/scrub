@@ -15,8 +15,8 @@
                         --manual waits for another scan instead of skipping
                         and reports more; --entropy lists each random
                         looking string instead of counting them
-    host/scrub rotated ID
-                        mark secret ID of the ledger rotated
+    host/scrub rotated ID... | all
+                        mark those secrets of the ledger rotated, or every one
 
   CONTEXT, which host/workbench writes, holds one fact a line:
     home host|workbench claude|codex PATH
@@ -75,10 +75,19 @@ lock() {
 
 # host/scrub-scan in the scan image, with the state folder and what else is
 # given, on standard input so nothing of this checkout is mounted.
+# Red and bold on a terminal, unless NO_COLOR; SCRUB_TTY=1 as if on a
+# terminal, for the tests.
+colors() {
+  RED="" RESET=""
+  if { [[ -t 1 ]] || [[ "${SCRUB_TTY:-}" = 1 ]]; } && [[ -z "${NO_COLOR:-}" ]]; then
+    RED=$'\e[1;31m' RESET=$'\e[0m'
+  fi
+}
+
 scan_container() {
   local color=()
-  # SCRUB_TTY=1 as if on a terminal, for the tests.
-  if { [[ -t 1 ]] || [[ "${SCRUB_TTY:-}" = 1 ]]; } && [[ -z "${NO_COLOR:-}" ]]; then color=(--color); fi
+  colors
+  if [[ -n "${RED}" ]]; then color=(--color); fi
   podman image exists "${IMAGE}" ||
     die "no image ${IMAGE}; host/workbench build (or pull) makes it"
   podman run --rm -i --network=none --cap-drop=all --security-opt no-new-privileges \
@@ -226,13 +235,15 @@ cmd_scan() {
   [[ -z "${check}" ]] || return 0
   [[ -f "${WORK}/out/actions" ]] || die "the scan wrote no result, so nothing was changed"
   : >"${WORK}/done"
+  : >"${WORK}/hits"
+  : >"${WORK}/replaced"
   while read -r verb m s; do
     case "${verb}" in
-    # What a copy's redaction is, said only once it has replaced the file.
-    say) printf '%s\n' "${s}" >>"${WORK}/said.${m}" ;;
+    # Each secret a copy's redaction removes, said once it replaced the file.
+    hit) printf '%s\t%s\n' "${m}" "${s}" >>"${WORK}/hits" ;;
     replace)
       if replace "${m}"; then
-        cat "${WORK}/said.${m}" 2>/dev/null || true
+        echo "${m}" >>"${WORK}/replaced"
       else
         echo "${m}" >>"${WORK}/failed"
       fi
@@ -243,6 +254,10 @@ cmd_scan() {
       ;;
     esac
   done <"${WORK}/out/actions"
+  # One line per secret redacted, with the files it was redacted in.
+  colors
+  awk -F'\t' -v red="${RED}" -v reset="${RESET}" 'FILENAME == ARGV[1] { ok[$1] = 1; next } FILENAME == ARGV[2] { path[$1] = $6; next } $1 in ok { n[$2]++; last[$2] = path[$1] } END { for (s in n) print red "scrub: " s ": redacted " (n[s] == 1 ? "in " last[s] : "in " n[s] " files") ". Rotate it" reset }' \
+    "${WORK}/replaced" "${WORK}/manifest" "${WORK}/hits" | sort
   # The index: every file still there that was scanned now, or before and
   # has not changed since. One this scan set out to look at and did not
   # finish (it could not be copied, it waits for its session to end, or it
@@ -254,12 +269,16 @@ cmd_scan() {
 }
 
 cmd_rotated() {
-  [[ "${1:-}" =~ ^[0-9]+$ ]] || usage
+  local id
+  [[ $# -gt 0 ]] || usage
+  for id in "$@"; do
+    [[ "${id}" =~ ^([0-9]+|all)$ ]] || usage
+  done
   mkdir -p "${STATE}"
   chmod 700 "${STATE}"
   lock wait
   MOUNTS=()
-  scan_container rotated "$1"
+  scan_container rotated "$@"
 }
 
 case "${1:-}" in
@@ -267,6 +286,9 @@ scan)
   shift
   cmd_scan "$@"
   ;;
-rotated) cmd_rotated "${2:-}" ;;
+rotated)
+  shift
+  cmd_rotated "$@"
+  ;;
 *) usage ;;
 esac
