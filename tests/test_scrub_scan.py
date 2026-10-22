@@ -354,9 +354,13 @@ def test_a_hit_not_written_as_found_is_reported_not_redacted(
     w.add("b.jsonl", line(t="SPLITVALUE12") + "\n")
     w.run(gitleaks)
     printed = capsys.readouterr().out
-    assert "(odd): cannot be redacted in 2 files. Rotate it" in printed
+    # A session start or end counts them; a manual run says where.
+    assert "1 secret that cannot be redacted; make scrub-check lists them" in printed
+    assert "cannot be redacted in" not in printed
     assert PAT not in w.redacted(n)
     assert "done 3" not in w.actions() and w.actions()[-1].startswith("done 2 ")
+    w.run(gitleaks, "--manual")
+    assert "(odd): cannot be redacted in 2 files. Rotate it" in capsys.readouterr().out
 
 
 def test_report_only_hits_are_reported_on_manual_runs_only(w, gitleaks, capsys):

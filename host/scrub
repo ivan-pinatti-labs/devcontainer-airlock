@@ -180,6 +180,14 @@ replace() {
   return 1
 }
 
+# The secrets of the copies listed in $1 (their `hit` actions), one line
+# each: what happened to them ($2), in which file or how many.
+said() {
+  colors
+  awk -F'\t' -v red="${RED}" -v reset="${RESET}" -v what="$2" 'FILENAME == ARGV[1] { ok[$1] = 1; next } FILENAME == ARGV[2] { path[$1] = $6; next } $1 in ok { n[$2]++; last[$2] = path[$1] } END { for (s in n) print red "scrub: " s ": " what " " (n[s] == 1 ? "in " last[s] : "in " n[s] " files") ". Rotate it" reset }' \
+    "$1" "${WORK}/manifest" "${WORK}/hits" | sort
+}
+
 cmd_scan() {
   local context="${1:-}" full="" check="" manual="" wait=skip args=() n=0 size mtime kind home path verb m s index
   [[ -f "${context}" ]] || usage
@@ -237,6 +245,7 @@ cmd_scan() {
   : >"${WORK}/done"
   : >"${WORK}/hits"
   : >"${WORK}/replaced"
+  : >"${WORK}/failed"
   while read -r verb m s; do
     case "${verb}" in
     # Each secret a copy's redaction removes, said once it replaced the file.
@@ -254,10 +263,10 @@ cmd_scan() {
       ;;
     esac
   done <"${WORK}/out/actions"
-  # One line per secret redacted, with the files it was redacted in.
-  colors
-  awk -F'\t' -v red="${RED}" -v reset="${RESET}" 'FILENAME == ARGV[1] { ok[$1] = 1; next } FILENAME == ARGV[2] { path[$1] = $6; next } $1 in ok { n[$2]++; last[$2] = path[$1] } END { for (s in n) print red "scrub: " s ": redacted " (n[s] == 1 ? "in " last[s] : "in " n[s] " files") ". Rotate it" reset }' \
-    "${WORK}/replaced" "${WORK}/manifest" "${WORK}/hits" | sort
+  # One line per secret redacted, with the files it was redacted in, and
+  # one per secret a refused file still holds, with its number to rotate.
+  said "${WORK}/replaced" "redacted"
+  said "${WORK}/failed" "still there, the next scan tries again,"
   # The index: every file still there that was scanned now, or before and
   # has not changed since. One this scan set out to look at and did not
   # finish (it could not be copied, it waits for its session to end, or it

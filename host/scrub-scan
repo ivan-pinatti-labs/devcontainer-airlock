@@ -320,7 +320,7 @@ class Found:
         if self.waiting and every:
             verb = "would wait" if check else "waits"
             parts.append(f"{verb} for a session to end {where(self.waiting)}")
-        if self.kept:
+        if self.kept and every:
             parts.append(f"cannot be redacted {where(self.kept)}")
         return f"{self.label}: {'; '.join(parts)}. Rotate it" if parts else ""
 
@@ -553,8 +553,11 @@ def scan(args, out: Output) -> int:
         if line:
             out.say(line, alarm=True)
     waiting = sum(1 for s in secrets_found.values() if s.waiting)
+    kept = sum(1 for s in secrets_found.values() if s.kept)
     if waiting and not args.manual:
         out.say(f"{plural(waiting, 'secret')} in files a running session holds, redacted once it ends; make scrub-check lists them", alarm=True)
+    if kept and not args.manual:
+        out.say(f"{plural(kept, 'secret')} that cannot be redacted; make scrub-check lists them", alarm=True)
     if not args.check:
         ledger.rotate_changed(known, out)
         (work / "out" / "actions").write_text("".join(f"{a}\n" for a in actions))

@@ -223,6 +223,7 @@ PODMAN_RUN='mkdir -p "${WORK}/out/redacted"; : >"${WORK}/out/actions"
 check "a file written while it was scanned is left" 0 out \
   "scrub: ${claude}/projects/-w/raced.jsonl changed while it was scanned, so it is left for the next scan"
 assert "and not said to be redacted" bash -c "! grep -q 'redacted in' '${__scratch}/out'"
+check "but said to be still there, with its number" 0 out "secret #9 (raced 1): still there, the next scan tries again, in "
 assert "as it is" grep -qF "${pat}" "${claude}/projects/-w/raced.jsonl"
 assert "and looked at again next time" bash -c "! grep -qF raced.jsonl '${state}/index'"
 old "${claude}/projects/-w/raced.jsonl"

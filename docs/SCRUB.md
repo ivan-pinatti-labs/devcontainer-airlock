@@ -22,9 +22,14 @@ finding says "rotate it".
 
 Each secret is one line, whatever number of files it is in: where it was
 redacted, where it waits for a session to end, where it cannot be redacted.
+In `make scrub` a secret that was redacted in some files and waits or
+cannot be redacted in others has two: what was redacted is said once the
+files are replaced, after the rest (and a file that changed meanwhile is
+said to still hold it, with its number).
 `make scrub` and `make scrub-check` then list every secret found before and
 not rotated yet; a session start or end only counts them (and the secrets
-waiting for a running session), so it stays a line or two. After rotating,
+waiting for a running session or that cannot be redacted), so it stays a
+line or three. After rotating,
 `make scrub-rotated ID=<n>` takes a secret off the list; `ID="3 5 8"` takes
 several, `ID=all` every one (for false positives, or after rotating them
 all). The GitHub token, the ssh key and the values of the files in
