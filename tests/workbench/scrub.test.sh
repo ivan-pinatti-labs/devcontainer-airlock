@@ -31,7 +31,7 @@ scan_rule() {
 scan_rule
 
 run "${wb}" scrub bogus
-check "scrub takes --check or rotated" 2 err "workbench: host/workbench scrub [--check] | scrub rotated ID"
+check "scrub takes --check or rotated" 2 err "workbench: host/workbench scrub [--check] [--entropy] | scrub rotated ID"
 run "${wb}" scrub rotated
 check "rotated needs an id" 1 err "workbench: which secret? host/workbench scrub rotated ID"
 run "${wb}" scrub rotated 3
@@ -92,6 +92,8 @@ scan_rule
 rm -rf "${HOME}/.ssh/devcontainer/id_ed25519" "${PODMAN_STATE}/secret/gh-devcontainer" "${HOME}/.claude/sessions"
 run "${wb}" scrub --check
 check "check only reports" 0 calls "python3 -I - scan --check --manual"
+run "${wb}" scrub --check --entropy
+check "and --entropy lists each random looking string" 0 calls "python3 -I - scan --entropy --check --manual"
 assert "with no secret the host does not hold" test -z "$(ls "${got}/known")"
 touch "${PODMAN_STATE}/secret/gh-devcontainer" "${HOME}/.ssh/devcontainer/id_ed25519"
 

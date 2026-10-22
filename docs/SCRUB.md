@@ -41,7 +41,7 @@ file holds it and what would happen to it:
 scrub: github-pat ...Q7r8 in <file>: would be redacted to [REDACTED:github-pat:...Q7r8]. Rotate it: ...
 scrub: aws-access-token ...MN23 in <file>: in a file a running session holds, so it would wait for the session to end. Rotate it now
 scrub: <file>: redacting it would break its JSON, so it is left as it is. Rotate what it holds
-scrub: generic-high-entropy ...xfCQ in <file>: a random looking string, reported only (docs/SCRUB.md)
+scrub: 412 random looking strings in 37 files, reported only, not redacted (docs/SCRUB.md); ENTROPY=1 lists them
 scrub: 812 files looked at: 3 would be redacted, 1 wait for a session to end, 1 cannot be redacted; dry run, nothing was changed
 ```
 
@@ -105,9 +105,10 @@ redacted by the first scan after its session ends.
    for a value written beside a word like `token`, `key` or `password`.
 3. **Long random looking strings** with no known format
    (`generic-high-entropy` in `host/scrub-gitleaks.toml`): **reported only**,
-   on `make scrub` and `make scrub-check`, and never redacted or kept in the
-   ledger. Run `make scrub-check` over your history and look at what it
-   lists; making this tier redact is a decision for after that.
+   on `make scrub` and `make scrub-check` as one count (`ENTROPY=1` lists each
+   one), and never redacted or kept in the ledger. Run
+   `make scrub-check ENTROPY=1` over your history and look at what it lists;
+   making this tier redact is a decision for after that.
 
 gitleaks reads a view of each file in which every JSON string is decoded and
 written beside its key, so a rule sees `api_key: "..."` rather than its

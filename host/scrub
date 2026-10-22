@@ -7,13 +7,14 @@
   the scan runs in a container with no network, on copies.
 
   Usage:
-    host/scrub scan CONTEXT [--full] [--check] [--manual]
+    host/scrub scan CONTEXT [--full] [--check] [--manual] [--entropy]
                         look at the files in the homes CONTEXT names that
                         changed since the last scan (--full: every one),
                         redact what no live session holds and report the
                         rest; --check redacts nothing and keeps nothing;
                         --manual waits for another scan instead of skipping
-                        and reports more
+                        and reports more; --entropy lists each random
+                        looking string instead of counting them
     host/scrub rotated ID
                         mark secret ID of the ledger rotated
 
@@ -46,7 +47,7 @@ die() {
   exit 1
 }
 usage() {
-  sed -n '9,18p' "$0" >&2
+  sed -n '9,19p' "$0" >&2
   exit 2
 }
 
@@ -179,6 +180,7 @@ cmd_scan() {
     --full) full=1 ;;
     --check) check=1 ;;
     --manual) manual=1 wait=wait ;;
+    --entropy) args+=(--entropy) ;;
     *) usage ;;
     esac
   done

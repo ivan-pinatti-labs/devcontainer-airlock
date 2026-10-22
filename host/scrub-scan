@@ -469,7 +469,9 @@ def scan(args, out: Output) -> int:
     (work / "out" / "redacted").mkdir(parents=True, exist_ok=True)
     for e in entries:
         found = redact[e.n]
-        if args.manual:
+        # Report only hits are many on real history: one line in all,
+        # unless asked for each (--entropy).
+        if args.entropy:
             for value in sorted(report[e.n]):
                 out.say(f"{shown('generic-high-entropy', value)} in {e.path}: a random looking string, reported only (docs/SCRUB.md)")
         if not args.check:
@@ -517,6 +519,12 @@ def scan(args, out: Output) -> int:
         ledger.rotate_changed(known, out)
         (work / "out" / "actions").write_text("".join(f"{a}\n" for a in actions))
     ledger.report_open(out)
+    loud = {n: len(values) for n, values in report.items() if values}
+    if args.manual and loud and not args.entropy:
+        out.say(
+            f"{plural(sum(loud.values()), 'random looking string')} in {plural(len(loud), 'file')}, "
+            "reported only, not redacted (docs/SCRUB.md); ENTROPY=1 lists them"
+        )
     if args.manual:
         verb = "would be redacted" if args.check else "to redact"
         out.say(
@@ -547,6 +555,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("scan")
     s.add_argument("--check", action="store_true")
     s.add_argument("--manual", action="store_true")
+    s.add_argument("--entropy", action="store_true")
     r = sub.add_parser("rotated")
     r.add_argument("id", type=int)
     args = parser.parse_args(argv)

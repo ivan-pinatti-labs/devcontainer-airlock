@@ -56,7 +56,7 @@ workbench-help:
 		'  codex-shell                 A terminal in the Codex workbench.' \
 		'  unlock                      Unlock the ssh key for git push, for 12 hours (HOURS= up to 48).' \
 		'  scrub                       Find secrets the agents wrote into their history, redact them, list those not rotated.' \
-		'  scrub-check                 A dry run: what scrub would redact or leave, changing nothing.' \
+		'  scrub-check                 A dry run: what scrub would redact or leave, changing nothing (ENTROPY=1: every random string).' \
 		'  scrub-rotated ID=<n>        Mark secret <n> of that list rotated.' \
 		'  workbench-up                Start this repository workbenches and L2 engine, and the shared services.' \
 		'  workbench-down              Stop them; the shared services too when nothing else uses them.' \
@@ -125,12 +125,14 @@ unlock:
 # Secrets the agents wrote into their history (docs/SCRUB.md). Every session
 # start and end already scans what changed; these look at everything.
 ID ?=
+# ENTROPY=1: list each random looking string rather than their count.
+ENTROPY ?=
 export ID
 scrub:
-	@$(WORKBENCH) scrub
+	@$(WORKBENCH) scrub $(if $(ENTROPY),--entropy)
 
 scrub-check:
-	@$(WORKBENCH) scrub --check
+	@$(WORKBENCH) scrub --check $(if $(ENTROPY),--entropy)
 
 scrub-rotated:
 	@$(WORKBENCH) scrub rotated $(if $(ID),"$$ID",$(error which secret? ID=<n>, from make scrub))
