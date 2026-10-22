@@ -17,7 +17,7 @@
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
-.PHONY: claude codex sessions prune claude-shell codex-shell claude-remote claude-plain claude-assisted claude-unattended unlock workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
+.PHONY: claude codex sessions prune claude-shell codex-shell claude-remote claude-plain claude-assisted claude-unattended unlock scrub scrub-check scrub-rotated workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 VOICE ?= 1
@@ -55,6 +55,9 @@ workbench-help:
 		'  claude-shell                A terminal in the Claude workbench.' \
 		'  codex-shell                 A terminal in the Codex workbench.' \
 		'  unlock                      Unlock the ssh key for git push, for 12 hours (HOURS= up to 48).' \
+		'  scrub                       Find secrets the agents wrote into their history, redact them, list those not rotated.' \
+		'  scrub-check                 A dry run: what scrub would redact or leave, changing nothing.' \
+		'  scrub-rotated ID=<n>        Mark secret <n> of that list rotated.' \
 		'  workbench-up                Start this repository workbenches and L2 engine, and the shared services.' \
 		'  workbench-down              Stop them; the shared services too when nothing else uses them.' \
 		'  workbench-status            What is running.' \
@@ -118,6 +121,19 @@ codex-shell:
 unlock:
 	@$(WORKBENCH) helpers >/dev/null
 	@$(WORKBENCH) unlock $(if $(HOURS),"$$HOURS")
+
+# Secrets the agents wrote into their history (docs/SCRUB.md). Every session
+# start and end already scans what changed; these look at everything.
+ID ?=
+export ID
+scrub:
+	@$(WORKBENCH) scrub
+
+scrub-check:
+	@$(WORKBENCH) scrub --check
+
+scrub-rotated:
+	@$(WORKBENCH) scrub rotated $(if $(ID),"$$ID",$(error which secret? ID=<n>, from make scrub))
 
 workbench-up:
 	@$(WORKBENCH) up

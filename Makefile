@@ -65,6 +65,7 @@ KCOV_IMAGE ?= docker.io/kcov/kcov:latest@sha256:481289ae32e55e5b733019515acd1094
 # The Python sources. Files ending in .py are listed too, so a module no test
 # imports fails the gate instead of dropping out of the report.
 PYTHON_SOURCES := \
+	host/scrub-scan \
 	images/egress-proxy/bin/egress-refresh \
 	images/gh-broker/broker.py \
 	images/l2/bin/l2-prepare-hooks \

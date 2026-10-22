@@ -53,6 +53,13 @@
                                     copy the local L2 images into the shared L2
                                     store now (up does it when they differ)
     host/workbench status           what is running
+    host/workbench scrub [--check]  look for secrets the agents wrote into
+                                    their history, redact them where no
+                                    session runs, and list the ones not
+                                    rotated yet (docs/SCRUB.md); --check is
+                                    a dry run. Every session start and
+                                    end runs it over what changed
+    host/workbench scrub rotated ID mark secret ID rotated
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
                                     engine and network) and take it off the
                                     egress proxy. When no other workspace is
@@ -174,6 +181,19 @@
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
                           Default: ghcr.io/ivan-pinatti-labs
+    WORKBENCH_SCRUB       0 to skip the secret scan at session start and
+                          end; `scrub` still runs. Default: 1
+    WORKBENCH_SCRUB_HOMES more folders agents keep history in, beyond
+                          ~/.claude, ~/.codex, the WORKBENCH_HISTORY ones and
+                          the workbenches own, as <agent>=<folder> pairs,
+                          space separated
+    WORKBENCH_SCRUB_SECRETS
+                          files of KEY=value lines whose values are secrets
+                          to search for as they are, space separated (the
+                          GitHub token and the ssh key always are)
+    WORKBENCH_SCRUB_QUIET minutes a file in a host folder has to go unwritten
+                          before the scan takes its session to have ended.
+                          Default: 10
 
   State kept on the host:
     ${XDG_DATA_HOME}/workbench/claude, codex  the agents logins and settings,
@@ -192,6 +212,8 @@
     podman volume egress-cache                providers last good lists
     podman volumes mirror-*                   the mirror cache, its OSV
                                               feeds and its admin password
+    ${XDG_STATE_HOME}/workbench/scrub         the ledger of secrets found,
+                                              its key, what was scanned
 
   Exit status codes:
     1  a prerequisite is missing (the message says which)
@@ -222,7 +244,7 @@ load_config() {
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
     '' | '#'*) continue ;;
-    WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY | WORKBENCH_MIRROR | WORKBENCH_MIRROR_MIN_AGE | WORKBENCH_MIRROR_HEAP | WORKBENCH_DNS) ;;
+    WORKBENCH_ROOT | WORKBENCH_TAG | WORKBENCH_TZ | WORKBENCH_VOICE | WORKBENCH_AGENTS | WORKBENCH_ACCOUNTS | WORKBENCH_HISTORY | WORKBENCH_GH_OWNERS | WORKBENCH_GH_SECRET | WORKBENCH_SSH_KEY | WORKBENCH_REGISTRY | WORKBENCH_MIRROR | WORKBENCH_MIRROR_MIN_AGE | WORKBENCH_MIRROR_HEAP | WORKBENCH_DNS | WORKBENCH_SCRUB | WORKBENCH_SCRUB_HOMES | WORKBENCH_SCRUB_SECRETS | WORKBENCH_SCRUB_QUIET) ;;
     *) die "unknown setting '${key}' in ${CONFIG}" ;;
     esac
     # Set in the environment, even to nothing, wins over the file.
@@ -1951,6 +1973,103 @@ session_repos() {
   if is_group "$1"; then group_repos "$1"; else echo "$1"; fi
 }
 
+# The secret scan (host/scrub, docs/SCRUB.md). What it reads, one fact a
+# line: the folders agents keep history in (the host ones, then each
+# workbench's own), what is live there, and the secrets whose values the host
+# holds. $1: a conversation known to have ended, or nothing.
+scrub_context() {
+  local closed="${1:-}" pair agent path d f pid id name s
+  local -a homes=("claude=${HOME}/.claude" "codex=${HOME}/.codex")
+  [[ "${WORKBENCH_SCRUB_QUIET:-10}" =~ ^[0-9]+$ ]] ||
+    die "WORKBENCH_SCRUB_QUIET is '${WORKBENCH_SCRUB_QUIET}'; use a whole number of minutes"
+  echo "quiet $((${WORKBENCH_SCRUB_QUIET:-10} * 60))"
+  [ -z "${closed}" ] || echo "closed ${closed}"
+  for pair in ${WORKBENCH_HISTORY:-} ${WORKBENCH_SCRUB_HOMES:-}; do homes+=("${pair}"); done
+  for pair in "${homes[@]}"; do
+    agent="$(agent_of "${pair%%=*}")"
+    path="${pair#*=}"
+    path="${path/#\~/${HOME}}"
+    echo "home host ${agent} ${path}"
+    # A Claude Code running on the host keeps a record per process, which
+    # names its conversation; its folder is in use while that process runs.
+    [ "${agent}" = claude ] || continue
+    for f in "${path}"/sessions/*.json; do
+      pid="$(basename "${f}" .json)"
+      [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null || continue
+      echo "busy ${path}"
+      id="$(sed -n 's/.*"sessionId"[[:space:]]*:[[:space:]]*"\([0-9a-f-]*\)".*/\1/p' "${f}")"
+      [ -z "${id}" ] || echo "live ${id}"
+    done
+  done
+  for d in "${DATA}"/*/; do
+    name="$(basename "${d}")"
+    if valid_agent "${name}"; then echo "home workbench $(agent_of "${name}") ${d%/}"; fi
+  done
+  # A running Claude Code session: its workbench folder is in use, and the
+  # conversations it has been in are live. Any other running workbench (a
+  # Codex one, or one `up` started) holds everything in its folders.
+  while read -r name agent s; do
+    if [ -n "${s}" ] && [ "$(agent_of "${agent}")" = claude ] && [ -f "$(session_dir "${s}")/session" ]; then
+      echo "busy ${DATA}/${agent}"
+      # In a shell of its own: session_read sets the S_ variables.
+      (
+        session_read "${s}"
+        echo "live ${S_ID}"
+      )
+      { podman exec "${name}" cat /tmp/airlock-conversation 2>/dev/null || true; } | while read -r id; do
+        if conversation_id_ok "${id}"; then echo "live ${id}"; fi
+      done
+    else
+      echo "busy-all ${DATA}/${agent}"
+      for pair in ${WORKBENCH_HISTORY:-}; do
+        path="${pair#*=}"
+        if [ "${pair%%=*}" = "${agent}" ]; then echo "busy-all ${path/#\~/${HOME}}"; fi
+      done
+    fi
+  done < <(podman ps --filter label=workbench.agent --format '{{.Names}} {{index .Labels "workbench.agent"}} {{index .Labels "workbench.session"}}' 2>/dev/null || true)
+  if podman secret exists "${GH_SECRET}" 2>/dev/null; then echo "secret gh-broker-token ${GH_SECRET}"; fi
+  if [ -f "${SSH_KEY}" ]; then echo "known ssh-key ${SSH_KEY}"; fi
+  for f in ${WORKBENCH_SCRUB_SECRETS:-}; do echo "env ${f/#\~/${HOME}}"; done
+}
+
+# Run host/scrub over the context above; $1 a conversation that ended (or
+# nothing), the rest host/scrub's own options.
+scrub_pass() {
+  local closed="$1" ctx rc=0
+  shift
+  ctx="$(mktemp)"
+  # In a shell of its own, so a setting it refuses ends only the scan.
+  if ! (scrub_context "${closed}") >"${ctx}"; then
+    rm -f "${ctx}"
+    return 1
+  fi
+  SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" scan "${ctx}" "$@" || rc=$?
+  rm -f "${ctx}"
+  return "${rc}"
+}
+
+# At a session's start and end: never in the way of the session.
+scrub_auto() {
+  [ "${WORKBENCH_SCRUB:-1}" != 0 ] || return 0
+  scrub_pass "${1:-}" ||
+    echo "workbench: the secret scan failed (above); make scrub-check shows what is left" >&2
+}
+
+cmd_scrub() {
+  case "${1:-}" in
+  '') scrub_pass "" --full --manual ;;
+  --check) scrub_pass "" --full --manual --check ;;
+  rotated)
+    [ -n "${2:-}" ] || die "which secret? host/workbench scrub rotated ID"
+    SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" rotated "$2"
+    ;;
+  *)
+    echo "workbench: host/workbench scrub [--check] | scrub rotated ID" >&2
+    exit 2
+    ;;
+  esac
+}
+
 # Bring session SESSION's containers up for workspace $1, agent $2: the
 # shared services that are not running, its network and registrations, its
 # engine and its workbench.
@@ -1958,6 +2077,9 @@ session_up() {
   local ws="$1" agent="$2"
   profiles "${ws}" >/dev/null || exit 1
   egress_sets "${ws}" >/dev/null || exit 1
+  # Before the lock, which a scan would hold up: what changed since the
+  # last one, while no workbench of this session runs yet.
+  scrub_auto
   lock_state
   refresh_shared
   start_helpers
@@ -2168,6 +2290,7 @@ session_run() {
   terminal_restore
   session_settle "${name}"
   session_down "${S_WS}"
+  scrub_auto "${S_ID}"
   echo "workbench: session ${SESSION} stopped; make attach-${SESSION} resumes it"
   return "${rc}"
 }
@@ -2289,6 +2412,7 @@ cmd_session_stop() {
   session_read "${SESSION}"
   session_settle "$(wb_name "${S_WS}" "${S_AGENT}")"
   session_down "${S_WS}"
+  scrub_auto "${S_ID}"
   echo "workbench: session ${SESSION} stopped"
 }
 
@@ -2417,6 +2541,10 @@ claude | codex | claude-* | codex-*) cmd_shell "$1" "${2:-}" "$(agent_of "$1")" 
 accounts) echo "${ACCOUNTS}" ;;
 load-l2) cmd_load_l2 "${2:-}" ;;
 status) cmd_status ;;
+scrub)
+  shift
+  cmd_scrub "$@"
+  ;;
 down) cmd_down "${2:-}" ;;
 session)
   shift

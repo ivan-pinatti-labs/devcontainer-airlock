@@ -104,7 +104,8 @@
   // carry no version pin for Renovate to move; the two npm agent CLIs do,
   // and custom.regex is what moves them.
   // The images scripts/build-images.sh runs (a throwaway registry, trivy,
-  // skopeo) are pinned by tag and digest in shell assignments, each under a
+  // skopeo), host/workbench's mirror backend and host/scrub's gitleaks are
+  // pinned by tag and digest in shell assignments, each under a
   // `# renovate:` annotation the dockerfileVersions preset does not look at,
   // since it only reads Dockerfiles. Pin Only has no grammar for a shell
   // assignment either (.github/pin-only.yml), so these bumps wait for a
@@ -114,6 +115,7 @@
       customType: "regex",
       managerFilePatterns: [
         "/^scripts/build-images\\.sh$/",
+        "/^host/scrub$/",
         "/^host/workbench$/",
       ],
       matchStrings: [
