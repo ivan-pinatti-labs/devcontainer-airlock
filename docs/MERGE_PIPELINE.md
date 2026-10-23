@@ -133,16 +133,26 @@ pin only:
 
 1. **`Pin Only` is graded.** The shared pin-only check checks that
    every changed line differs from its counterpart in nothing but a
-   version, in a pin position, across three allowed pin surfaces
-   (`.pre-commit-config.yaml`, `.github/workflows/`,
-   `images/base/Dockerfile`), and
-   `coderabbit-gate.yml` publishes its verdict as the `Pin Only` status. A
-   number that is not a pin does not count as one.
-2. **The approval is supplied, conditionally.** `bot-auto-merge.yml` waits
+   version, in a pin position, on one of the surfaces
+   `.github/pin-only.yml` allows: `.pre-commit-config.yaml`,
+   `.github/workflows/`, every image's Dockerfile (agent-policy's
+   `<tag>@<commit>` included), the test requirements, the Makefile's image
+   digests, and the annotated image pins in `scripts/build-images.sh`,
+   `host/workbench` and `host/scrub`. `coderabbit-gate.yml` publishes its
+   verdict as the `Pin Only` status. A number that is not a pin does not
+   count as one.
+2. **Renovate asks for the merge by label.** Its patch and minor bumps,
+   the digest bumps of the base image and the Makefile's images, and the
+   weekly refresh of the hash locked test requirements (lockFileMaintenance)
+   carry the `automerge` label (`.github/renovate.json5`); a major does
+   not. A lock refresh needs no reader because the lock's own
+   `--exclude-newer=P7D` keeps everything it resolves at least seven days
+   old, and `Pin Only` refuses a package added or removed.
+3. **The approval is supplied, conditionally.** `bot-auto-merge.yml` waits
    for `Pin Only` to read `success` and then supplies the approving review
    branch protection requires. A diff that is not pin-only gets no approval
    and waits for a person, same as a major bump does.
-3. **GitHub enqueues and merges it** once every required check, including
+4. **GitHub enqueues and merges it** once every required check, including
    `Review Verified`, is green and the approval is in place, the same as
    any other pull request.
 

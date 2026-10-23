@@ -48,7 +48,7 @@ check "the mirror gets a network of its own" 0 calls \
   "podman network create --internal --disable-dns --subnet 10.203.2.0/24 workbench-net-airlock-mirror"
 assert "its backend reaches only its registries through the proxy" grep -qx \
   "sets=python,node,golang,docker-hub,ghcr,ubuntu,debian,alpine,fedora" "${run_dir}/egress/airlock-mirror.conf"
-check "the backend image is pulled by digest" 0 calls "podman pull --quiet docker.io/sonatype/nexus3:3.96.3@sha256:"
+check "the backend image is pulled by digest" 0 calls "podman pull --quiet $(pinned "${wb}" NEXUS_IMAGE)"
 check "the backend runs at .10, with the default heap" 0 calls \
   "podman run -d --name mirror-nexus --network workbench-net-airlock-mirror:ip=10.203.2.10 --cap-drop=all --security-opt no-new-privileges -v mirror-nexus-data:/nexus-data -e INSTALL4J_ADD_VM_PARAMS=-Xms1024m -Xmx1024m -XX:MaxDirectMemorySize=1024m"
 check "and is provisioned" 0 err "workbench: provisioning the package mirror (the first start takes about a minute)"
