@@ -86,9 +86,13 @@ assert() {
 
 # pinned SCRIPT NAME: the image SCRIPT pins in its `NAME=` assignment, quotes
 # dropped. Read rather than written out, so a bot bump of the pin does not
-# fail the tests that look for it.
+# fail the tests that look for it. When there is no such assignment it prints
+# a marker no call can contain, so the check using it fails rather than
+# matching an empty string as a prefix.
 pinned() {
-  sed -n "s/^${2}=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "${__repo}/${1}"
+  local image
+  image="$(sed -n "s/^${2}=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "${__repo}/${1}")"
+  printf '%s' "${image:-<no ${2} pinned in ${1}>}"
 }
 
 finish() {
