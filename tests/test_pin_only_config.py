@@ -31,9 +31,10 @@ SHELL_IMAGE_PIN = re.compile(
     r'^(?P<name>[A-Z][A-Z0-9_]*)=(?P<quote>"?)[A-Za-z0-9._/-]+:'
     r"[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}(?P=quote)[ \t]*$"
 )
-# Any assignment that looks like an image pin, whether or not the grammar
-# could read it: what a script would write when it gains one.
-LOOSE_IMAGE_ASSIGNMENT = re.compile(r'^[A-Z][A-Z0-9_]*="?[^\s"]+@sha256:')
+# Any annotated assignment, whatever its value: in a script, a `# renovate:`
+# annotation only ever sits above an image pin, so one that lost its digest
+# or its tag is still found here and then fails the shape check below.
+LOOSE_IMAGE_ASSIGNMENT = re.compile(r'^[A-Z][A-Z0-9_]*="?[^\s"]+')
 # agent-policy's `ARG AGENT_POLICY_REF=<tag>@<commit>`, for arg_tag_commit.
 ARG_TAG_COMMIT = re.compile(
     r"^ARG [A-Z][A-Z0-9_]*=v?[0-9][0-9A-Za-z.+_-]*@[0-9a-f]{40}$"
