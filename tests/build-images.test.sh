@@ -91,7 +91,7 @@ echo 2 >"${CURL_FAILS}"
 RUNTIME=docker PUBLISH_TO=ghcr.io/example REGISTRY_USER=u REGISTRY_TOKEN=t TAGS="latest v1" \
   run scripts/build-images.sh
 check "a staging registry that is not up is started" 0 calls \
-  "docker run -d --rm --name build-images-staging -p 5000:5000 docker.io/library/registry:3@"
+  "docker run -d --rm --name build-images-staging -p 5000:5000 $(pinned scripts/build-images.sh REGISTRY_IMAGE)"
 check "and waited for" 0 calls "sleep 0.2"
 check "with docker, buildx builds with attestations" 0 calls \
   "--target claude --push --sbom=true --provenance=mode=max --metadata-file ${SARIF_DIR}/workbench-claude.build.json"

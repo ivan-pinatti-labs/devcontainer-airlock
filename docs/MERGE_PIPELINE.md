@@ -142,8 +142,12 @@ pin only:
    verdict as the `Pin Only` status. A number that is not a pin does not
    count as one.
 2. **Renovate asks for the merge by label.** Its patch and minor bumps,
-   and the digest bumps of the base image and the Makefile's images, carry
-   the `automerge` label (`.github/renovate.json5`); a major does not.
+   the digest bumps of the base image and the Makefile's images, and the
+   weekly refresh of the hash locked test requirements (lockFileMaintenance)
+   carry the `automerge` label (`.github/renovate.json5`); a major does
+   not. A lock refresh needs no reader because the lock's own
+   `--exclude-newer=P7D` keeps everything it resolves at least seven days
+   old, and `Pin Only` refuses a package added or removed.
 3. **The approval is supplied, conditionally.** `bot-auto-merge.yml` waits
    for `Pin Only` to read `success` and then supplies the approving review
    branch protection requires. A diff that is not pin-only gets no approval
