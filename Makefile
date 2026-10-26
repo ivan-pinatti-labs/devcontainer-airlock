@@ -56,7 +56,7 @@ help:
 COVERAGE_DIR ?= coverage
 PODMAN ?= $(if $(CONTAINER_HOST),podman-remote,podman)
 # renovate: datasource=docker depName=docker.io/library/python
-PYTHON_IMAGE ?= docker.io/library/python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
+PYTHON_IMAGE ?= docker.io/library/python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 # renovate: datasource=docker depName=docker.io/library/node
 NODE_IMAGE ?= docker.io/library/node:24-trixie@sha256:1278a37eb510ec1606fba0e80f554bcc941ae0b44f35ae373c4822ae7717c64d
 # renovate: datasource=docker depName=docker.io/kcov/kcov
