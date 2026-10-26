@@ -104,7 +104,8 @@
   // pinned to an upstream image (the linters l2 copies out, and
   // quay.io/podman/stable under images/podman-nested); custom.regex covers the
   // two annotated ARG lines pinning the coding agent CLI versions in that
-  // same file. The first three are also
+  // same file, and the VS Code extension pins in
+  // images/workbench/vscode/extensions.txt. The first three are also
   // configured, disabled, in dependabot.yml; see the file header above.
   // Dropping a manager from this list is the other half of switching that
   // ecosystem back to Dependabot, alongside raising its
@@ -165,7 +166,36 @@
         "# renovate: datasource=(?<datasource>github-tags) depName=(?<depName>\\S+)\\nARG [A-Z_]+_REF=(?<currentValue>[^@\\s]+)@(?<currentDigest>[0-9a-f]{40})",
       ],
     },
+    {
+      // The VS Code extensions baked into the workbench, one
+      // `publisher.name@1.2.3` per line. Renovate has no Marketplace
+      // datasource, so the vscode-extension custom datasource below reads the
+      // index the Extension Index workflow publishes every day.
+      customType: "regex",
+      managerFilePatterns: ["/^images/workbench/vscode/extensions\\.txt$/"],
+      matchStrings: [
+        "(?:^|\\n)(?<depName>[A-Za-z0-9][A-Za-z0-9-]*\\.[A-Za-z0-9][A-Za-z0-9-]*)@(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+      ],
+      datasourceTemplate: "custom.vscode-extension",
+      versioningTemplate: "semver",
+    },
   ],
+
+  // The release lists for those extensions, one JSON file per extension in
+  // the shape custom datasources take, each release dated by the Marketplace.
+  // The Marketplace's own release query is a POST, which a custom datasource
+  // cannot send, so .github/workflows/extension-index.yml asks it once a day
+  // (scripts/extension-index.py) and commits the answers to the
+  // `extension-index` branch, which holds nothing else and is never merged.
+  // The releases are stable only, and only those built for linux-x64 or for
+  // every platform; minimumReleaseAge below ages them like any other pin.
+  // A repository created from this template points this at its own branch.
+  customDatasources: {
+    "vscode-extension": {
+      defaultRegistryUrlTemplate: "https://raw.githubusercontent.com/ivan-pinatti-labs/devcontainer-airlock/extension-index/{{packageName}}.json",
+      format: "json",
+    },
+  },
 
   // tests/requirements.txt is a hash lock compiled from
   // tests/requirements.in with `uv pip compile --generate-hashes`.
@@ -322,6 +352,19 @@
       groupName: "coding agent CLIs",
       groupSlug: "agent-clis",
       labels: ["dependencies", "tooling"],
+    },
+
+    // The VS Code extensions run with the editor's full permissions, in the
+    // workbench where the agents' logins are (docs/LAYERS.md, "Extensions").
+    // They take the same lane as the agent CLIs: the seven day window, the
+    // patch and minor automerge from the first rule above, and `Pin Only`'s
+    // vscode_extension_pin grammar, which keeps each line's extension and
+    // lets only its version move. A major waits for a person, and adding or
+    // removing an extension is not a bump at all. Not grouped, so a major
+    // held for review never holds back another extension's patch.
+    {
+      matchDatasources: ["custom.vscode-extension"],
+      labels: ["dependencies", "vscode-extension"],
     },
 
     // The github-actions manager extracts more than uses: pins by default:

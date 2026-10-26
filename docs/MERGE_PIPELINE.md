@@ -137,8 +137,12 @@ pin only:
    `.github/pin-only.yml` allows: `.pre-commit-config.yaml`,
    `.github/workflows/`, every image's Dockerfile (agent-policy's
    `<tag>@<commit>` included), the test requirements, the Makefile's image
-   digests, and the annotated image pins in `scripts/build-images.sh`,
-   `host/workbench` and `host/scrub`. `coderabbit-gate.yml` publishes its
+   digests, the annotated image pins in `scripts/build-images.sh`,
+   `host/workbench` and `host/scrub`, and the workbench's VS Code extension
+   pins (`images/workbench/vscode/extensions.txt`, whose releases Renovate
+   reads from the `extension-index` branch that
+   `.github/workflows/extension-index.yml` publishes daily from the
+   Marketplace). `coderabbit-gate.yml` publishes its
    verdict as the `Pin Only` status. A number that is not a pin does not
    count as one.
 2. **Renovate asks for the merge by label.** Its patch and minor bumps,

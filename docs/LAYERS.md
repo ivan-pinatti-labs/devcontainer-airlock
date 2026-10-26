@@ -981,6 +981,13 @@ the editor itself; VS Code has no sandbox for them. What limits them here:
 
 - Only the extensions in `images/workbench/vscode/extensions.txt` exist,
   each pinned to an exact version released at least seven days earlier.
+  Renovate moves the pins like any other: Renovate has no Marketplace
+  datasource, so `.github/workflows/extension-index.yml` publishes each
+  extension's stable releases, dated by the Marketplace, to the
+  `extension-index` branch every day, and Renovate reads them from there
+  and holds each one back for seven days. A patch or minor bump merges
+  unattended when `Pin Only` sees nothing but the version move; a major,
+  and adding or removing an extension, waits for a person.
 - They are baked into a root owned, read only directory. Neither an
   extension nor anything else in the workbench can install, update or replace
   one. Auto update is off.

@@ -10,9 +10,10 @@
 # scoped to .github/workflows/: it applies on every path, which is why the
 # three action grammars carry it as default_grammars rather than as a rule.
 
-# Every image's Dockerfile, and the three scripts that pin an image in a
-# shell assignment: scripts/build-images.sh (a registry, trivy, skopeo),
-# host/workbench (the mirror backend) and host/scrub (gitleaks).
+# Every image's Dockerfile, the three scripts that pin an image in a shell
+# assignment: scripts/build-images.sh (a registry, trivy, skopeo),
+# host/workbench (the mirror backend) and host/scrub (gitleaks), and the
+# workbench's VS Code extension pins.
 allowed_paths:
   - .pre-commit-config.yaml
   - .github/workflows/
@@ -30,6 +31,7 @@ allowed_paths:
   - scripts/build-images.sh
   - host/workbench
   - host/scrub
+  - images/workbench/vscode/extensions.txt
 
 # The coding agent CLI versions and the agent-policy release are annotated
 # ARGs in the workbench's Dockerfile; the script images are annotated shell
@@ -74,6 +76,11 @@ rules:
   # keep their tags fixed, so only the digest ever moves.
   - path: Makefile
     grammars: [digest]
+  # The VS Code extensions baked into the workbench, `publisher.name@1.2.3`
+  # one per line: the extension stays, only its version moves. An added or
+  # removed line has no counterpart, so a new extension waits for a person.
+  - path: images/workbench/vscode/extensions.txt
+    grammars: [vscode_extension_pin]
 
 # Block scalars are passed through on every path here, not only workflows.
 default_grammars:
