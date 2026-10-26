@@ -1,0 +1,107 @@
+---
+name: Extension Index
+
+# Publishes the release index Renovate reads for the VS Code extensions baked
+# into the workbench (images/workbench/vscode/extensions.txt). Renovate has no
+# Marketplace datasource, and its custom datasources can only GET a URL while
+# the Marketplace's release query is a POST, so this asks the Marketplace once
+# a day and commits one JSON file per extension to the `extension-index`
+# branch. Renovate reads them from there (.github/renovate.json5), holds every
+# release back for seven days, and opens the pull request like any other pin.
+#
+# Nothing here judges a release or touches `main`. The branch holds only data,
+# is never merged, and is added to, never force pushed, so its history is a
+# record of what the Marketplace listed and when. If this stops running, the
+# index stops moving and so do the pins; nothing merges by mistake.
+#
+# A repository created from this template publishes its own branch, and has to
+# point the custom datasource in .github/renovate.json5 at it.
+
+"on":
+  schedule:
+    # Daily, ahead of Renovate's own "before 7am" window (America/Toronto).
+    - cron: "41 5 * * *"
+  push:
+    # A new extension, or a change to how the index is built, gets an index
+    # the same day rather than the next morning.
+    branches: [main]
+    paths:
+      - images/workbench/vscode/extensions.txt
+      - scripts/extension-index.py
+      - .github/workflows/extension-index.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: extension-index
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the extension index
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Ask the Marketplace for every pinned extension's releases
+        env:
+          INDEX: ${{ runner.temp }}/index.json
+        run: scripts/extension-index.py > "${INDEX}"
+
+      - name: Commit the index to the extension-index branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          INDEX: ${{ runner.temp }}/index.json
+          WORK: ${{ runner.temp }}/publish
+          BRANCH: extension-index
+        run: |
+          set -euo pipefail
+          git init -q -b "${BRANCH}" "${WORK}"
+          cd "${WORK}"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git config http.https://github.com/.extraheader "AUTHORIZATION: basic ${auth}"
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null; then
+            git fetch -q --depth 1 origin "${BRANCH}"
+            git reset -q --hard FETCH_HEAD
+          fi
+          find . -maxdepth 1 -name '*.json' -delete
+          # One file per extension, named for the identifier Renovate reads
+          # from extensions.txt. The script only prints identifiers that
+          # matched `publisher.name`, and this refuses anything else again
+          # before it becomes a path.
+          jq -r 'keys[]' "${INDEX}" | while read -r id; do
+            case "${id}" in
+              *[!A-Za-z0-9.-]* | .* | *..*)
+                echo "refusing extension identifier '${id}'" >&2
+                exit 1
+                ;;
+            esac
+            jq --arg id "${id}" '.[$id]' "${INDEX}" > "${id}.json"
+          done
+          cat > README.md <<'EOF'
+          # extension-index
+
+          Data, not code: the release index Renovate reads for the VS Code
+          extensions in `images/workbench/vscode/extensions.txt` on `main`.
+          Written by `.github/workflows/extension-index.yml` from the Visual
+          Studio Marketplace. Never merged, never edited by hand.
+          EOF
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The index is unchanged."
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "chore: refresh the VS Code extension index"
+          git push -q origin "HEAD:refs/heads/${BRANCH}"
+          git diff --stat HEAD~1 HEAD 2>/dev/null || git show --stat --format= HEAD

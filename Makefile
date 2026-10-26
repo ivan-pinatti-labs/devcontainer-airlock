@@ -75,7 +75,7 @@ PYTHON_SOURCES := \
 	images/mirror-gate/lib/osvdb.py \
 	images/workbench/bin/gh \
 	images/workbench/bin/route-to-l2 \
-	scripts/extension-pins.py \
+	scripts/extension-index.py \
 	scripts/kcov_to_sonar.py
 # The shell scripts, held at 100%, found rather than listed: every file git
 # would commit (minus any deleted in the working tree) that ends in .sh or

@@ -145,7 +145,7 @@ credentials and agents in the workbench, project tooling in L2.
 | Go modules for golang hooks (checkmake, gitleaks) | the Go module proxy, at the versions in `images/l2/go-modules.txt` | Go's checksum database, checked when the image is built; the image digest pins the result | L2, a read only module proxy; the hooks still build from source there |
 | claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | workbench, see below |
 | codex (Codex CLI) | npm `@openai/codex`, version pinned | npm registry signature **and** SLSA build provenance | workbench, see below |
-| VS Code extensions | the Visual Studio Marketplace, version pinned | Marketplace signature, checked on install | workbench, read only; `images/workbench/vscode/extensions.txt` |
+| VS Code extensions | the Visual Studio Marketplace, version pinned, moved by Renovate through the `extension-index` branch | Marketplace signature, checked on install | workbench, read only; `images/workbench/vscode/extensions.txt` |
 
 ### tflint is the exception
 

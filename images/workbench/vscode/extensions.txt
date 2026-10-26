@@ -3,9 +3,11 @@
 # directory is read only, auto update is off, and adding one means changing
 # this file in a reviewed pull request.
 #
-# A pin is chosen at least seven days after its release, the same rule the
-# coding agent CLIs follow, because a malicious update to a trusted extension
-# is usually found and pulled within days (docs/LAYERS.md, "Extensions").
+# Renovate moves each pin, at least seven days after a stable release, the
+# same rule the coding agent CLIs follow, because a malicious update to a
+# trusted extension is usually found and pulled within days (docs/LAYERS.md,
+# "Extensions"). It reads the releases from the index the Extension Index
+# workflow publishes, and only the version on a line may change unattended.
 anthropic.claude-code@2.1.274
 openai.chatgpt@26.908.40401
 ms-vscode.makefile-tools@0.12.17
