@@ -52,18 +52,18 @@ jobs:
 
       - name: Ask the Marketplace for every pinned extension's releases
         env:
-          INDEX: ${{ runner.temp }}/index
-        run: scripts/extension-index.py "${INDEX}"
+          INDEX: ${{ runner.temp }}/index.json
+        run: scripts/extension-index.py > "${INDEX}"
 
       - name: Commit the index to the extension-index branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          INDEX: ${{ runner.temp }}/index
+          INDEX: ${{ runner.temp }}/index.json
           WORK: ${{ runner.temp }}/publish
           BRANCH: extension-index
         run: |
-          set -eu
+          set -euo pipefail
           git init -q -b "${BRANCH}" "${WORK}"
           cd "${WORK}"
           auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
@@ -74,7 +74,19 @@ jobs:
             git reset -q --hard FETCH_HEAD
           fi
           find . -maxdepth 1 -name '*.json' -delete
-          cp "${INDEX}"/*.json .
+          # One file per extension, named for the identifier Renovate reads
+          # from extensions.txt. The script only prints identifiers that
+          # matched `publisher.name`, and this refuses anything else again
+          # before it becomes a path.
+          jq -r 'keys[]' "${INDEX}" | while read -r id; do
+            case "${id}" in
+              *[!A-Za-z0-9.-]* | .* | *..*)
+                echo "refusing extension identifier '${id}'" >&2
+                exit 1
+                ;;
+            esac
+            jq --arg id "${id}" '.[$id]' "${INDEX}" > "${id}.json"
+          done
           cat > README.md <<'EOF'
           # extension-index
 

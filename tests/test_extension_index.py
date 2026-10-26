@@ -105,29 +105,29 @@ def test_index_dates_a_repeated_version_by_its_latest_upload(ext):
     ]
 
 
-@pytest.mark.parametrize("argv", [[], ["--check"], ["a", "b"]])
-def test_main_refuses_anything_but_one_directory(ext, capsys, argv):
+@pytest.mark.parametrize("argv", [["--check"], ["out"]])
+def test_main_refuses_any_argument(ext, capsys, argv):
     assert ext.main(argv) == 2
     err = capsys.readouterr().err
-    assert "<output directory>" in err and "Runs anywhere" not in err
+    assert "> index.json" in err and "Runs anywhere" not in err
 
 
-def test_main_writes_one_file_per_extension(ext, tmp_path, capsys):
+def test_main_prints_one_entry_per_extension(ext, capsys):
     ext.PINS.write_text("# keep\nPub.Ext@1.0.0\npub.other@3.0.0\n")
     ext.marketplace["Pub.Ext"] = [release("2.0.0", "2026-10-01")]
     ext.marketplace["pub.other"] = [release("3.0.0", "2026-09-01")]
-    out = tmp_path / "out/index"
-    assert ext.main([str(out)]) == 0
-    assert sorted(p.name for p in out.iterdir()) == ["Pub.Ext.json", "pub.other.json"]
-    data = json.loads((out / "Pub.Ext.json").read_text())
-    assert data["releases"][0]["version"] == "2.0.0"
-    assert "Pub.Ext: 1 stable release(s)" in capsys.readouterr().out
+    assert ext.main([]) == 0
+    out, err = capsys.readouterr()
+    data = json.loads(out)
+    assert list(data) == ["Pub.Ext", "pub.other"]
+    assert data["Pub.Ext"]["releases"][0]["version"] == "2.0.0"
+    assert "Pub.Ext: 1 stable release(s)" in err
 
 
-def test_main_says_when_the_marketplace_cannot_be_read(ext, tmp_path, capsys):
+def test_main_says_when_the_marketplace_cannot_be_read(ext, capsys):
     ext.PINS.write_text("pub.ext@1.0.0\n")
     ext.marketplace["pub.ext"] = OSError("unreachable")
-    out = tmp_path / "index"
-    assert ext.main([str(out)]) == 2
-    assert "could not be read: unreachable" in capsys.readouterr().err
-    assert not out.exists()
+    assert ext.main([]) == 2
+    out, err = capsys.readouterr()
+    assert "could not be read: unreachable" in err
+    assert out == ""

@@ -2,11 +2,12 @@
 """Write the release index Renovate reads for the workbench's VS Code extensions.
 
 Reads images/workbench/vscode/extensions.txt and asks the Visual Studio
-Marketplace for each extension's releases, then writes one JSON file per
-extension, in the shape Renovate's custom datasources take:
+Marketplace for each extension's releases, then prints one JSON document to
+standard output, keyed by extension, each value in the shape Renovate's
+custom datasources take:
 
-  {"releases": [{"version": "1.2.3", "releaseTimestamp": "..."}, ...],
-    "homepage": "...", "changelogUrl": "..."}
+  {"publisher.name": {"releases": [{"version": "1.2.3",
+    "releaseTimestamp": "..."}, ...], "homepage": "...", "changelogUrl": "..."}}
 
 Only stable releases (not pre-releases) built for linux-x64 or for every
 platform are listed, each with the date the Marketplace published it. Nothing
@@ -16,18 +17,19 @@ seven days old, the same rule as every other pin (docs/LAYERS.md,
 
 Renovate has no Marketplace datasource, and its custom datasources can only
 GET a URL, while the Marketplace's release query is a POST. So the Extension
-Index workflow runs this every day and publishes the files to the
-`extension-index` branch, where Renovate reads them (.github/renovate.json5).
+Index workflow runs this every day and publishes each extension's entry as
+a file of its own on the `extension-index` branch, where Renovate reads it
+(.github/renovate.json5).
 
 Usage:
-  scripts/extension-index.py <output directory>
+  scripts/extension-index.py > index.json
 
 Runs anywhere Python 3 and network access to the Marketplace are, which in
 the workbench means L2 with the egress proxy:
-  l2 --net -- scripts/extension-index.py /tmp/index
+  l2 --net -- scripts/extension-index.py
 
 Exit status codes:
-  0  the index was written
+  0  the index was printed
   2  usage error, or the Marketplace could not be read
 """
 
@@ -119,13 +121,12 @@ def index(ext_id):
 
 
 def main(argv):
-    if len(argv) != 1 or argv[0].startswith("-"):
+    if argv:
         print(
             __doc__.split("Usage:")[1].split("Runs anywhere")[0].rstrip(),
             file=sys.stderr,
         )
         return 2
-    out = pathlib.Path(argv[0])
     try:
         indexes = {ext_id: index(ext_id) for ext_id in read_pins()}
     except OSError as e:
@@ -133,10 +134,9 @@ def main(argv):
             f"extension-index: the Marketplace could not be read: {e}", file=sys.stderr
         )
         return 2
-    out.mkdir(parents=True, exist_ok=True)
     for ext_id, data in indexes.items():
-        (out / f"{ext_id}.json").write_text(json.dumps(data, indent=2) + "\n")
-        print(f"{ext_id}: {len(data['releases'])} stable release(s)")
+        print(f"{ext_id}: {len(data['releases'])} stable release(s)", file=sys.stderr)
+    print(json.dumps(indexes, indent=2))
     return 0
 
 
