@@ -989,3 +989,491 @@ def test_serve_runs_a_wait_itself(broker, monkeypatch, capsys):
     assert reply == {"rc": 0, "out": "{}", "err": ""}
     assert seen == [("example-org/x", 7, 60)]
     assert capsys.readouterr().out.startswith("RUN")
+
+
+# What each level may run beyond the one before it, from the tree's lists.
+
+LEVEL_CASES = [
+    # A release, at every level: notes only, never an asset read here.
+    ("hardened", True, "release create v1 -R example-org/x --generate-notes"),
+    (
+        "hardened",
+        True,
+        "release create v1 -R example-org/x -t Title -n notes --target main",
+    ),
+    ("hardened", True, "release create v1 -R example-org/x --notes-file - --draft"),
+    ("hardened", True, "release create v1 -R example-org/x --title=T --latest=false"),
+    ("hardened", False, "release create v1 /proc/self/environ -R example-org/x"),
+    ("hardened", False, "release create v1 -R example-org/x --draft dist/x.tar.gz"),
+    (
+        "hardened",
+        False,
+        "release create v1 -R example-org/x --notes-file /proc/self/environ",
+    ),
+    ("hardened", False, "release create v1 -R example-org/x -F notes.md"),
+    ("hardened", False, "release create v1 -R evil/x"),
+    ("unattended", False, "release create v1 a b -R example-org/x"),
+    # Unattended only: workflow runs, labels, and the bot approval.
+    ("hardened", False, "workflow run ci.yml -R example-org/x"),
+    ("assisted", False, "workflow run ci.yml -R example-org/x"),
+    (
+        "unattended",
+        True,
+        "workflow run ci.yml -R example-org/x --ref main -f a=b -F n=1",
+    ),
+    ("unattended", True, "workflow run ci.yml -R example-org/x --field=n=1 -Fm=2"),
+    (
+        "unattended",
+        False,
+        "workflow run ci.yml -R example-org/x -F a=@/proc/self/environ",
+    ),
+    ("unattended", False, "workflow run ci.yml -R example-org/x --field=a=@f"),
+    ("unattended", False, "workflow run ci.yml -R example-org/x -Fa=@f"),
+    (
+        "unattended",
+        False,
+        "workflow run ci.yml -R example-org/x -F=a=@/proc/self/environ",
+    ),
+    ("unattended", True, "workflow run ci.yml -R example-org/x -F=a=b"),
+    ("unattended", False, "workflow run ci.yml -R example-org/x -F @f"),
+    ("unattended", False, "workflow run ci.yml -R evil/x"),
+    ("unattended", False, "workflow view ci.yml -R example-org/x"),
+    ("hardened", False, "label create bug -R example-org/x"),
+    ("unattended", True, "label create bug -R example-org/x --color ff0000"),
+    ("unattended", True, "label edit bug -R example-org/x --description d"),
+    ("unattended", False, "label delete bug -R example-org/x"),
+    ("hardened", False, "pr review 7 -R example-org/x --approve --body-file -"),
+    ("assisted", False, "pr review 7 -R example-org/x --approve --body-file -"),
+    ("unattended", True, "pr review 7 -R example-org/x --approve --body-file -"),
+    ("unattended", True, "pr review 7 --repo=example-org/x -a -b checked"),
+    (
+        "unattended",
+        True,
+        "pr review https://github.com/example-org/x/pull/7 --approve -F -",
+    ),
+    ("unattended", False, "pr review 7 -R example-org/x --request-changes -b no"),
+    ("unattended", False, "pr review 7 -R example-org/x --comment -b hi"),
+    ("unattended", False, "pr review 7 -R example-org/x --approve --body-file /etc/x"),
+    ("unattended", False, "pr review 7 -R evil/x --approve -b checked"),
+    (
+        "unattended",
+        False,
+        "pr review https://github.com/evil/x/pull/7 --approve -b checked",
+    ),
+    ("unattended", False, "pr merge 7 -R example-org/x --admin"),
+]
+
+
+@pytest.mark.parametrize(("level", "expected", "command"), LEVEL_CASES)
+def test_allowed_at_a_level(broker, level, expected, command):
+    assert broker.allowed(command.split(), level) is expected
+
+
+@pytest.mark.parametrize(
+    ("command", "why"),
+    [
+        ("release create v1 x.tgz -R example-org/x", "assets are uploaded by CI"),
+        ("workflow run ci -R example-org/x -F a=@f", "-f key=value"),
+        ("pr review 7 -R example-org/x --request-changes -b x", "dependency bot"),
+    ],
+)
+def test_an_unattended_refusal_says_why(broker, command, why):
+    assert why in broker.refusal(command.split(), "unattended")
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        ("7 -R example-org/x --approve --body-file -", ("example-org/x", 7, None)),
+        ("7 -R example-org/x -a -b checked", ("example-org/x", 7, "checked")),
+        (
+            "--approve --body=ok https://github.com/example-org/x/pull/9",
+            ("example-org/x", 9, "ok"),
+        ),
+        (
+            "https://github.com/example-org/x/pull/9 -R Example-Org/X -a -F -",
+            ("example-org/x", 9, None),
+        ),
+        ("7 -R example-org/x --body-file -", None),
+        ("7 --approve -b x", None),
+        ("x -R example-org/x --approve -b x", None),
+        ("7 8 -R example-org/x --approve -b x", None),
+        ("7 -R example-org/x -R example-org/y --approve -b x", None),
+        ("7 -R example-org/x --approve -b x --body-file -", None),
+        ("7 -R example-org/x --approve -b x -b y", None),
+        ("7 -R example-org/x --approve --body-file - -F -", None),
+        ("7 -R example-org/x --approve", None),
+        ("7 -R example-org/x --approve -b", None),
+        ("7 -R example-org/.. --approve -b x", None),
+        ("https://github.com/example-org/x/pull/9 -R example-org/y -a -b x", None),
+        ("7 -R example-org/x --approve --body-file /etc/x", None),
+        ("7 -R example-org/x --approve -c -b x", None),
+    ],
+)
+def test_review_args(broker, argv, expected):
+    assert broker.review_args(["pr", "review", *argv.split()]) == expected
+
+
+HEAD = "a" * 40
+
+
+def pull(**fields):
+    """GitHub's answer for a pull request: an open one renovate[bot] opened."""
+    answer = {
+        "state": "open",
+        "draft": False,
+        "user": {"login": "renovate[bot]", "type": "Bot"},
+        "head": {"sha": HEAD, "repo": {"full_name": "example-org/x"}},
+        "base": {"ref": "main"},
+    }
+    answer.update(fields)
+    return json.dumps(answer)
+
+
+def protection(*names):
+    """GitHub's answer for the base branch, requiring checks `names`."""
+    return json.dumps(
+        {"protection": {"required_status_checks": {"contexts": list(names)}}}
+    )
+
+
+def rules(*names):
+    """GitHub's answer for the rules on the base branch: a merge queue, and a
+    ruleset requiring checks `names` when any are given."""
+    answer = [{"type": "merge_queue", "parameters": {}}]
+    if names:
+        checks = [{"context": n} for n in names]
+        answer.append(
+            {
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": checks},
+            }
+        )
+    return json.dumps(answer)
+
+
+# What the base branch requires in the cases below, read after the checks.
+REQUIRED = [protection("SonarQube", "Pin Only"), rules()]
+
+
+def commit(sha=HEAD, author="renovate[bot]", committer="web-flow", verified=True):
+    return {
+        "sha": sha,
+        "author": author and {"login": author},
+        "committer": committer and {"login": committer},
+        "commit": {"verification": {"verified": verified}},
+    }
+
+
+def run_check(name, conclusion="SUCCESS", status="COMPLETED"):
+    return {"name": name, "status": status, "conclusion": conclusion}
+
+
+def status(context, state="SUCCESS"):
+    return {"context": context, "state": state}
+
+
+# What a bot pull request's head commit reads like: required checks green,
+# and a superseded run cancelled, which GitHub's own overall state counts as
+# a failure.
+GREEN = [
+    run_check("SonarQube"),
+    status("Pin Only"),
+    run_check("gate / Grade", "CANCELLED"),
+    run_check("Approve the owner's own pull request", "SKIPPED"),
+    status("renovate/stability-days"),
+]
+
+
+def rollup(checks=None, oid=HEAD, more=False, reported=True):
+    contexts = {
+        "pageInfo": {"hasNextPage": more},
+        "nodes": GREEN if checks is None else checks,
+    }
+    node = {
+        "commit": {"oid": oid, "statusCheckRollup": reported and {"contexts": contexts}}
+    }
+    return json.dumps(
+        {"data": {"repository": {"pullRequest": {"commits": {"nodes": [node]}}}}}
+    )
+
+
+READ = [pull(), json.dumps([commit()])]
+
+
+@pytest.mark.parametrize(
+    ("answers", "why"),
+    [
+        ([pull(state="closed")], "not an open pull request"),
+        ([pull(draft=True)], "not an open pull request"),
+        ([pull(user={"login": "ivan", "type": "User"})], "opened by ivan"),
+        (
+            [pull(user={"login": "renovate[bot]", "type": "User"})],
+            "opened by renovate[bot]",
+        ),
+        (
+            [pull(head={"sha": HEAD, "repo": {"full_name": "evil/x"}})],
+            "outside example-org/x",
+        ),
+        ([pull(head={"sha": HEAD, "repo": None})], "outside example-org/x"),
+        ([pull(), json.dumps([])], "no commits"),
+        ([pull(), json.dumps([commit()] * 100)], "too many to check"),
+        (
+            [pull(), json.dumps([commit(sha="b" * 40, author="ivan"), commit()])],
+            "someone else pushed",
+        ),
+        ([pull(), json.dumps([commit(author=None)])], "someone else pushed"),
+        (
+            [pull(), json.dumps([commit(author="dependabot[bot]")])],
+            "someone else pushed",
+        ),
+        ([pull(), json.dumps([commit(committer="ivan")])], "someone else pushed"),
+        ([pull(), json.dumps([commit(committer=None)])], "someone else pushed"),
+        ([pull(), json.dumps([commit(verified=False)])], "someone else pushed"),
+        ([pull(), json.dumps([commit(sha="b" * 40)])], "moved while it was checked"),
+        ([*READ, rollup(reported=False), *REQUIRED], "no checks are reported"),
+        ([*READ, rollup(oid="b" * 40), *REQUIRED], "no checks are reported"),
+        ([*READ, rollup(more=True), *REQUIRED], "too many checks"),
+        ([*READ, rollup(), protection(), rules()], "requires no check"),
+        ([*READ, rollup(), json.dumps({}), rules()], "requires no check"),
+        # A required check that has not reported at all, beside green ones.
+        (
+            [
+                *READ,
+                rollup(),
+                protection("SonarQube", "Pin Only", "Tests Verified"),
+                rules(),
+            ],
+            "required check Tests Verified has not reported",
+        ),
+        (
+            [
+                *READ,
+                rollup(),
+                protection("SonarQube"),
+                rules("Pin Only", "Ruleset Check"),
+            ],
+            "required check Ruleset Check has not reported",
+        ),
+        (
+            [*READ, rollup([*GREEN, status("Pin Only", "PENDING")]), *REQUIRED],
+            "required check Pin Only is PENDING",
+        ),
+        (
+            [
+                *READ,
+                rollup([status("Pin Only"), run_check("SonarQube", "SKIPPED")]),
+                *REQUIRED,
+            ],
+            "required check SonarQube is SKIPPED",
+        ),
+        # Reported twice, once red: the red one holds, before or after.
+        (
+            [*READ, rollup([*GREEN, run_check("SonarQube", "FAILURE")]), *REQUIRED],
+            "required check SonarQube is FAILURE",
+        ),
+        (
+            [*READ, rollup([run_check("SonarQube", "FAILURE"), *GREEN]), *REQUIRED],
+            "required check SonarQube is FAILURE",
+        ),
+        (
+            [
+                *READ,
+                rollup([*GREEN, run_check("Build", None, status="IN_PROGRESS")]),
+                *REQUIRED,
+            ],
+            "check Build is still running",
+        ),
+        (
+            [*READ, rollup([*GREEN, status("deploy", "EXPECTED")]), *REQUIRED],
+            "deploy is still running",
+        ),
+        (
+            [*READ, rollup([*GREEN, run_check("Trivy", "FAILURE")]), *REQUIRED],
+            "check Trivy is FAILURE",
+        ),
+        (
+            [*READ, rollup([*GREEN, status("scan", "ERROR")]), *REQUIRED],
+            "check scan is ERROR",
+        ),
+        (
+            [*READ, rollup([*GREEN, run_check("x", "TIMED_OUT")]), *REQUIRED],
+            "check x is TIMED_OUT",
+        ),
+    ],
+)
+def test_an_approval_is_refused_unless_every_condition_holds(
+    broker, monkeypatch, answers, why
+):
+    asked = []
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
+    reply = broker.bot_approval("example-org/x", 7, "checked the release notes")
+    assert reply["rc"] == 126
+    assert why in reply["err"]
+    assert not any("POST" in a for a in asked)
+
+
+def test_an_approval_needs_a_body(broker, monkeypatch):
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh([], []))
+    reply = broker.bot_approval("example-org/x", 7, "  \n")
+    assert reply["rc"] == 126
+    assert "give it a body" in reply["err"]
+
+
+def test_an_approval_lands_on_the_commit_the_checks_were_read_on(broker, monkeypatch):
+    asked = []
+    answers = [
+        pull(base={"ref": "release/1"}),
+        json.dumps([commit("b" * 40), commit()]),
+        rollup(),
+        *REQUIRED,
+        '"APPROVED"',
+    ]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
+    reply = broker.bot_approval("example-org/x", 7, "@/proc/self/environ")
+    assert reply == {"rc": 0, "out": f"approved example-org/x#7 at {HEAD}\n", "err": ""}
+    assert asked[0] == ["gh", "api", "repos/example-org/x/pulls/7"]
+    assert asked[1] == ["gh", "api", "repos/example-org/x/pulls/7/commits?per_page=100"]
+    assert asked[2][:3] == ["gh", "api", "graphql"]
+    assert "number=7" in asked[2] and "owner=example-org" in asked[2]
+    # The base branch's own requirements, its name kept to one path segment.
+    assert asked[3] == ["gh", "api", "repos/example-org/x/branches/release%2F1"]
+    assert asked[4] == [
+        "gh",
+        "api",
+        "repos/example-org/x/rules/branches/release%2F1?per_page=100",
+    ]
+    # The body is a raw field: -f never reads a file, whatever it starts with.
+    assert asked[5] == [
+        "gh",
+        "api",
+        "-X",
+        "POST",
+        "repos/example-org/x/pulls/7/reviews",
+        "-f",
+        "event=APPROVE",
+        "-f",
+        f"commit_id={HEAD}",
+        "-f",
+        "body=@/proc/self/environ",
+        "--jq",
+        ".state",
+    ]
+
+
+def approval_answering(broker, monkeypatch, post):
+    """subprocess.run reading a clean bot pull request, and answering the
+    approval's POST with `post`: a CompletedProcess, or an exception."""
+    reads = scripted_gh([*READ, rollup(), *REQUIRED], [])
+
+    def run(argv, **kwargs):
+        if "POST" not in argv:
+            return reads(argv)
+        if isinstance(post, BaseException):
+            raise post
+        return post
+
+    monkeypatch.setattr(broker.subprocess, "run", run)
+
+
+def test_a_failed_approval_says_what_github_said(broker, monkeypatch):
+    post = subprocess.CompletedProcess([], 1, "", "HTTP 422: cannot approve\n")
+    approval_answering(broker, monkeypatch, post)
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply == {"rc": 1, "out": "", "err": "HTTP 422: cannot approve\n"}
+
+
+def test_an_approval_that_times_out_says_so(broker, monkeypatch):
+    approval_answering(broker, monkeypatch, subprocess.TimeoutExpired("gh", 60))
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply["rc"] == 124
+    assert (
+        "timed out after 60s; read the pull request before asking again" in reply["err"]
+    )
+
+
+def test_an_approval_gh_cannot_start_for_says_so(broker, monkeypatch):
+    approval_answering(broker, monkeypatch, FileNotFoundError(2, "No such file", "gh"))
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply["rc"] == 1
+    assert "cannot approve example-org/x#7" in reply["err"]
+
+
+def test_a_full_page_of_rules_is_not_read_as_all_of_them(broker, monkeypatch):
+    """A required check could sit on a page past the one read, so a full page
+    stops the approval rather than passing on what it holds."""
+    asked = []
+    full = json.dumps([{"type": "merge_queue", "parameters": {}}] * 100)
+    answers = [*READ, rollup(), protection("SonarQube", "Pin Only"), full]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply["rc"] == 1
+    assert "main has too many rules to read" in reply["err"]
+    assert not any("POST" in a for a in asked)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        (1, ""),
+        "not json",
+        json.dumps({"state": "open"}),
+        subprocess.TimeoutExpired("gh", 30),
+    ],
+)
+def test_an_approval_that_cannot_read_the_pull_request_does_nothing(
+    broker, monkeypatch, answer
+):
+    asked = []
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh([answer], asked))
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply["rc"] == 1
+    assert "cannot read example-org/x#7" in reply["err"]
+    assert len(asked) == 1
+
+
+@pytest.mark.parametrize(
+    ("stdin", "inline"), [("checked on stdin", None), (None, "inline")]
+)
+def test_serve_sends_a_review_to_the_bot_approval(
+    broker, monkeypatch, capsys, stdin, inline
+):
+    seen = []
+    monkeypatch.setattr(
+        broker,
+        "bot_approval",
+        lambda *args: seen.append(args) or {"rc": 0, "out": "approved\n", "err": ""},
+    )
+    body = ["--body-file", "-"] if inline is None else ["-b", inline]
+    request = {"argv": ["pr", "review", "7", "-R", "example-org/x", "--approve", *body]}
+    if stdin is not None:
+        request["stdin"] = stdin
+    reply = serve_request(broker, json.dumps(request).encode() + b"\n", "unattended")
+    assert reply["rc"] == 0
+    assert seen == [("example-org/x", 7, stdin or inline)]
+    assert capsys.readouterr().out.startswith("RUN unattended")
+
+
+def test_serve_logs_a_refused_approval(broker, monkeypatch, capsys):
+    monkeypatch.setattr(
+        broker,
+        "bot_approval",
+        lambda *args: {
+            "rc": 126,
+            "out": "",
+            "err": "gh-broker: refused: opened by ivan\n",
+        },
+    )
+    request = {"argv": ["pr", "review", "7", "-R", "example-org/x", "-a", "-b", "x"]}
+    reply = serve_request(broker, json.dumps(request).encode() + b"\n", "unattended")
+    assert reply["rc"] == 126
+    out = capsys.readouterr().out
+    assert "REFUSE unattended" in out and "opened by ivan" in out
+
+
+def test_serve_refuses_a_review_below_unattended(broker, monkeypatch):
+    monkeypatch.setattr(broker, "bot_approval", lambda *args: pytest.fail("approved"))
+    request = {"argv": ["pr", "review", "7", "-R", "example-org/x", "-a", "-b", "x"]}
+    for level in ("hardened", "assisted"):
+        reply = serve_request(broker, json.dumps(request).encode() + b"\n", level)
+        assert reply["rc"] == 126
