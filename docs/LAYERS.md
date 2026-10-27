@@ -594,7 +594,22 @@ There is no `gh` binary and no token in the workbench. The `gh` command there
 sends its arguments to the gh broker, which runs the real `gh` with the token
 if the command is in `images/gh-broker/allowlist.json`, and returns the
 output. Anything running in the workbench can use GitHub through it; nothing
-can take the token away. Every request is logged: `podman logs gh-broker`.
+can take the token away. Every request is logged, with the level it was
+held to: `podman logs gh-broker`.
+
+**One broker, a socket per session level.** The broker listens on one
+socket for each session level (docs/MODES.md), and a session gets only its
+own level's socket mounted at `/run/gh-broker/gh.sock`. A request is held to
+the level of the socket it came in on, never to anything it says itself, so
+a hardened session has no way to reach what an unattended one may do.
+`allowlist.json` is the hardened list; `allowlist.assisted.json` and
+`allowlist.unattended.json` each add to the level before, so every level
+allows everything the one before it does, and the broker logs what each
+allows beyond hardened when it starts. An override holds only lists of
+commands to add, and the refusals below are written in the broker's code,
+not in a list, so no override lifts them. One process serves all three:
+they share one token, so a container per level would hold the same secret
+three times and isolate nothing more.
 
 Refused: anything outside the allowlist (including `gh auth token`, `repo
 delete`, `secret`), repositories and owners outside `WORKBENCH_GH_OWNERS`

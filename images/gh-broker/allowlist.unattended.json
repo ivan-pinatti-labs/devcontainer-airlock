@@ -1,0 +1,4 @@
+{
+  "comment": "What an unattended session may run beyond an assisted one, on top of allowlist.json and allowlist.assisted.json (docs/MODES.md). Only `add` is read: commands, public_reads, broker_commands and graphql_mutations, each a list added to the level before. Nothing here can lift a refusal the broker makes in code (owners, files named on the command line, `pr merge --admin`, api writes). Widening this file is a reviewed change.",
+  "add": {}
+}

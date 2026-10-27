@@ -95,7 +95,7 @@ reviews:
         beyond removing masked paths, and anything that assumes a daemon, a
         privileged container or a Docker socket. Flag anything specific to
         one organization or one machine; it belongs in the host settings.
-    - path: "**/{sets/*.toml,allowlist.json,extensions.txt,egress-sets}"
+    - path: "**/{sets/*.toml,allowlist*.json,extensions.txt,egress-sets}"
       instructions: |
         Widening an allowlist (an egress set or a new one, gh commands,
         extensions) is a reviewed change of its own. Flag one folded into a

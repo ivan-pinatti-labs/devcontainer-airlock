@@ -26,6 +26,8 @@ check "no key, no ssh-agent" 0 err \
   "workbench: no ${key}, so no ssh-agent; git push will not work (docs/LAYERS.md)"
 refute "none is started" "--name devcontainer-ssh-agent"
 assert "the broker's folder is private" test "$(stat -c %a "${XDG_RUNTIME_DIR}/workbench/gh")" = 700
+assert "so is each other level's" test "$(stat -c %a "${XDG_RUNTIME_DIR}/workbench-gh/unattended")" = 700
+assert "and the folder holding them" test "$(stat -c %a "${XDG_RUNTIME_DIR}/workbench-gh")" = 700
 assert "the proxy's is readable by its account" test "$(stat -c %a "${egress}")" = 755
 
 mkdir -p "$(dirname "${key}")" "${XDG_RUNTIME_DIR}/devcontainer-ssh"

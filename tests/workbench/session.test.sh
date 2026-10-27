@@ -49,6 +49,10 @@ check "the clone read only, its own folder in it read write" 0 calls \
   "-v ${app}:${app}:ro,Z -v ${app}/.claude/worktrees/${s}:${app}/.claude/worktrees/${s}:Z"
 assert "that folder is made" test -d "${app}/.claude/worktrees/${s}"
 check "told which session it is" 0 calls "-e AIRLOCK_SESSION=${s} -e AIRLOCK_WORKBENCH=workbench-claude-s-${s}"
+check "the gh broker's hardened socket" 0 calls \
+  "-v ${XDG_RUNTIME_DIR}/workbench/gh:/run/gh-broker -v"
+refute "not the assisted one" "workbench-gh/assisted:/run/gh-broker -v"
+refute "nor the unattended one" "workbench-gh/unattended:/run/gh-broker -v"
 check "Claude Code gets the session's own conversation id" 0 calls \
   "podman exec -it -e TERM -e COLORTERM -w ${app} workbench-claude-s-${s} claude --session-id ${id}"
 check "and when it exits, the session's containers go" 0 calls \
@@ -209,6 +213,9 @@ hours_of() { sed -n 's/^hours=//p' "${sessions}/$(session_name)/session"; }
 run "${wb}" session start claude --level unattended --hours 24
 u="$(session_name)"
 check "an unattended session says how long its key lasts" 0 out "workbench: session ${u} (claude, ${app}, unattended, key for 24h)"
+check "it gets the gh broker's unattended socket" 0 calls \
+  "-v ${XDG_RUNTIME_DIR}/workbench-gh/unattended:/run/gh-broker -v"
+refute "and not the hardened one" "-v ${XDG_RUNTIME_DIR}/workbench/gh:/run/gh-broker -v"
 assert "and records it" grep -qx "hours=24" "${sessions}/${u}/session"
 check "the key is unlocked for as long, in seconds" 0 calls "ssh-add -t 86400 /key/id"
 assert "and the record says when it runs out" grep -qE '^ends=[0-9]+$' "${sessions}/${u}/session"
