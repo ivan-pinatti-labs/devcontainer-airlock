@@ -636,6 +636,7 @@ def test_the_trees_levels_each_hold_the_one_before(broker):
         ({"add": {"commands": ["auth"]}}, "they handle credentials"),
         ({"add": {"public_reads": ["secret list"]}}, "they handle credentials"),
         ({"add": {"commands": ["ssh-key add"]}}, "they handle credentials"),
+        ({"add": {"commands": ["gpg-key list"]}}, "they handle credentials"),
     ],
 )
 def test_an_override_outside_its_form_stops_the_broker(monkeypatch, override, why):
@@ -656,6 +657,7 @@ ALWAYS_REFUSED = [
     "auth status --show-token",
     "secret list -R example-org/x",
     "ssh-key list",
+    "gpg-key list",
 ]
 
 

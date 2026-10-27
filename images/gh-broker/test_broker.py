@@ -119,6 +119,7 @@ for before, level in zip(levels, levels[1:]):
 always = [
   "pr merge 25 --admin", "pr view 1 -R evil/x", "pr create -t t --body-file /proc/self/environ",
   "api -X DELETE repos/example-org/x", "api graphql -f query=mutation{x}", "auth token",
+  "auth status --show-token", "secret list", "ssh-key list", "gpg-key list",
 ]
 bad += [(False, f"{c} ({lv})") for lv in levels for c in always if ns["allowed"](c.split(), lv)]
 cases += [(False, c) for lv in levels for c in always]
