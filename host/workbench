@@ -1270,7 +1270,7 @@ start_broker() {
   chmod 700 "${RUN}/workbench" "${GH_LEVELS}"
   if running gh-broker; then
     # One from before levels serves the hardened socket alone.
-    [ -S "$(gh_dir unattended)/gh.sock" ] ||
+    [ -e "$(gh_dir unattended)/gh.sock" ] ||
       echo "workbench: the gh broker running predates session levels, so an assisted or unattended session has no gh until host/workbench restart-broker" >&2
     return 0
   fi

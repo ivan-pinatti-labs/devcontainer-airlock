@@ -606,8 +606,12 @@ a hardened session has no way to reach what an unattended one may do.
 `allowlist.unattended.json` each add to the level before, so every level
 allows everything the one before it does, and the broker logs what each
 allows beyond hardened when it starts. An override holds only lists of
-commands to add, and the refusals below are written in the broker's code,
-not in a list, so no override lifts them. One process serves all three:
+commands to add. The refusals of owners, files named on the command line,
+`--admin`, `gh api` writes and the commands that handle credentials (`gh
+auth`, `secret`, `ssh-key`, `gpg-key`) are written in the broker's code, so
+no override lifts them, and a list naming a credential command stops the
+broker. Any other command off the allowlist stays refused only until a list
+names it. One process serves all three:
 they share one token, so a container per level would hold the same secret
 three times and isolate nothing more.
 

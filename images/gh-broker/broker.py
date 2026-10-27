@@ -43,6 +43,10 @@ LEVELS = ("hardened", "assisted", "unattended")
 LIST_KEYS = ("commands", "public_reads", "broker_commands", "graphql_mutations")
 OWN_COMMANDS = frozenset({"wait pr"})
 COMMAND_NAME = re.compile(r"^[a-z][a-z-]*( [a-z][a-z-]*)?$")
+# The gh commands that print, set or plant a credential (`gh auth token`
+# prints the broker's own), refused here at every level, whatever a list
+# says: a list naming one stops the broker.
+NEVER = frozenset({"auth", "secret", "ssh-key", "gpg-key"})
 
 
 def read_override(level):
@@ -82,6 +86,8 @@ def level_policies():
         current = {key: current[key] | frozenset(add.get(key, [])) for key in LIST_KEYS}
         if not all(COMMAND_NAME.match(c) for c in current["commands"] | current["public_reads"]):
             raise ValueError(f"{level}: a command is its name, one or two words")
+        if any(c.split()[0] in NEVER for c in current["commands"] | current["public_reads"]):
+            raise ValueError(f"{level}: no list names {', '.join(sorted(NEVER))}: they handle credentials")
         if not current["broker_commands"] <= OWN_COMMANDS:
             raise ValueError(f"{level}: broker_commands names only {', '.join(sorted(OWN_COMMANDS))}")
         policies[level] = current
@@ -529,6 +535,8 @@ def refusal(argv, level="hardened"):
         return None if wait_args(argv) else (
             "usage: gh wait pr NUMBER -R OWNER/REPO [--timeout SECONDS], on a"
             f" repository under an allowed owner; at most {WAIT_CAP}s")
+    if argv[0] in NEVER:
+        return f"'gh {argv[0]}' handles credentials, and is never run here"
     if argv[0] == "api":
         return None if api_ok(argv, policy) else (
             "this gh api call is not allowed: only reads, review comment replies"

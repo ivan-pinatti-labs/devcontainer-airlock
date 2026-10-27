@@ -360,7 +360,8 @@ def test_owners_come_from_the_environment(monkeypatch, owners, count):
     ("command", "why"),
     [
         ("pr create -t t --body-file /tmp/body.md", "stdin"),
-        ("auth token", "not on the allowlist"),
+        ("auth token", "handles credentials, and is never run here"),
+        ("repo delete example-org/x", "not on the allowlist"),
         ("pr view 1 -R evil/x", "allowed owner"),
         ("search issues --owner evil", "allowed owner"),
         ("pr merge 25 --admin", "merge queue"),
@@ -444,7 +445,7 @@ def test_serve_refuses_a_malformed_request(broker, payload):
 
 
 def test_serve_refuses_a_command_off_the_allowlist(broker, capsys):
-    reply = serve_request(broker, b'{"argv": ["auth", "token"]}\n')
+    reply = serve_request(broker, b'{"argv": ["repo", "delete", "example-org/x"]}\n')
     assert reply["rc"] == 126
     assert "not on the allowlist" in reply["err"]
     assert capsys.readouterr().out.startswith("REFUSE")
@@ -631,6 +632,10 @@ def test_the_trees_levels_each_hold_the_one_before(broker):
         ({"add": {"commands": ["pr merge --admin"]}}, "one or two words"),
         ({"add": {"public_reads": ["Secret list"]}}, "one or two words"),
         ({"add": {"broker_commands": ["run anything"]}}, "broker_commands names only"),
+        ({"add": {"commands": ["auth token"]}}, "they handle credentials"),
+        ({"add": {"commands": ["auth"]}}, "they handle credentials"),
+        ({"add": {"public_reads": ["secret list"]}}, "they handle credentials"),
+        ({"add": {"commands": ["ssh-key add"]}}, "they handle credentials"),
     ],
 )
 def test_an_override_outside_its_form_stops_the_broker(monkeypatch, override, why):
@@ -647,6 +652,10 @@ ALWAYS_REFUSED = [
     'api graphql -f query=mutation{deleteRepository(input:{repositoryId:"R"}){clientMutationId}}',
     "wait pr 7 -R someone-else/x",
     "release create v1 -R evil/x",
+    "auth token",
+    "auth status --show-token",
+    "secret list -R example-org/x",
+    "ssh-key list",
 ]
 
 

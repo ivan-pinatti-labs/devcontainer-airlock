@@ -110,14 +110,15 @@ record keeps the level (`level=`), and an unattended one its key's hours
 (`hours=`), so attach starts it the same way. The workbench sees its level
 as `AIRLOCK_LEVEL`.
 
-The level also decides what the session may do on GitHub. The gh broker
-listens on a socket per level, and the session gets only its own level's
-socket mounted: `${XDG_RUNTIME_DIR}/workbench/gh` for hardened,
+The gh broker listens on a socket per level, and the session gets only its
+own level's socket mounted: `${XDG_RUNTIME_DIR}/workbench/gh` for hardened,
 `${XDG_RUNTIME_DIR}/workbench-gh/<level>` for the others. The broker holds
 each request to the allowlist of the socket it came in on:
 `images/gh-broker/allowlist.json` for hardened, plus
 `allowlist.assisted.json` for assisted, plus `allowlist.unattended.json`
-for unattended (docs/LAYERS.md, "GitHub access"). A broker started before
+for unattended (docs/LAYERS.md, "GitHub access"). The assisted and
+unattended files add nothing yet, so every level may run the same commands
+today. A broker started before
 levels serves the hardened socket alone; `host/workbench restart-broker`
 replaces it.
 

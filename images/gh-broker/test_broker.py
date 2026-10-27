@@ -101,7 +101,7 @@ cases += argv_cases
 refusal = ns["refusal"]
 why_cases = [
   ("pr create -t t --body-file /tmp/body.md", "stdin"),
-  ("auth token", "not on the allowlist"),
+  ("auth token", "never run here"), ("repo delete example-org/x", "not on the allowlist"),
   ("pr view 1 -R evil/x", "allowed owner"),
   ("search issues --owner evil", "allowed owner"),
   ("pr merge 25 --admin", "merge queue"),
