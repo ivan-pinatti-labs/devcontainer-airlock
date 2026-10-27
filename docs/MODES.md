@@ -53,11 +53,12 @@ would only stall the run, so nothing asks:
   takes, and it approves only a pull request `renovate[bot]` or
   `dependabot[bot]` opened, from a branch in the same repository, whose
   every commit is the bot's own and signed by GitHub, so nothing anyone
-  else pushed to the branch rides on the approval, and whose every
-  required check on the head commit is green, with no other check failed
-  or still running (a cancelled run, such as a superseded one, is left
-  aside). The approval lands on that commit, so a
-  later push leaves it stale, and its body says what was verified. GitHub
+  else pushed to the branch rides on the approval, and whose every check
+  the base branch requires has reported on the head commit and is green,
+  with no other check failed or still running (a cancelled run, such as a
+  superseded one, is left aside). The approval lands on that commit, so a
+  later push leaves it stale. The agent writes its body, which is meant to
+  say what it verified; the broker only refuses a blank one. GitHub
   already refuses an approval of the token owner's own pull request, so an
   agent never approves its own work.
 - **Refused:** everything else that would ask under hardened. Discarding

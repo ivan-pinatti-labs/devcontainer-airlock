@@ -63,7 +63,10 @@ def inline_body_file(argv):
 
 def reads_stdin(argv):
     """Whether gh would read its standard input for this command line: a body
-    or an api input given as `-`, or an api field read from `@-`."""
+    or an api input given as `-`, or an api field read from `@-`, or a
+    workflow run's inputs given as JSON (`--json`), which gh reads there."""
+    if argv[:2] == ["workflow", "run"] and "--json" in argv:
+        return True
     for i, a in enumerate(argv):
         nxt = argv[i + 1] if i + 1 < len(argv) else ""
         if a in ("--body-file", "--notes-file", "--input") and nxt == "-":

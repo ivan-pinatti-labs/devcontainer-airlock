@@ -217,6 +217,14 @@ def test_release_notes_on_stdin_pass_through(monkeypatch, sock):
     assert broker.request["stdin"] == "piped notes"
 
 
+def test_workflow_inputs_as_json_are_sent_on_stdin(monkeypatch, sock):
+    broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')
+    argv = ["workflow", "run", "ci.yml", "--json"]
+    assert run_gh(monkeypatch, argv, Stdin('{"n": "1"}')) == 0
+    broker.thread.join()
+    assert broker.request["stdin"] == '{"n": "1"}'
+
+
 def test_a_workflow_input_is_left_for_the_broker(monkeypatch, sock):
     """A workflow run's -F is an input, not a body file to read here."""
     broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')

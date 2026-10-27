@@ -39,6 +39,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 
 ALLOW = json.load(open("/etc/gh-broker/allowlist.json"))
 # The session levels, each allowing everything the one before it does.
@@ -503,8 +504,7 @@ CHECKS_QUERY = (
     "repository(owner:$owner,name:$name){pullRequest(number:$number){"
     "commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){"
     "pageInfo{hasNextPage} nodes{"
-    "... on CheckRun{name status conclusion isRequired(pullRequestNumber:$number)}"
-    " ... on StatusContext{context state isRequired(pullRequestNumber:$number)}}}}}}}}}}"
+    "... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}}}"
 )
 # How a check that is neither green nor left aside reads: still running, or
 # failed. A cancelled or skipped run is left aside: a superseded run is
@@ -512,33 +512,53 @@ CHECKS_QUERY = (
 FAILED = frozenset({"FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"})
 
 
-def checks_refusal(commit, head):
+def required_checks(repo, base):
+    """The check names the base branch requires: its branch protection's and
+    any ruleset's. Read from the branch, not from what the commit reports, so
+    a required check that has not reported at all is still counted."""
+    branch = urllib.parse.quote(base, safe="")
+    protection = gh_api(f"repos/{repo}/branches/{branch}").get("protection") or {}
+    names = set((protection.get("required_status_checks") or {}).get("contexts") or [])
+    for rule in gh_api(f"repos/{repo}/rules/branches/{branch}"):
+        if rule.get("type") == "required_status_checks":
+            names |= {c["context"] for c in rule["parameters"]["required_status_checks"]}
+    return names
+
+
+def checks_refusal(commit, head, required):
     """Why the checks on the head commit leave the pull request unapproved,
-    or None: every required check there green, at least one of them, and no
-    other check failed or still running. Branch protection still holds the
-    merge to every required check, reported or not."""
+    or None: every check in `required` (the base branch's) reported there
+    and green, at least one of them, and no other check failed or still
+    running. Matched by name: branch protection still holds the merge to
+    every required check, from the app it names."""
     rollup = commit["statusCheckRollup"]
     if commit["oid"] != head or not rollup:
         return f"no checks are reported on {head[:12]}"
     if rollup["contexts"]["pageInfo"]["hasNextPage"]:
         return f"{head[:12]} has too many checks to read"
-    required = 0
+    if not required:
+        return "the base branch requires no check, so there is nothing to have passed"
+    states = {}
     for check in rollup["contexts"]["nodes"]:
         name = check.get("name") or check.get("context")
         if "state" in check:
             state = check["state"]
         else:
             state = check["conclusion"] if check["status"] == "COMPLETED" else "PENDING"
-        if check["isRequired"]:
-            required += 1
-            if state != "SUCCESS":
-                return f"the required check {name} is {state}"
+        if name in required:
+            # A check can report more than once (a run per workflow event);
+            # any one that is not green holds the approval back.
+            if states.get(name, "SUCCESS") == "SUCCESS":
+                states[name] = state
         elif state in ("PENDING", "EXPECTED"):
             return f"the check {name} is still running"
         elif state in FAILED:
             return f"the check {name} is {state}"
-    if not required:
-        return f"no required check is reported on {head[:12]}"
+    for name in sorted(required):
+        if name not in states:
+            return f"the required check {name} has not reported on {head[:12]}"
+        if states[name] != "SUCCESS":
+            return f"the required check {name} is {states[name]}"
     return None
 
 
@@ -577,7 +597,7 @@ def approval_refusal(repo, number, body):
     answer = gh_api("graphql", "-f", f"query={CHECKS_QUERY}", "-f", f"owner={owner}",
                     "-f", f"name={name}", "-F", f"number={number}")
     commit = answer["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]
-    why = checks_refusal(commit, head)
+    why = checks_refusal(commit, head, required_checks(repo, pr["base"]["ref"]))
     return (why, None) if why else (None, head)
 
 
@@ -597,7 +617,13 @@ def bot_approval(repo, number, body):
         "gh", "api", "-X", "POST", f"repos/{repo}/pulls/{number}/reviews",
         "-f", "event=APPROVE", "-f", f"commit_id={head}", "-f", f"body={body}", "--jq", ".state",
     ]
-    p = subprocess.run(approve, capture_output=True, text=True, timeout=60)
+    try:
+        p = subprocess.run(approve, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return {"rc": 124, "out": "", "err": f"gh-broker: the approval of {repo}#{number}"
+                " timed out after 60s; read the pull request before asking again\n"}
+    except OSError as e:
+        return {"rc": 1, "out": "", "err": f"gh-broker: cannot approve {repo}#{number} ({e})\n"}
     if p.returncode != 0:
         return {"rc": p.returncode, "out": "", "err": p.stderr}
     return {"rc": 0, "out": f"approved {repo}#{number} at {head}\n", "err": ""}

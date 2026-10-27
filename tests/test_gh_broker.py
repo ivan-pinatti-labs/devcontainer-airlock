@@ -1118,9 +1118,36 @@ def pull(**fields):
         "draft": False,
         "user": {"login": "renovate[bot]", "type": "Bot"},
         "head": {"sha": HEAD, "repo": {"full_name": "example-org/x"}},
+        "base": {"ref": "main"},
     }
     answer.update(fields)
     return json.dumps(answer)
+
+
+def protection(*names):
+    """GitHub's answer for the base branch, requiring checks `names`."""
+    return json.dumps(
+        {"protection": {"required_status_checks": {"contexts": list(names)}}}
+    )
+
+
+def rules(*names):
+    """GitHub's answer for the rules on the base branch: a merge queue, and a
+    ruleset requiring checks `names` when any are given."""
+    answer = [{"type": "merge_queue", "parameters": {}}]
+    if names:
+        checks = [{"context": n} for n in names]
+        answer.append(
+            {
+                "type": "required_status_checks",
+                "parameters": {"required_status_checks": checks},
+            }
+        )
+    return json.dumps(answer)
+
+
+# What the base branch requires in the cases below, read after the checks.
+REQUIRED = [protection("SonarQube", "Pin Only"), rules()]
 
 
 def commit(sha=HEAD, author="renovate[bot]", committer="web-flow", verified=True):
@@ -1132,25 +1159,20 @@ def commit(sha=HEAD, author="renovate[bot]", committer="web-flow", verified=True
     }
 
 
-def run_check(name, conclusion="SUCCESS", required=False, status="COMPLETED"):
-    return {
-        "name": name,
-        "status": status,
-        "conclusion": conclusion,
-        "isRequired": required,
-    }
+def run_check(name, conclusion="SUCCESS", status="COMPLETED"):
+    return {"name": name, "status": status, "conclusion": conclusion}
 
 
-def status(context, state="SUCCESS", required=False):
-    return {"context": context, "state": state, "isRequired": required}
+def status(context, state="SUCCESS"):
+    return {"context": context, "state": state}
 
 
 # What a bot pull request's head commit reads like: required checks green,
 # and a superseded run cancelled, which GitHub's own overall state counts as
 # a failure.
 GREEN = [
-    run_check("SonarQube", required=True),
-    status("Pin Only", required=True),
+    run_check("SonarQube"),
+    status("Pin Only"),
     run_check("gate / Grade", "CANCELLED"),
     run_check("Approve the owner's own pull request", "SKIPPED"),
     status("renovate/stability-days"),
@@ -1203,34 +1225,73 @@ READ = [pull(), json.dumps([commit()])]
         ([pull(), json.dumps([commit(committer=None)])], "someone else pushed"),
         ([pull(), json.dumps([commit(verified=False)])], "someone else pushed"),
         ([pull(), json.dumps([commit(sha="b" * 40)])], "moved while it was checked"),
-        ([*READ, rollup(reported=False)], "no checks are reported"),
-        ([*READ, rollup(oid="b" * 40)], "no checks are reported"),
-        ([*READ, rollup(more=True)], "too many checks"),
-        ([*READ, rollup([])], "no required check"),
-        ([*READ, rollup([run_check("Lint")])], "no required check"),
+        ([*READ, rollup(reported=False), *REQUIRED], "no checks are reported"),
+        ([*READ, rollup(oid="b" * 40), *REQUIRED], "no checks are reported"),
+        ([*READ, rollup(more=True), *REQUIRED], "too many checks"),
+        ([*READ, rollup(), protection(), rules()], "requires no check"),
+        ([*READ, rollup(), json.dumps({}), rules()], "requires no check"),
+        # A required check that has not reported at all, beside green ones.
         (
-            [*READ, rollup([*GREEN, status("Tests Verified", "PENDING", True)])],
-            "required check Tests Verified is PENDING",
+            [
+                *READ,
+                rollup(),
+                protection("SonarQube", "Pin Only", "Tests Verified"),
+                rules(),
+            ],
+            "required check Tests Verified has not reported",
         ),
         (
-            [*READ, rollup([*GREEN, run_check("SonarQube", "SKIPPED", True)])],
+            [
+                *READ,
+                rollup(),
+                protection("SonarQube"),
+                rules("Pin Only", "Ruleset Check"),
+            ],
+            "required check Ruleset Check has not reported",
+        ),
+        (
+            [*READ, rollup([*GREEN, status("Pin Only", "PENDING")]), *REQUIRED],
+            "required check Pin Only is PENDING",
+        ),
+        (
+            [
+                *READ,
+                rollup([status("Pin Only"), run_check("SonarQube", "SKIPPED")]),
+                *REQUIRED,
+            ],
             "required check SonarQube is SKIPPED",
         ),
+        # Reported twice, once red: the red one holds, before or after.
         (
-            [*READ, rollup([*GREEN, run_check("Build", None, status="IN_PROGRESS")])],
+            [*READ, rollup([*GREEN, run_check("SonarQube", "FAILURE")]), *REQUIRED],
+            "required check SonarQube is FAILURE",
+        ),
+        (
+            [*READ, rollup([run_check("SonarQube", "FAILURE"), *GREEN]), *REQUIRED],
+            "required check SonarQube is FAILURE",
+        ),
+        (
+            [
+                *READ,
+                rollup([*GREEN, run_check("Build", None, status="IN_PROGRESS")]),
+                *REQUIRED,
+            ],
             "check Build is still running",
         ),
         (
-            [*READ, rollup([*GREEN, status("deploy", "EXPECTED")])],
+            [*READ, rollup([*GREEN, status("deploy", "EXPECTED")]), *REQUIRED],
             "deploy is still running",
         ),
         (
-            [*READ, rollup([*GREEN, run_check("Trivy", "FAILURE")])],
+            [*READ, rollup([*GREEN, run_check("Trivy", "FAILURE")]), *REQUIRED],
             "check Trivy is FAILURE",
         ),
-        ([*READ, rollup([*GREEN, status("scan", "ERROR")])], "check scan is ERROR"),
         (
-            [*READ, rollup([*GREEN, run_check("x", "TIMED_OUT")])],
+            [*READ, rollup([*GREEN, status("scan", "ERROR")]), *REQUIRED],
+            "check scan is ERROR",
+        ),
+        (
+            [*READ, rollup([*GREEN, run_check("x", "TIMED_OUT")]), *REQUIRED],
             "check x is TIMED_OUT",
         ),
     ],
@@ -1255,7 +1316,13 @@ def test_an_approval_needs_a_body(broker, monkeypatch):
 
 def test_an_approval_lands_on_the_commit_the_checks_were_read_on(broker, monkeypatch):
     asked = []
-    answers = [pull(), json.dumps([commit("b" * 40), commit()]), rollup(), '"APPROVED"']
+    answers = [
+        pull(base={"ref": "release/1"}),
+        json.dumps([commit("b" * 40), commit()]),
+        rollup(),
+        *REQUIRED,
+        '"APPROVED"',
+    ]
     monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
     reply = broker.bot_approval("example-org/x", 7, "@/proc/self/environ")
     assert reply == {"rc": 0, "out": f"approved example-org/x#7 at {HEAD}\n", "err": ""}
@@ -1263,8 +1330,11 @@ def test_an_approval_lands_on_the_commit_the_checks_were_read_on(broker, monkeyp
     assert asked[1] == ["gh", "api", "repos/example-org/x/pulls/7/commits?per_page=100"]
     assert asked[2][:3] == ["gh", "api", "graphql"]
     assert "number=7" in asked[2] and "owner=example-org" in asked[2]
+    # The base branch's own requirements, its name kept to one path segment.
+    assert asked[3] == ["gh", "api", "repos/example-org/x/branches/release%2F1"]
+    assert asked[4] == ["gh", "api", "repos/example-org/x/rules/branches/release%2F1"]
     # The body is a raw field: -f never reads a file, whatever it starts with.
-    assert asked[3] == [
+    assert asked[5] == [
         "gh",
         "api",
         "-X",
@@ -1281,19 +1351,42 @@ def test_an_approval_lands_on_the_commit_the_checks_were_read_on(broker, monkeyp
     ]
 
 
-def test_a_failed_approval_says_what_github_said(broker, monkeypatch):
-    reads = scripted_gh([pull(), json.dumps([commit()]), rollup()], [])
+def approval_answering(broker, monkeypatch, post):
+    """subprocess.run reading a clean bot pull request, and answering the
+    approval's POST with `post`: a CompletedProcess, or an exception."""
+    reads = scripted_gh([*READ, rollup(), *REQUIRED], [])
 
     def run(argv, **kwargs):
-        if "POST" in argv:
-            return subprocess.CompletedProcess(
-                argv, 1, "", "HTTP 422: cannot approve\n"
-            )
-        return reads(argv)
+        if "POST" not in argv:
+            return reads(argv)
+        if isinstance(post, BaseException):
+            raise post
+        return post
 
     monkeypatch.setattr(broker.subprocess, "run", run)
+
+
+def test_a_failed_approval_says_what_github_said(broker, monkeypatch):
+    post = subprocess.CompletedProcess([], 1, "", "HTTP 422: cannot approve\n")
+    approval_answering(broker, monkeypatch, post)
     reply = broker.bot_approval("example-org/x", 7, "checked")
     assert reply == {"rc": 1, "out": "", "err": "HTTP 422: cannot approve\n"}
+
+
+def test_an_approval_that_times_out_says_so(broker, monkeypatch):
+    approval_answering(broker, monkeypatch, subprocess.TimeoutExpired("gh", 60))
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply["rc"] == 124
+    assert (
+        "timed out after 60s; read the pull request before asking again" in reply["err"]
+    )
+
+
+def test_an_approval_gh_cannot_start_for_says_so(broker, monkeypatch):
+    approval_answering(broker, monkeypatch, FileNotFoundError(2, "No such file", "gh"))
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply["rc"] == 1
+    assert "cannot approve example-org/x#7" in reply["err"]
 
 
 @pytest.mark.parametrize(
