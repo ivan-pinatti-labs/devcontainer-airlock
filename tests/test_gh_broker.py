@@ -585,7 +585,7 @@ def test_main_needs_the_hardened_folder(broker, monkeypatch, tmp_path, capsys):
 
 # Session levels: allowlist.<level>.json adds to the level before it.
 
-ADDS_RELEASE = json.dumps({"add": {"commands": ["release create"]}})
+ADDS_GIST = json.dumps({"add": {"commands": ["gist create"]}})
 
 
 def test_each_level_adds_to_the_one_before_it(monkeypatch):
@@ -595,14 +595,14 @@ def test_each_level_adds_to_the_one_before_it(monkeypatch):
             "assisted": json.dumps(
                 {"comment": "c", "add": {"commands": ["label create"]}}
             ),
-            "unattended": ADDS_RELEASE,
+            "unattended": ADDS_GIST,
         },
     )
     commands = {level: fresh.POLICIES[level]["commands"] for level in fresh.LEVELS}
     assert "label create" not in commands["hardened"]
     assert "label create" in commands["assisted"]
-    assert "release create" not in commands["assisted"]
-    assert {"label create", "release create"} <= commands["unattended"]
+    assert "gist create" not in commands["assisted"]
+    assert {"label create", "gist create"} <= commands["unattended"]
     assert commands["hardened"] < commands["assisted"] < commands["unattended"]
 
 
@@ -666,15 +666,15 @@ def test_what_the_code_refuses_holds_at_every_level(monkeypatch, command):
 
 
 def test_a_refusal_names_the_level(monkeypatch):
-    fresh = load_broker(monkeypatch, overrides={"unattended": ADDS_RELEASE})
-    assert fresh.refusal(["release", "create", "v1"], "assisted") == (
-        "'gh release create' is not on the allowlist at the assisted level"
+    fresh = load_broker(monkeypatch, overrides={"unattended": ADDS_GIST})
+    assert fresh.refusal(["gist", "create", "f"], "assisted") == (
+        "'gh gist create' is not on the allowlist at the assisted level"
     )
-    assert fresh.refusal(["release", "create", "v1"], "unattended") is None
+    assert fresh.refusal(["gist", "create", "f"], "unattended") is None
 
 
 def test_serve_says_which_files_hold_the_level(monkeypatch, capsys):
-    fresh = load_broker(monkeypatch, overrides={"unattended": ADDS_RELEASE})
+    fresh = load_broker(monkeypatch, overrides={"unattended": ADDS_GIST})
     reply = serve_request(fresh, b'{"argv": ["auth", "token"]}\n', "unattended")
     assert reply["err"].endswith(
         "(images/gh-broker/allowlist.json, allowlist.unattended.json)\n"
@@ -686,7 +686,7 @@ def test_the_level_is_the_socket_a_request_came_in_on(monkeypatch):
     """End to end over real sockets: the same request on each level's
     socket. A request naming a level of its own changes nothing."""
     fresh = load_broker(
-        monkeypatch, overrides={"assisted": None, "unattended": ADDS_RELEASE}
+        monkeypatch, overrides={"assisted": None, "unattended": ADDS_GIST}
     )
     ran = []
 
@@ -718,13 +718,13 @@ def test_the_level_is_the_socket_a_request_came_in_on(monkeypatch):
                     data += chunk
             return json.loads(data)["rc"]
 
-        release = {"argv": ["release", "create", "v1", "-R", "example-org/x"]}
-        assert ask("hardened", release) == 126
-        assert ask("assisted", release) == 126
-        assert ask("hardened", {**release, "level": "unattended"}) == 126
+        gist = {"argv": ["gist", "create", "-R", "example-org/x"]}
+        assert ask("hardened", gist) == 126
+        assert ask("assisted", gist) == 126
+        assert ask("hardened", {**gist, "level": "unattended"}) == 126
         assert ran == []
-        assert ask("unattended", release) == 0
-        assert ran == [["gh", "release", "create", "v1", "-R", "example-org/x"]]
+        assert ask("unattended", gist) == 0
+        assert ran == [["gh", "gist", "create", "-R", "example-org/x"]]
 
 
 # gh wait pr: the broker's own bounded wait on a pull request (#145).
