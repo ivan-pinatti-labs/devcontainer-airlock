@@ -233,6 +233,10 @@ RUN set -eu; \
   # CLAUDE_CODE_AUTO_MODE_SERVER (docs/MODES.md). A CLI that stopped reading
   # it would go back to that path without a word, so the build stops instead.
   grep -aq CLAUDE_CODE_AUTO_MODE_SERVER \
+    "$(readlink -f /opt/agent-clis/node_modules/.bin/claude)"; \
+  # The same for deniedMcpServers, which keeps SonarQube for IDE's MCP server
+  # away from the agent (docs/LAYERS.md, "SonarQube for IDE").
+  grep -aq deniedMcpServers \
     "$(readlink -f /opt/agent-clis/node_modules/.bin/claude)"
 # SoX, which Claude Code's voice mode records with (`rec`), and a rec of our
 # own in front of it that reads a voice session's microphone pipe. There is

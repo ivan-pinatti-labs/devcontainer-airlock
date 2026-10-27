@@ -51,6 +51,15 @@ def test_permission_checks_cannot_be_bypassed():
     assert permissions["disableBypassPermissionsMode"] == "disable"
 
 
+def test_the_sonarqube_mcp_server_is_denied():
+    """SonarQube for IDE's AI Integrations can write a `sonarqube` MCP server,
+    with the connection's token, into ~/.claude.json on a click. The managed
+    denylist blocks it in every scope (docs/LAYERS.md, "SonarQube for IDE")."""
+    with open(SETTINGS, encoding="utf-8") as handle:
+        denied = json.load(handle)["deniedMcpServers"]
+    assert {"serverName": "sonarqube"} in denied
+
+
 def test_managed_settings_turn_the_server_classifier_off():
     """The managed settings set CLAUDE_CODE_AUTO_MODE_SERVER to 0.
 
