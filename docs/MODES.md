@@ -6,8 +6,10 @@ A Claude Code session runs at one of three levels. The level decides how far
 the agent may go without asking you. It does not move the boundary: at every
 level the agent runs in the workbench, holds no GitHub token and no ssh key,
 reaches GitHub only through the gh broker's allowlist and the network only
-through the egress proxy, and runs project code only in L2. Codex runs
-hardened for now.
+through the egress proxy, and runs project code only in L2. On GitHub the
+level also picks which of the broker's lists holds the agent; unattended's
+adds a few commands to the cycle, each held by the broker's code ("How a
+session gets its level" below). Codex runs hardened for now.
 
 | Level        | Start it with            | Who is there           | The agent                                       |
 | ------------ | ------------------------ | ---------------------- | ----------------------------------------------- |
@@ -44,6 +46,20 @@ would only stall the run, so nothing asks:
   run`, closing an issue, labels, tags and releases (`git push --tags`, `gh
   release create`), deleting a merged branch, and cleaning up the session's
   own containers.
+- **Allowed, and checked by the gh broker:** approving a dependency bot's
+  pull request the bot lane leaves for a person, a major bump included,
+  once the agent has verified it (its tests, the upstream release notes).
+  `gh pr review N -R OWNER/REPO --approve --body-file -` is all the broker
+  takes, and it approves only a pull request `renovate[bot]` or
+  `dependabot[bot]` opened, from a branch in the same repository, whose
+  every commit is the bot's own and signed by GitHub, so nothing anyone
+  else pushed to the branch rides on the approval, and whose every
+  required check on the head commit is green, with no other check failed
+  or still running (a cancelled run, such as a superseded one, is left
+  aside). The approval lands on that commit, so a
+  later push leaves it stale, and its body says what was verified. GitHub
+  already refuses an approval of the token owner's own pull request, so an
+  agent never approves its own work.
 - **Refused:** everything else that would ask under hardened. Discarding
   work (`git reset --hard`, `restore`, `clean`), `git worktree remove
   --force`, deleting a tag, pushing straight to `main`, `find -exec`, a
@@ -116,9 +132,9 @@ own level's socket mounted: `${XDG_RUNTIME_DIR}/workbench/gh` for hardened,
 each request to the allowlist of the socket it came in on:
 `images/gh-broker/allowlist.json` for hardened, plus
 `allowlist.assisted.json` for assisted, plus `allowlist.unattended.json`
-for unattended (docs/LAYERS.md, "GitHub access"). The assisted and
-unattended files add nothing yet, so every level may run the same commands
-today. A broker started before
+for unattended (docs/LAYERS.md, "GitHub access"). The assisted file adds
+nothing yet; the unattended one adds what "Unattended" above lists (workflow
+runs, labels and the bot approval). A broker started before
 levels serves the hardened socket alone; `host/workbench restart-broker`
 replaces it.
 

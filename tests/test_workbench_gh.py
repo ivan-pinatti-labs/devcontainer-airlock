@@ -193,6 +193,40 @@ def test_a_body_file_is_read_here_and_sent_on_stdin(monkeypatch, sock, tmp_path,
     assert broker.request["stdin"] == "the body"
 
 
+@pytest.mark.parametrize(
+    "flags", [["--notes-file", "{body}"], ["--notes-file={body}"], ["-F", "{body}"]]
+)
+def test_release_notes_are_read_here_and_sent_on_stdin(
+    monkeypatch, sock, tmp_path, flags
+):
+    body = tmp_path / "notes.md"
+    body.write_text("the notes", encoding="utf-8")
+    broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')
+    argv = ["release", "create", "v1", *[f.format(body=body) for f in flags]]
+    assert run_gh(monkeypatch, argv, Stdin("ignored")) == 0
+    broker.thread.join()
+    assert broker.request["argv"] == ["release", "create", "v1", "--notes-file", "-"]
+    assert broker.request["stdin"] == "the notes"
+
+
+def test_release_notes_on_stdin_pass_through(monkeypatch, sock):
+    broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')
+    argv = ["release", "create", "v1", "--notes-file", "-"]
+    assert run_gh(monkeypatch, argv, Stdin("piped notes")) == 0
+    broker.thread.join()
+    assert broker.request["stdin"] == "piped notes"
+
+
+def test_a_workflow_input_is_left_for_the_broker(monkeypatch, sock):
+    """A workflow run's -F is an input, not a body file to read here."""
+    broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')
+    argv = ["workflow", "run", "ci.yml", "-F", "n=1", "-Fm=2"]
+    assert run_gh(monkeypatch, argv, Unread()) == 0
+    broker.thread.join()
+    assert broker.request["argv"] == argv
+    assert broker.request["stdin"] == ""
+
+
 def test_a_body_on_stdin_passes_through(monkeypatch, sock):
     broker = Broker(sock, b'{"rc": 0, "out": "", "err": ""}')
     argv = ["pr", "create", "--body-file", "-", "--body-file"]

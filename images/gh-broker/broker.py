@@ -9,14 +9,18 @@ of what the workbench did on GitHub.
 The token comes from the GH_TOKEN environment variable, which the host
 passes as a podman secret and which never leaves this container. Refused:
 anything not in /etc/gh-broker/allowlist.json, any repository or owner
-outside the allowed owners (-R, --owner, a URL, a search qualifier), flags that read a file, `pr merge --admin`, and every
-`gh api` write except replying to a review comment and the GraphQL mutations
-the allowlist names (resolving a review thread). The exception: the read
-only commands under public_reads, and `gh api` GETs under repos/, may name a
-repository outside the owners when GitHub says it is public.
+outside the allowed owners (-R, --owner, a URL, a search qualifier), flags
+that read a file (a release's assets and a workflow input read from @path
+too), `pr merge --admin`, and every `gh api` write except replying to a
+review comment and the GraphQL mutations the allowlist names (resolving a
+review thread). The exception: the read only commands under public_reads,
+and `gh api` GETs under repos/, may name a repository outside the owners
+when GitHub says it is public.
 
 One command is the broker's own rather than gh's: `wait pr`, a bounded wait
-on a pull request's state (see wait_pr below).
+on a pull request's state (see wait_pr below). And `pr review`, at a level
+that lists it, is only ever an approval of a dependency bot's pull request,
+which the broker checks and sends itself (see bot_approval below).
 
 One broker serves every session level (docs/MODES.md), each on a socket of
 its own: GH_BROKER_DIR/<level>/gh.sock. The host mounts into a session only
@@ -375,6 +379,9 @@ FILE_FLAGS = ("--body-file", "-F", "--recover", "--notes-file")
 
 
 def files_ok(argv):
+    # A workflow run's -F is an input, which workflow_ok holds instead.
+    if argv[:2] == ["workflow", "run"]:
+        return True
     for i, a in enumerate(argv):
         if a in FILE_FLAGS:
             if i + 1 >= len(argv) or argv[i + 1] != "-":
@@ -387,12 +394,213 @@ def files_ok(argv):
     return True
 
 
+def workflow_ok(argv):
+    """`gh workflow run` with no input read from a file: gh reads the value of
+    `-F key=@path` from that path, here."""
+    for i, a in enumerate(argv):
+        if a in ("-F", "--field"):
+            value = argv[i + 1] if i + 1 < len(argv) else ""
+        elif a.startswith("--field="):
+            value = a.split("=", 1)[1]
+        elif a.startswith("-F") and len(a) > 2:
+            value = a[2:]
+        else:
+            continue
+        if value.split("=", 1)[-1].startswith("@"):
+            return False
+    return True
+
+
+# `gh release create TAG [FILE...]` uploads every argument after the tag as
+# an asset, read here: `gh release create v1 /proc/self/environ` would
+# publish the token. The flags that take a value, so that value is not taken
+# for a file; a flag not listed is taken to have none, so a value given to
+# it counts as a file and is refused.
+RELEASE_VALUE_FLAGS = (
+    "-n", "--notes", "-F", "--notes-file", "-t", "--title", "--target",
+    "--discussion-category", "--notes-start-tag", "-R", "--repo",
+)
+
+
+def release_ok(argv):
+    if argv[:2] != ["release", "create"]:
+        return True
+    named, i = 0, 2
+    while i < len(argv):
+        if argv[i] in RELEASE_VALUE_FLAGS:
+            i += 2
+            continue
+        named += not argv[i].startswith("-")
+        i += 1
+    return named <= 1
+
+
 def merge_ok(argv):
     # A merge goes through the merge queue, never around it: --admin merges
     # past the queue and the checks it runs.
     if argv[:2] != ["pr", "merge"]:
         return True
     return not any(a == "--admin" or a.startswith("--admin=") for a in argv)
+
+
+# `gh pr review` is only ever an approval of a dependency bot's pull request,
+# at whichever level lists it, and the broker sends it itself (bot_approval)
+# rather than running gh. The bots whose pull requests it approves:
+BOTS = frozenset({"renovate[bot]", "dependabot[bot]"})
+PR_URL = re.compile(r"^https://github\.com/([A-Za-z0-9-]+/[A-Za-z0-9._-]+)/pull/([0-9]{1,9})$")
+
+
+def review_args(argv):
+    """(repo, number, body) for `gh pr review N -R OWNER/REPO --approve`
+    with a body (`--body TEXT`, or `--body-file -`, when body is None), the
+    pull request given by number and -R or by its URL; None for any other
+    form."""
+    args = []
+    for a in argv[2:]:
+        args += a.split("=", 1) if a.startswith("--") and "=" in a else [a]
+    target = repo = body = None
+    approve = from_stdin = False
+    i = 0
+    while i < len(args):
+        a, value = args[i], args[i + 1] if i + 1 < len(args) else None
+        if a in ("-a", "--approve"):
+            approve, i = True, i + 1
+            continue
+        if a in ("-R", "--repo") and value is not None and repo is None:
+            repo = value
+        elif a in ("-b", "--body") and value is not None and body is None:
+            body = value
+        elif a in ("--body-file", "-F") and value == "-" and not from_stdin:
+            from_stdin = True
+        elif a.startswith("-") or target is not None:
+            return None
+        else:
+            target, i = a, i + 1
+            continue
+        i += 2
+    url = PR_URL.match(target or "")
+    if url and repo is not None and repo.lower() != url.group(1).lower():
+        return None
+    if url:
+        repo, target = url.group(1), url.group(2)
+    if not approve or repo is None or not plain_repo(repo) or not DIGITS.fullmatch(target or ""):
+        return None
+    if (body is not None) == from_stdin:
+        return None
+    return repo, int(target), body
+
+
+def gh_api(*args):
+    """A JSON answer from `gh api`, or ValueError saying why there is none."""
+    p = subprocess.run(["gh", "api", *args], capture_output=True, text=True, timeout=30)
+    if p.returncode != 0:
+        raise ValueError(p.stderr.strip() or "gh api failed")
+    return json.loads(p.stdout)
+
+
+CHECKS_QUERY = (
+    "query($owner:String!,$name:String!,$number:Int!){"
+    "repository(owner:$owner,name:$name){pullRequest(number:$number){"
+    "commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){"
+    "pageInfo{hasNextPage} nodes{"
+    "... on CheckRun{name status conclusion isRequired(pullRequestNumber:$number)}"
+    " ... on StatusContext{context state isRequired(pullRequestNumber:$number)}}}}}}}}}}"
+)
+# How a check that is neither green nor left aside reads: still running, or
+# failed. A cancelled or skipped run is left aside: a superseded run is
+# cancelled, and GitHub's own overall state counts it as a failure.
+FAILED = frozenset({"FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"})
+
+
+def checks_refusal(commit, head):
+    """Why the checks on the head commit leave the pull request unapproved,
+    or None: every required check there green, at least one of them, and no
+    other check failed or still running. Branch protection still holds the
+    merge to every required check, reported or not."""
+    rollup = commit["statusCheckRollup"]
+    if commit["oid"] != head or not rollup:
+        return f"no checks are reported on {head[:12]}"
+    if rollup["contexts"]["pageInfo"]["hasNextPage"]:
+        return f"{head[:12]} has too many checks to read"
+    required = 0
+    for check in rollup["contexts"]["nodes"]:
+        name = check.get("name") or check.get("context")
+        if "state" in check:
+            state = check["state"]
+        else:
+            state = check["conclusion"] if check["status"] == "COMPLETED" else "PENDING"
+        if check["isRequired"]:
+            required += 1
+            if state != "SUCCESS":
+                return f"the required check {name} is {state}"
+        elif state in ("PENDING", "EXPECTED"):
+            return f"the check {name} is still running"
+        elif state in FAILED:
+            return f"the check {name} is {state}"
+    if not required:
+        return f"no required check is reported on {head[:12]}"
+    return None
+
+
+def approval_refusal(repo, number, body):
+    """(why the pull request is not one to approve, None), or (None, the head
+    commit to approve). Approved only: an open pull request a dependency bot
+    opened, from a branch in the same repository, every commit on it the
+    bot's own and signed by GitHub (so nothing anyone else pushed rides on
+    the approval), every required check on the head commit green and no other
+    failed or still running (checks_refusal), and a body saying
+    what was verified."""
+    if not body.strip():
+        return "an approval says what was verified: give it a body", None
+    pr = gh_api(f"repos/{repo}/pulls/{number}")
+    author = pr["user"]["login"]
+    if pr["state"] != "open" or pr["draft"]:
+        return f"{repo}#{number} is not an open pull request ready for review", None
+    if author not in BOTS or pr["user"]["type"] != "Bot":
+        return (f"{repo}#{number} was opened by {author}; only a dependency bot's"
+                f" ({', '.join(sorted(BOTS))}) is approved here"), None
+    if ((pr["head"]["repo"] or {}).get("full_name") or "").lower() != repo.lower():
+        return f"{repo}#{number} comes from a branch outside {repo}", None
+    head = pr["head"]["sha"]
+    commits = gh_api(f"repos/{repo}/pulls/{number}/commits?per_page=100")
+    if not commits or len(commits) >= 100:
+        return f"{repo}#{number} has no commits, or too many to check", None
+    for c in commits:
+        if ((c["author"] or {}).get("login") != author
+                or (c["committer"] or {}).get("login") != "web-flow"
+                or c["commit"]["verification"]["verified"] is not True):
+            return (f"commit {c['sha'][:12]} on {repo}#{number} is not a commit {author}"
+                    " made and GitHub signed: someone else pushed to its branch"), None
+    if commits[-1]["sha"] != head:
+        return f"{repo}#{number} moved while it was checked; ask again", None
+    owner, name = repo.split("/")
+    answer = gh_api("graphql", "-f", f"query={CHECKS_QUERY}", "-f", f"owner={owner}",
+                    "-f", f"name={name}", "-F", f"number={number}")
+    commit = answer["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]
+    why = checks_refusal(commit, head)
+    return (why, None) if why else (None, head)
+
+
+def bot_approval(repo, number, body):
+    """The reply to an allowed `pr review`: the approval, on the head commit
+    the checks were read on, so a push after them leaves it stale (branch
+    protection dismisses it); or a refusal saying why."""
+    try:
+        why, head = approval_refusal(repo, number, body)
+    except (subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError, IndexError) as e:
+        return {"rc": 1, "out": "", "err": f"gh-broker: cannot read {repo}#{number} ({e})\n"}
+    if why is not None:
+        return {"rc": 126, "out": "", "err": f"gh-broker: refused: {why}\n"}
+    # -f, never -F: the body is text, and -F would read a body of @path from
+    # that file.
+    approve = [
+        "gh", "api", "-X", "POST", f"repos/{repo}/pulls/{number}/reviews",
+        "-f", "event=APPROVE", "-f", f"commit_id={head}", "-f", f"body={body}", "--jq", ".state",
+    ]
+    p = subprocess.run(approve, capture_output=True, text=True, timeout=60)
+    if p.returncode != 0:
+        return {"rc": p.returncode, "out": "", "err": p.stderr}
+    return {"rc": 0, "out": f"approved {repo}#{number} at {head}\n", "err": ""}
 
 
 # `gh wait pr N -R owner/repo [--timeout SECONDS]`: the broker's own command,
@@ -561,6 +769,16 @@ def refusal(argv, level="hardened"):
                 " workbench gh does for a --body-file path")
     if not merge_ok(argv):
         return "--admin merges around the merge queue"
+    if not workflow_ok(argv):
+        return ("an input read from a file (-F key=@path) would be read here, beside"
+                " the token; give its value (-f key=value)")
+    if not release_ok(argv):
+        return ("an asset named after the tag would be read here, beside the token;"
+                " a release is created with notes only, and assets are uploaded by CI")
+    if argv[:2] == ["pr", "review"] and review_args(argv) is None:
+        return ("gh pr review here is only an approval of a dependency bot's pull"
+                " request: gh pr review N -R OWNER/REPO --approve --body-file -, the"
+                " body saying what was verified")
     return None
 
 
@@ -583,6 +801,15 @@ def serve(conn, level):
         print("RUN", level, json.dumps(argv), "in", req.get("cwd"), flush=True)
         if " ".join(argv[:2]) in POLICIES[level]["broker_commands"]:
             conn.sendall(json.dumps(wait_pr(*wait_args(argv))).encode())
+            return
+        if argv[:2] == ["pr", "review"]:
+            repo, number, body = review_args(argv)
+            if body is None:
+                body = str(req.get("stdin") or "")
+            reply = bot_approval(repo, number, body)
+            if reply["rc"] == 126:
+                print("REFUSE", level, json.dumps(argv), reply["err"].strip(), flush=True)
+            conn.sendall(json.dumps(reply).encode())
             return
         cwd = req.get("cwd")
         cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else "/"

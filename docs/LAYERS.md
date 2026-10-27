@@ -189,7 +189,9 @@ own, named at random (`brave-otter`). Sessions run side by side, in any mix
 of agents and accounts, and cannot reach each other's processes, files or
 containers. Each runs at a level, hardened unless `make claude-assisted` or
 `make claude-unattended` started it: how far the agent goes without asking
-you, never what it can reach (docs/MODES.md). A session reads the workspace's clones read only and writes
+you, never what it can reach, apart from the few GitHub commands the
+unattended level's broker list adds (docs/MODES.md). A session reads the
+workspace's clones read only and writes
 only in its own folder in each repository, `<repo>/.claude/worktrees/<name>`.
 Other sessions' folders are inside the read only clone, so a session can
 read them but not write them. The workspace folder's own `.claude` is a
@@ -636,7 +638,28 @@ would remove it, so keep the token fine grained. Interactive prompts are not
 available, so pass the flags a prompt would ask for. The broker never reads
 a file named on the command line, since it would read it beside the token;
 the workbench `gh` reads a `--body-file` (or `-F`) path itself and sends the
-text as the body on stdin. A refusal says which rule it hit.
+text as the body on stdin, and a release's `--notes-file` the same way. For
+the same reason `gh release create` takes the tag and no asset (gh would
+upload any further argument as a file read beside the token; CI attaches
+assets), and `gh workflow run` takes no input read from a file (`-F
+key=@path`). A refusal says which rule it hit.
+
+**What the unattended level adds.** `allowlist.unattended.json` adds `gh
+workflow run`, `gh label create` and `edit`, and `gh pr review`, which is
+only ever an approval of a dependency bot's pull request: the broker reads
+the pull request, its commits and its checks, and approves the head commit
+itself only when a dependency bot opened it from a branch in the same
+repository, every commit on it is the bot's own and signed by GitHub, and
+every required check is green with no other failed or still running
+(docs/MODES.md, "Unattended"). Branch protection still holds the merge to
+its required checks; the approval adds nothing past that.
+
+**A merge that would write workflow files.** The token holds no `workflow`
+scope, so `gh pr merge --auto` fails ("refusing to allow a Personal Access
+Token to create or update workflow") when `main` changed the same workflow
+files after the branch point and the merge would write workflow content
+neither side has. Merge `main` into the branch with git and push it over
+ssh, which needs no scope, then enqueue again.
 
 **Waiting on a pull request.** Between those steps come long waits: a
 review slot, a test suite, the approval job, the merge queue. An agent in

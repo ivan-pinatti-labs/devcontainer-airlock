@@ -123,6 +123,24 @@ always = [
 ]
 bad += [(False, f"{c} ({lv})") for lv in levels for c in always if ns["allowed"](c.split(), lv)]
 cases += [(False, c) for lv in levels for c in always]
+# A release takes no asset; workflow runs, labels and the bot approval are
+# unattended only, and a review is only ever an approval.
+level_cases = [
+  ("hardened", True, "release create v1 -R example-org/x --generate-notes"),
+  ("hardened", False, "release create v1 /proc/self/environ -R example-org/x"),
+  ("unattended", False, "release create v1 -R example-org/x --notes-file /proc/self/environ"),
+  ("hardened", False, "workflow run ci.yml -R example-org/x"),
+  ("unattended", True, "workflow run ci.yml -R example-org/x -f a=b"),
+  ("unattended", False, "workflow run ci.yml -R example-org/x -F a=@/proc/self/environ"),
+  ("assisted", False, "label create bug -R example-org/x"),
+  ("unattended", True, "label create bug -R example-org/x"),
+  ("assisted", False, "pr review 7 -R example-org/x --approve --body-file -"),
+  ("unattended", True, "pr review 7 -R example-org/x --approve --body-file -"),
+  ("unattended", False, "pr review 7 -R example-org/x --request-changes --body-file -"),
+  ("unattended", False, "pr review 7 -R example-org/x --approve"),
+]
+bad += [(exp, f"{c} ({lv})") for lv, exp, c in level_cases if ns["allowed"](c.split(), lv) != exp]
+cases += [(exp, c) for _, exp, c in level_cases]
 for exp, c in bad: print("WRONG", "expected", "allow" if exp else "refuse", ":", c)
 print(f"{len(cases)-len(bad)}/{len(cases)} cases as expected")
 sys.exit(1 if bad else 0)
