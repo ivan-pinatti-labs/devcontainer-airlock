@@ -48,6 +48,8 @@ COMMAND_NAME = re.compile(r"^[a-z][a-z-]*( [a-z][a-z-]*)?$")
 # prints the broker's own), refused here at every level, whatever a list
 # says: a list naming one stops the broker.
 NEVER = frozenset({"auth", "secret", "ssh-key", "gpg-key"})
+# The verbs a public read may have: the commands that only read.
+READ_VERBS = frozenset({"list", "view"})
 
 
 def read_override(level):
@@ -89,6 +91,10 @@ def level_policies():
             raise ValueError(f"{level}: a command is its name, one or two words")
         if any(c.split()[0] in NEVER for c in current["commands"] | current["public_reads"]):
             raise ValueError(f"{level}: no list names {', '.join(sorted(NEVER))}: they handle credentials")
+        # A public read reaches a repository outside the owners, so it has to
+        # be one that writes nothing there.
+        if not all(c.split()[-1] in READ_VERBS for c in current["public_reads"]):
+            raise ValueError(f"{level}: a public read is a {' or '.join(sorted(READ_VERBS))} command")
         if not current["broker_commands"] <= OWN_COMMANDS:
             raise ValueError(f"{level}: broker_commands names only {', '.join(sorted(OWN_COMMANDS))}")
         policies[level] = current

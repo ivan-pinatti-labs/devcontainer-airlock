@@ -637,6 +637,14 @@ def test_the_trees_levels_each_hold_the_one_before(broker):
         ({"add": {"public_reads": ["secret list"]}}, "they handle credentials"),
         ({"add": {"commands": ["ssh-key add"]}}, "they handle credentials"),
         ({"add": {"commands": ["gpg-key list"]}}, "they handle credentials"),
+        (
+            {"add": {"public_reads": ["pr comment"]}},
+            "a public read is a list or view command",
+        ),
+        (
+            {"add": {"public_reads": ["status"]}},
+            "a public read is a list or view command",
+        ),
     ],
 )
 def test_an_override_outside_its_form_stops_the_broker(monkeypatch, override, why):
