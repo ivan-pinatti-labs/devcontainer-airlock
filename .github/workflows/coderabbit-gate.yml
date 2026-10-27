@@ -53,7 +53,7 @@ jobs:
     # 40 character SHA cannot be wrapped, and shortening either would mean
     # giving up the pin.
     # yamllint disable-line rule:line-length
-    uses: ivan-pinatti-labs/gh-actions/.github/workflows/reusable-coderabbit-gate.yml@4d66a19b6c2ad914f41929f60c258fa8781142a0 # v0.9.0
+    uses: ivan-pinatti-labs/gh-actions/.github/workflows/reusable-coderabbit-gate.yml@d9b6c2a9f359e75a22847013d551c8680433377f # v0.9.1
     permissions:
       contents: read
       pull-requests: read
