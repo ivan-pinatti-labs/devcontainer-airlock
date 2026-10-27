@@ -1,9 +1,10 @@
 """gh broker: run allowlisted gh commands for the workbench, holding the token.
 
-Listens on a unix socket. Each connection carries one JSON line:
-{"argv": [...], "cwd": "...", "stdin": "..."}. The reply is one JSON object:
-{"rc": int, "out": str, "err": str}. Every request is logged to stdout, so
-`podman logs gh-broker` is the record of what the workbench did on GitHub.
+Listens on a unix socket per session level (see below). Each connection
+carries one JSON line: {"argv": [...], "cwd": "...", "stdin": "..."}. The
+reply is one JSON object: {"rc": int, "out": str, "err": str}. Every request
+is logged to stdout with its level, so `podman logs gh-broker` is the record
+of what the workbench did on GitHub.
 
 The token comes from the GH_TOKEN environment variable, which the host
 passes as a podman secret and which never leaves this container. Refused:
