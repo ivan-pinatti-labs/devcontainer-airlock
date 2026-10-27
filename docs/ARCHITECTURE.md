@@ -99,7 +99,7 @@ out.
 
 | From | To | Over | Carries |
 | --- | --- | --- | --- |
-| workbench (`gh`) | gh-broker | `gh.sock` | a `gh` command line; the broker checks it against its allowlist and the owners, runs it with the token, and sends back the output |
+| workbench (`gh`) | gh-broker | `gh.sock`, one per session level | a `gh` command line; the broker checks it against the allowlist of the level whose socket it came in on and the owners, runs it with the token, and sends back the output |
 | workbench (`git`, `ssh`) | ssh-agent | `agent.sock` | signing requests; the key never leaves the agent |
 | workbench (`l2`, `podman`) | L2 engine | `podman.sock` | the podman API: start an L2 run, build an L2 image |
 | L2 engine | L2 run | inside the engine | the run gets the working tree, and nothing of the workbench (not its processes, not its localhost) |

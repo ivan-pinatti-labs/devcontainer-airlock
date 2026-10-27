@@ -205,7 +205,10 @@
   State kept on the host:
     ${XDG_DATA_HOME}/workbench/claude, codex  the agents logins and settings,
         separate from your own ~/.claude and ~/.codex
-    ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket
+    ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket for hardened
+                                              sessions
+    ${XDG_RUNTIME_DIR}/workbench-gh/assisted, unattended
+                                              the sockets for the other levels
     ${XDG_RUNTIME_DIR}/workbench/egress       the workspaces the egress proxy
                                               serves, and their sets
     ${XDG_RUNTIME_DIR}/workbench/mirror       the workspaces the package mirror
@@ -357,6 +360,8 @@ LABEL_OPTS=(--security-opt label=type:container_engine_t --security-opt label=le
 DATA="${XDG_DATA_HOME:-${HOME}/.local/share}/workbench"
 RUN="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}"
 GH_DIR="${RUN}/workbench/gh"
+# The gh broker sockets of the levels past hardened, a folder each (gh_dir).
+GH_LEVELS="${RUN}/workbench-gh"
 # The workspaces the egress proxy serves, one file each, which it reads.
 EGRESS_DIR="${RUN}/workbench/egress"
 MIRROR_DIR="${RUN}/workbench/mirror"
@@ -1241,14 +1246,38 @@ mirror_leave() {
   podman network disconnect -f "$(net_name "$1")" mirror-gate >/dev/null 2>&1 || true
 }
 
+# The folder holding the gh broker's socket for session level $1. A session
+# mounts only its own level's, and the broker serves each at that level, so
+# which one a session has is what it may do on GitHub (docs/MODES.md).
+# Hardened keeps the folder it had before levels; the others sit apart from
+# ${RUN}/workbench, whose names a workspace's own folders also take.
+gh_dir() {
+  case "$1" in
+  hardened) echo "${GH_DIR}" ;;
+  *) echo "${GH_LEVELS}/$1" ;;
+  esac
+}
+
 start_broker() {
-  running gh-broker && return
+  local level mounts=()
+  # Made first, so a session can mount its level's folder whichever broker
+  # runs.
+  for level in ${LEVELS}; do
+    mkdir -p "$(gh_dir "${level}")"
+    chmod 700 "$(gh_dir "${level}")"
+    mounts+=(-v "$(gh_dir "${level}"):/run/gh-broker/${level}:Z")
+  done
+  chmod 700 "${RUN}/workbench" "${GH_LEVELS}"
+  if running gh-broker; then
+    # One from before levels serves the hardened socket alone.
+    [ -e "$(gh_dir unattended)/gh.sock" ] ||
+      echo "workbench: the gh broker running predates session levels, so an assisted or unattended session has no gh until host/workbench restart-broker" >&2
+    return 0
+  fi
   podman secret exists "${GH_SECRET}" ||
     die "no podman secret ${GH_SECRET}; create it: podman secret create ${GH_SECRET} <file holding the token>"
   [ -n "${GH_OWNERS}" ] ||
     die "set WORKBENCH_GH_OWNERS in ${CONFIG} to the GitHub owners (users or organizations) the broker may act on, comma separated"
-  mkdir -p "${GH_DIR}"
-  chmod 700 "${RUN}/workbench" "${GH_DIR}"
   podman rm -f gh-broker >/dev/null 2>&1 || true
   # WORKBENCH_ROOT, read only and not relabelled: the broker can read only
   # what a workbench has already labelled for this category, which is enough
@@ -1257,7 +1286,7 @@ start_broker() {
     --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
     --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
     --secret "${GH_SECRET},type=env,target=GH_TOKEN" -e GH_BROKER_OWNERS="${GH_OWNERS}" \
-    -v "${GH_DIR}:/run/gh-broker:Z" \
+    "${mounts[@]}" \
     -v "${ROOT}:${ROOT}:ro" \
     "${BROKER_IMAGE}" >/dev/null
 }
@@ -1384,7 +1413,7 @@ start_workbench() {
     -e AIRLOCK_SESSION="${SESSION:-}" -e AIRLOCK_WORKBENCH="${name}" -e AIRLOCK_HOST_HOME="${HOME}" \
     -e AIRLOCK_WORKSPACE="${ws}" \
     --hostname "${name:0:63}" \
-    -v "${GH_DIR}:/run/gh-broker" \
+    -v "$(gh_dir "${S_LEVEL:-hardened}"):/run/gh-broker" \
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
     "${voice[@]}" "${level[@]}" \
@@ -1424,7 +1453,7 @@ cmd_up() {
 }
 
 start_helpers() {
-  mkdir -p "${SSH_DIR}" "${GH_DIR}"
+  mkdir -p "${SSH_DIR}"
   start_broker
   start_ssh_agent
   start_proxy

@@ -17,7 +17,8 @@ RUN printf '%s\n' \
   && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 COPY broker.py /usr/local/libexec/gh-broker/broker.py
-COPY allowlist.json /etc/gh-broker/allowlist.json
+# The hardened list, and what each other level adds to the one before it.
+COPY allowlist.json allowlist.assisted.json allowlist.unattended.json /etc/gh-broker/
 # The allow and refuse cases: a change that reopens one fails the build.
 COPY test_broker.py /tmp/test_broker.py
 RUN python3 /tmp/test_broker.py && rm /tmp/test_broker.py
@@ -27,7 +28,7 @@ USER 1000:1000
 ENV GH_PROMPT_DISABLED=1 \
     GH_NO_UPDATE_NOTIFIER=1 \
     XDG_CACHE_HOME=/tmp \
-    GH_BROKER_SOCK=/run/gh-broker/gh.sock
+    GH_BROKER_DIR=/run/gh-broker
 LABEL org.opencontainers.image.source="https://github.com/ivan-pinatti-labs/devcontainer-airlock" \
       org.opencontainers.image.description="Holds the GitHub token and runs allowlisted gh commands for the ivan-pinatti-labs workbench." \
       org.opencontainers.image.licenses="Apache-2.0"

@@ -11,26 +11,45 @@ real socket path outside the test's own directory.
 from __future__ import annotations
 
 import builtins
+import io
 import json
+import os
+import selectors
 import socket
 import subprocess
+import tempfile
+import threading
+import time
 
 import pytest
 from conftest import REPO_ROOT, load
 
-ALLOWLIST = REPO_ROOT / "images/gh-broker/allowlist.json"
+BROKER_DIR = REPO_ROOT / "images/gh-broker"
 
 
 def tree_open(path, *args, **kwargs):
-    """`open` with the image's allowlist path pointing at the tree's copy."""
-    if path == "/etc/gh-broker/allowlist.json":
-        path = ALLOWLIST
+    """`open` with the image's allowlist paths pointing at the tree's copies."""
+    if str(path).startswith("/etc/gh-broker/"):
+        path = BROKER_DIR / str(path).removeprefix("/etc/gh-broker/")
     return builtins.open(path, *args, **kwargs)
 
 
-def load_broker(monkeypatch, owners="example-org"):
+def load_broker(monkeypatch, owners="example-org", overrides=None):
+    """The broker, reading the tree's allowlists, except for the levels named
+    in `overrides`: level to the text of its allowlist.<level>.json, or None
+    for no such file."""
     monkeypatch.setenv("GH_BROKER_OWNERS", owners)
-    return load("images/gh-broker/broker.py", "gh_broker", open=tree_open)
+    overrides = overrides or {}
+
+    def open_with(path, *args, **kwargs):
+        for level, text in overrides.items():
+            if path == f"/etc/gh-broker/allowlist.{level}.json":
+                if text is None:
+                    raise FileNotFoundError(path)
+                return io.StringIO(text)
+        return tree_open(path, *args, **kwargs)
+
+    return load("images/gh-broker/broker.py", "gh_broker", open=open_with)
 
 
 # What GitHub answers for `gh api repos/<repo> --jq .visibility`, by repo; a
@@ -341,7 +360,8 @@ def test_owners_come_from_the_environment(monkeypatch, owners, count):
     ("command", "why"),
     [
         ("pr create -t t --body-file /tmp/body.md", "stdin"),
-        ("auth token", "not on the allowlist"),
+        ("auth token", "handles credentials, and is never run here"),
+        ("repo delete example-org/x", "not on the allowlist"),
         ("pr view 1 -R evil/x", "allowed owner"),
         ("search issues --owner evil", "allowed owner"),
         ("pr merge 25 --admin", "merge queue"),
@@ -401,12 +421,13 @@ def test_mutation_fields(broker, query, fields):
     assert broker.mutation_fields(query) == fields
 
 
-def serve_request(broker, payload: bytes):
-    """Send one request through serve() over a socket pair; the reply."""
+def serve_request(broker, payload: bytes, level="hardened"):
+    """Send one request through serve() over a socket pair, as one that came
+    in on the socket of `level`; the reply."""
     ours, theirs = socket.socketpair()
     with ours:
         ours.sendall(payload)
-        broker.serve(theirs)
+        broker.serve(theirs, level)
         ours.shutdown(socket.SHUT_WR)
         data = b""
         while chunk := ours.recv(65536):
@@ -424,7 +445,7 @@ def test_serve_refuses_a_malformed_request(broker, payload):
 
 
 def test_serve_refuses_a_command_off_the_allowlist(broker, capsys):
-    reply = serve_request(broker, b'{"argv": ["auth", "token"]}\n')
+    reply = serve_request(broker, b'{"argv": ["repo", "delete", "example-org/x"]}\n')
     assert reply["rc"] == 126
     assert "not on the allowlist" in reply["err"]
     assert capsys.readouterr().out.startswith("REFUSE")
@@ -482,26 +503,44 @@ class Stop(Exception):
 class FakeSocket:
     def __init__(self, family):
         self.family = family
-        self.accepted = 0
+        self.path = None
 
     def bind(self, path):
+        self.path = path
         open(path, "w").close()
 
     def listen(self):
         pass
 
     def accept(self):
-        if self.accepted:
+        return f"conn on {self.path}", None
+
+
+class FakeSelector:
+    """Every registered socket ready once, then Stop."""
+
+    def __init__(self):
+        self.keys, self.selected = [], False
+
+    def register(self, fileobj, events, data):
+        self.keys.append(selectors.SelectorKey(fileobj, 0, events, data))
+
+    def select(self):
+        if self.selected:
             raise Stop
-        self.accepted += 1
-        return "conn", None
+        self.selected = True
+        return [(key, key.events) for key in self.keys]
 
 
 @pytest.mark.parametrize("stale", [True, False])
-def test_main_listens_and_serves_each_connection(broker, monkeypatch, tmp_path, stale):
-    sock = tmp_path / "gh.sock"
+def test_main_listens_on_each_level_mounted_and_serves_it_at_that_level(
+    broker, monkeypatch, tmp_path, capsys, stale
+):
+    """A level the host mounted no folder for gets no socket."""
+    for level in ("hardened", "unattended"):
+        (tmp_path / level).mkdir()
     if stale:
-        sock.write_text("left from a previous run")
+        (tmp_path / "hardened/gh.sock").write_text("left from a previous run")
     started = []
 
     class Thread:
@@ -513,14 +552,198 @@ def test_main_listens_and_serves_each_connection(broker, monkeypatch, tmp_path, 
             started.append(self.args)
 
     monkeypatch.setenv("GH_TOKEN", "t")
-    monkeypatch.setattr(broker, "SOCK", str(sock))
+    monkeypatch.setattr(broker, "SOCK_DIR", str(tmp_path))
     monkeypatch.setattr(broker.socket, "socket", FakeSocket)
+    monkeypatch.setattr(broker.selectors, "DefaultSelector", FakeSelector)
     monkeypatch.setattr(broker.threading, "Thread", Thread)
     with pytest.raises(Stop):
         broker.main()
-    assert started == [("conn",)]
-    assert sock.read_text() == ""
-    assert oct(sock.stat().st_mode & 0o777) == "0o660"
+    assert started == [
+        (f"conn on {tmp_path}/hardened/gh.sock", "hardened"),
+        (f"conn on {tmp_path}/unattended/gh.sock", "unattended"),
+    ]
+    assert not (tmp_path / "assisted").exists()
+    for level in ("hardened", "unattended"):
+        sock = tmp_path / level / "gh.sock"
+        assert sock.read_text() == ""
+        assert oct(sock.stat().st_mode & 0o777) == "0o660"
+    out = capsys.readouterr().out
+    assert (
+        f"gh-broker: hardened listening on {tmp_path}/hardened/gh.sock, beyond hardened: {{}}"
+        in out
+    )
+
+
+def test_main_needs_the_hardened_folder(broker, monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("GH_TOKEN", "t")
+    monkeypatch.setattr(broker, "SOCK_DIR", str(tmp_path))
+    (tmp_path / "unattended").mkdir()
+    with pytest.raises(SystemExit) as e:
+        broker.main()
+    assert e.value.code == 1
+    assert f"no {tmp_path}/hardened" in capsys.readouterr().err
+
+
+# Session levels: allowlist.<level>.json adds to the level before it.
+
+ADDS_GIST = json.dumps({"add": {"commands": ["gist create"]}})
+
+
+def test_each_level_adds_to_the_one_before_it(monkeypatch):
+    fresh = load_broker(
+        monkeypatch,
+        overrides={
+            "assisted": json.dumps(
+                {"comment": "c", "add": {"commands": ["label create"]}}
+            ),
+            "unattended": ADDS_GIST,
+        },
+    )
+    commands = {level: fresh.POLICIES[level]["commands"] for level in fresh.LEVELS}
+    assert "label create" not in commands["hardened"]
+    assert "label create" in commands["assisted"]
+    assert "gist create" not in commands["assisted"]
+    assert {"label create", "gist create"} <= commands["unattended"]
+    assert commands["hardened"] < commands["assisted"] < commands["unattended"]
+
+
+def test_a_level_with_no_override_is_the_level_before_it(monkeypatch):
+    fresh = load_broker(monkeypatch, overrides={"assisted": None, "unattended": None})
+    policies = fresh.POLICIES
+    assert policies["hardened"] == policies["assisted"] == policies["unattended"]
+
+
+def test_the_trees_levels_each_hold_the_one_before(broker):
+    for before, level in zip(broker.LEVELS, broker.LEVELS[1:]):
+        for key in broker.LIST_KEYS:
+            assert broker.POLICIES[before][key] <= broker.POLICIES[level][key]
+
+
+@pytest.mark.parametrize(
+    ("override", "why"),
+    [
+        ({"add": {}, "remove": {"commands": ["pr view"]}}, "only comment and add"),
+        ([], "only comment and add"),
+        ({"add": {"owners": ["evil"]}}, "add holds only"),
+        ({"add": {"api": {"methods": ["DELETE"]}}}, "add holds only"),
+        ({"add": []}, "add holds only"),
+        ({"add": {"commands": "release create"}}, "a list of names"),
+        ({"add": {"commands": [1]}}, "a list of names"),
+        ({"add": {"commands": ["pr merge --admin"]}}, "one or two words"),
+        ({"add": {"public_reads": ["Secret list"]}}, "one or two words"),
+        ({"add": {"broker_commands": ["run anything"]}}, "broker_commands names only"),
+        ({"add": {"commands": ["auth token"]}}, "they handle credentials"),
+        ({"add": {"commands": ["auth"]}}, "they handle credentials"),
+        ({"add": {"public_reads": ["secret list"]}}, "they handle credentials"),
+        ({"add": {"commands": ["ssh-key add"]}}, "they handle credentials"),
+        ({"add": {"commands": ["gpg-key list"]}}, "they handle credentials"),
+        (
+            {"add": {"public_reads": ["pr comment"]}},
+            "a public read is a list or view command",
+        ),
+        (
+            {"add": {"public_reads": ["status"]}},
+            "a public read is a list or view command",
+        ),
+    ],
+)
+def test_an_override_outside_its_form_stops_the_broker(monkeypatch, override, why):
+    with pytest.raises(ValueError, match=why):
+        load_broker(monkeypatch, overrides={"unattended": json.dumps(override)})
+
+
+# What the code refuses, no level's list can lift.
+ALWAYS_REFUSED = [
+    "pr merge 25 --admin",
+    "pr view 1 -R evil/x",
+    "pr create -t t --body-file /proc/self/environ",
+    "api -X DELETE repos/example-org/x",
+    'api graphql -f query=mutation{deleteRepository(input:{repositoryId:"R"}){clientMutationId}}',
+    "wait pr 7 -R someone-else/x",
+    "release create v1 -R evil/x",
+    "auth token",
+    "auth status --show-token",
+    "secret list -R example-org/x",
+    "ssh-key list",
+    "gpg-key list",
+]
+
+
+@pytest.mark.parametrize("command", ALWAYS_REFUSED)
+def test_what_the_code_refuses_holds_at_every_level(monkeypatch, command):
+    fresh = load_broker(
+        monkeypatch,
+        overrides={
+            "assisted": None,
+            "unattended": json.dumps(
+                {"add": {"commands": ["release create", "pr merge"]}}
+            ),
+        },
+    )
+    for level in fresh.LEVELS:
+        assert not fresh.allowed(command.split(), level), level
+
+
+def test_a_refusal_names_the_level(monkeypatch):
+    fresh = load_broker(monkeypatch, overrides={"unattended": ADDS_GIST})
+    assert fresh.refusal(["gist", "create", "f"], "assisted") == (
+        "'gh gist create' is not on the allowlist at the assisted level"
+    )
+    assert fresh.refusal(["gist", "create", "f"], "unattended") is None
+
+
+def test_serve_says_which_files_hold_the_level(monkeypatch, capsys):
+    fresh = load_broker(monkeypatch, overrides={"unattended": ADDS_GIST})
+    reply = serve_request(fresh, b'{"argv": ["auth", "token"]}\n', "unattended")
+    assert reply["err"].endswith(
+        "(images/gh-broker/allowlist.json, allowlist.unattended.json)\n"
+    )
+    assert capsys.readouterr().out.startswith('REFUSE unattended ["auth", "token"]')
+
+
+def test_the_level_is_the_socket_a_request_came_in_on(monkeypatch):
+    """End to end over real sockets: the same request on each level's
+    socket. A request naming a level of its own changes nothing."""
+    fresh = load_broker(
+        monkeypatch, overrides={"assisted": None, "unattended": ADDS_GIST}
+    )
+    ran = []
+
+    def run(argv, **kwargs):
+        ran.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "made", "")
+
+    monkeypatch.setattr(fresh.subprocess, "run", run)
+    monkeypatch.setenv("GH_TOKEN", "t")
+    # A short folder of the test's own: a unix socket path has a length limit.
+    with tempfile.TemporaryDirectory(prefix="gb-") as d:
+        for level in fresh.LEVELS:
+            os.mkdir(os.path.join(d, level))
+        monkeypatch.setattr(fresh, "SOCK_DIR", d)
+        threading.Thread(target=fresh.main, daemon=True).start()
+        socks = [os.path.join(d, level, "gh.sock") for level in fresh.LEVELS]
+        for _ in range(500):
+            if all(os.path.exists(s) for s in socks):
+                break
+            time.sleep(0.01)
+
+        def ask(level, request):
+            with socket.socket(socket.AF_UNIX) as s:
+                s.connect(os.path.join(d, level, "gh.sock"))
+                s.sendall(json.dumps(request).encode() + b"\n")
+                s.shutdown(socket.SHUT_WR)
+                data = b""
+                while chunk := s.recv(65536):
+                    data += chunk
+            return json.loads(data)["rc"]
+
+        gist = {"argv": ["gist", "create", "-R", "example-org/x"]}
+        assert ask("hardened", gist) == 126
+        assert ask("assisted", gist) == 126
+        assert ask("hardened", {**gist, "level": "unattended"}) == 126
+        assert ran == []
+        assert ask("unattended", gist) == 0
+        assert ran == [["gh", "gist", "create", "-R", "example-org/x"]]
 
 
 # gh wait pr: the broker's own bounded wait on a pull request (#145).

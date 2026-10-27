@@ -23,7 +23,7 @@ check "codex too" 0 out "workbench: codex: host/workbench codex, or attach VS Co
 check "the state is locked meanwhile" 0 calls "flock -w 120 9"
 
 check "the broker holds the token for the owners named" 0 calls \
-  "podman run -d --name gh-broker --userns=keep-id:uid=1000,gid=1000 --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp --secret gh-devcontainer,type=env,target=GH_TOKEN -e GH_BROKER_OWNERS=acme -v ${run_dir}/gh:/run/gh-broker:Z -v ${WORKBENCH_ROOT}:${WORKBENCH_ROOT}:ro localhost/airlock-gh-broker:local"
+  "podman run -d --name gh-broker --userns=keep-id:uid=1000,gid=1000 --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp --secret gh-devcontainer,type=env,target=GH_TOKEN -e GH_BROKER_OWNERS=acme -v ${run_dir}/gh:/run/gh-broker/hardened:Z -v ${XDG_RUNTIME_DIR}/workbench-gh/assisted:/run/gh-broker/assisted:Z -v ${XDG_RUNTIME_DIR}/workbench-gh/unattended:/run/gh-broker/unattended:Z -v ${WORKBENCH_ROOT}:${WORKBENCH_ROOT}:ro localhost/airlock-gh-broker:local"
 check "GitHub's host keys are fetched in a container" 0 calls \
   "podman run --rm --network podman localhost/airlock-base:local sh -c curl -fsS https://api.github.com/meta"
 assert "into known_hosts" grep -q "github.com ssh-ed25519 KEY" "${XDG_RUNTIME_DIR}/devcontainer-ssh/known_hosts"

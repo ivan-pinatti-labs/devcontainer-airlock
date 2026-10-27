@@ -1,9 +1,10 @@
 """gh broker: run allowlisted gh commands for the workbench, holding the token.
 
-Listens on a unix socket. Each connection carries one JSON line:
-{"argv": [...], "cwd": "...", "stdin": "..."}. The reply is one JSON object:
-{"rc": int, "out": str, "err": str}. Every request is logged to stdout, so
-`podman logs gh-broker` is the record of what the workbench did on GitHub.
+Listens on a unix socket per session level (see below). Each connection
+carries one JSON line: {"argv": [...], "cwd": "...", "stdin": "..."}. The
+reply is one JSON object: {"rc": int, "out": str, "err": str}. Every request
+is logged to stdout with its level, so `podman logs gh-broker` is the record
+of what the workbench did on GitHub.
 
 The token comes from the GH_TOKEN environment variable, which the host
 passes as a podman secret and which never leaves this container. Refused:
@@ -16,10 +17,19 @@ repository outside the owners when GitHub says it is public.
 
 One command is the broker's own rather than gh's: `wait pr`, a bounded wait
 on a pull request's state (see wait_pr below).
+
+One broker serves every session level (docs/MODES.md), each on a socket of
+its own: GH_BROKER_DIR/<level>/gh.sock. The host mounts into a session only
+its own level's folder, so the level a request is held to is the socket it
+came in on, never anything the request says. allowlist.json is the hardened
+list; allowlist.<level>.json adds to the level before it, so each level
+allows everything the one before it does. The refusals written in the code
+below (owners, files, --admin, api writes) hold at every level.
 """
 import json
 import os
 import re
+import selectors
 import socket
 import subprocess
 import sys
@@ -27,14 +37,79 @@ import threading
 import time
 
 ALLOW = json.load(open("/etc/gh-broker/allowlist.json"))
-COMMANDS = set(ALLOW["commands"])
+# The session levels, each allowing everything the one before it does.
+LEVELS = ("hardened", "assisted", "unattended")
+# The lists a level's override may add to, and the broker's own commands,
+# the only ones broker_commands may name.
+LIST_KEYS = ("commands", "public_reads", "broker_commands", "graphql_mutations")
+OWN_COMMANDS = frozenset({"wait pr"})
+COMMAND_NAME = re.compile(r"^[a-z][a-z-]*( [a-z][a-z-]*)?$")
+# The gh commands that print, set or plant a credential (`gh auth token`
+# prints the broker's own), refused here at every level, whatever a list
+# says: a list naming one stops the broker.
+NEVER = frozenset({"auth", "secret", "ssh-key", "gpg-key"})
+# The verbs a public read may have: the commands that only read.
+READ_VERBS = frozenset({"list", "view"})
+
+
+def read_override(level):
+    """What allowlist.<level>.json adds to the level before it, by list, or
+    nothing when there is no such file. Anything else in it (a key no list
+    has, a value that is not a list of names) stops the broker, so a mistake
+    there cannot pass for an empty override."""
+    try:
+        f = open(f"/etc/gh-broker/allowlist.{level}.json")
+    except FileNotFoundError:
+        return {}
+    with f:
+        override = json.load(f)
+    if not isinstance(override, dict) or set(override) - {"comment", "add"}:
+        raise ValueError(f"allowlist.{level}.json: only comment and add")
+    add = override.get("add", {})
+    if not isinstance(add, dict) or set(add) - set(LIST_KEYS):
+        raise ValueError(f"allowlist.{level}.json: add holds only {', '.join(LIST_KEYS)}")
+    for key, names in add.items():
+        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+            raise ValueError(f"allowlist.{level}.json: {key} is a list of names")
+    return add
+
+
+def level_policies():
+    """Each level's lists: the hardened ones from allowlist.json, and every
+    other level's, the level before it plus its override."""
+    lists = {
+        "commands": ALLOW["commands"],
+        "public_reads": ALLOW.get("public_reads", []),
+        "broker_commands": ALLOW.get("broker_commands", []),
+        "graphql_mutations": ALLOW["api"].get("graphql_mutations", []),
+    }
+    policies, current = {}, {key: frozenset(lists[key]) for key in LIST_KEYS}
+    for level in LEVELS:
+        add = {} if level == "hardened" else read_override(level)
+        current = {key: current[key] | frozenset(add.get(key, [])) for key in LIST_KEYS}
+        if not all(COMMAND_NAME.match(c) for c in current["commands"] | current["public_reads"]):
+            raise ValueError(f"{level}: a command is its name, one or two words")
+        if any(c.split()[0] in NEVER for c in current["commands"] | current["public_reads"]):
+            raise ValueError(f"{level}: no list names {', '.join(sorted(NEVER))}: they handle credentials")
+        # A public read reaches a repository outside the owners, so it has to
+        # be one that writes nothing there.
+        if not all(c.split()[-1] in READ_VERBS for c in current["public_reads"]):
+            raise ValueError(f"{level}: a public read is a {' or '.join(sorted(READ_VERBS))} command")
+        if not current["broker_commands"] <= OWN_COMMANDS:
+            raise ValueError(f"{level}: broker_commands names only {', '.join(sorted(OWN_COMMANDS))}")
+        policies[level] = current
+    return policies
+
+
+POLICIES = level_policies()
 # The GitHub owners (users or organizations) whose repositories the broker
 # acts on: GH_BROKER_OWNERS from the host, comma separated, else the
 # allowlist's own. None built in, so each installation names its own.
 _OWNER_NAMES = [o.strip() for o in os.environ.get("GH_BROKER_OWNERS", "").split(",") if o.strip()] or ALLOW["owners"]
 OWNER_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 OWNERS = tuple(o.lower() + "/" for o in _OWNER_NAMES if OWNER_NAME.match(o))
-SOCK = os.environ.get("GH_BROKER_SOCK", "/run/gh-broker/gh.sock")
+# The folder holding a folder per level, each with that level's socket.
+SOCK_DIR = os.environ.get("GH_BROKER_DIR", "/run/gh-broker")
 REPO_FLAGS = ("-R", "--repo")
 # gh search scopes to a user or organization with --owner, and to a
 # repository with --repo, each repeatable and comma separated.
@@ -105,7 +180,6 @@ def qualifiers(argv):
 # Read only commands that may also name a public repository outside the
 # owners: following an upstream issue means reading someone else's
 # repository. Writes stay held to the owners.
-PUBLIC_READS = frozenset(ALLOW.get("public_reads", []))
 REPO_NAME = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
 URL_REPO = re.compile(r"(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s#?]+)", re.I)
 # How long an answer to "is it public" is kept. A repository made private
@@ -145,12 +219,12 @@ def plain_repo(repo):
     return bool(REPO_NAME.match(repo)) and repo.split("/")[1] not in (".", "..")
 
 
-def public_read_ok(argv):
+def public_read_ok(argv, policy):
     """A read only command whose repositories outside the owners (named by
     -R, a URL or a repo: qualifier in its search) are all public. An org:,
     user: or owner: qualifier outside the owners names no one repository to
     check, so it is refused."""
-    if " ".join(argv[:2]) not in PUBLIC_READS or flag_values(argv, OWNER_FLAGS):
+    if " ".join(argv[:2]) not in policy["public_reads"] or flag_values(argv, OWNER_FLAGS):
         return False
     scopes = qualifiers(argv)
     if any(kind != "repo" and value + "/" not in OWNERS for kind, value in scopes):
@@ -162,7 +236,6 @@ def public_read_ok(argv):
 
 
 REPLY = re.compile(r"^repos/([^/]+)/[^/]+/pulls/\d+/comments/\d+/replies$", re.I)
-MUTATIONS = frozenset(ALLOW["api"].get("graphql_mutations", []))
 
 
 def mutation_fields(query):
@@ -221,7 +294,7 @@ def mutation_fields(query):
     return names
 
 
-def api_ok(argv):
+def api_ok(argv, policy):
     rest = argv[1:]
     method = None
     path = None
@@ -267,7 +340,7 @@ def api_ok(argv):
         if len(re.findall(r"\bmutation\b", query)) != 1:
             return False
         ops = mutation_fields(query)
-        return ops is not None and len(ops) == 1 and ops[0] in MUTATIONS
+        return ops is not None and len(ops) == 1 and ops[0] in policy["graphql_mutations"]
     reply = REPLY.match(path)
     if reply:
         # A reply to a review comment: a POST (gh sends one whenever fields
@@ -331,7 +404,6 @@ def merge_ok(argv):
 # for the event itself instead of guessing when to look, and every step it
 # takes afterwards is still a command of its own (#145). Read only, and held
 # to the allowed owners like any other command.
-BROKER_COMMANDS = frozenset(ALLOW.get("broker_commands", []))
 # The longest wait, in seconds: one CodeRabbit review slot (about an hour)
 # and a margin. A caller that asks for longer gets this, so no wait is
 # unbounded. Review threads are read 100 at a time, at most WAIT_PAGES pages
@@ -456,28 +528,31 @@ def wait_pr(repo, number, timeout, sleep=time.sleep, clock=time.monotonic):
             "err": f"gh-broker: {repo}#{number} unchanged after {timeout}s\n"}
 
 
-def allowed(argv):
-    return refusal(argv) is None
+def allowed(argv, level="hardened"):
+    return refusal(argv, level) is None
 
 
-# Why a command is refused, for the message the caller sees, or None when
-# it is allowed.
-def refusal(argv):
+# Why a command is refused at `level`, for the message the caller sees, or
+# None when it is allowed.
+def refusal(argv, level="hardened"):
+    policy = POLICIES[level]
     if not argv:
         return "no command"
-    if " ".join(argv[:2]) in BROKER_COMMANDS:
+    if " ".join(argv[:2]) in policy["broker_commands"]:
         return None if wait_args(argv) else (
             "usage: gh wait pr NUMBER -R OWNER/REPO [--timeout SECONDS], on a"
             f" repository under an allowed owner; at most {WAIT_CAP}s")
+    if argv[0] in NEVER:
+        return f"'gh {argv[0]}' handles credentials, and is never run here"
     if argv[0] == "api":
-        return None if api_ok(argv) else (
+        return None if api_ok(argv, policy) else (
             "this gh api call is not allowed: only reads, review comment replies"
             " and the listed GraphQL mutations, on the allowed owners (reads of a"
             " public repository too)")
-    if " ".join(argv[:2]) not in COMMANDS:
-        return f"'gh {' '.join(argv[:2])}' is not on the allowlist"
-    if not repos_ok(argv) and not public_read_ok(argv):
-        if " ".join(argv[:2]) in PUBLIC_READS:
+    if " ".join(argv[:2]) not in policy["commands"]:
+        return f"'gh {' '.join(argv[:2])}' is not on the allowlist at the {level} level"
+    if not repos_ok(argv) and not public_read_ok(argv, policy):
+        if " ".join(argv[:2]) in policy["public_reads"]:
             return "the repository is not under an allowed owner, and not public"
         return "the repository is not under an allowed owner"
     if not files_ok(argv):
@@ -489,7 +564,8 @@ def refusal(argv):
     return None
 
 
-def serve(conn):
+def serve(conn, level):
+    """Answer one connection, which came in on the socket of `level`."""
     with conn:
         try:
             req = json.loads(conn.makefile().readline())
@@ -497,14 +573,15 @@ def serve(conn):
         except (ValueError, KeyError, TypeError):
             conn.sendall(b'{"rc":2,"out":"","err":"gh-broker: malformed request\\n"}')
             return
-        why = refusal(argv)
+        why = refusal(argv, level)
         if why is not None:
-            print("REFUSE", json.dumps(argv), flush=True)
-            msg = f"gh-broker: refused: {why} (images/gh-broker/allowlist.json)\n"
+            print("REFUSE", level, json.dumps(argv), flush=True)
+            files = "allowlist.json" if level == "hardened" else f"allowlist.json, allowlist.{level}.json"
+            msg = f"gh-broker: refused: {why} (images/gh-broker/{files})\n"
             conn.sendall(json.dumps({"rc": 126, "out": "", "err": msg}).encode())
             return
-        print("RUN", json.dumps(argv), "in", req.get("cwd"), flush=True)
-        if " ".join(argv[:2]) in BROKER_COMMANDS:
+        print("RUN", level, json.dumps(argv), "in", req.get("cwd"), flush=True)
+        if " ".join(argv[:2]) in POLICIES[level]["broker_commands"]:
             conn.sendall(json.dumps(wait_pr(*wait_args(argv))).encode())
             return
         cwd = req.get("cwd")
@@ -518,6 +595,26 @@ def serve(conn):
         conn.sendall(json.dumps(reply).encode())
 
 
+def listen(level):
+    """A socket listening at SOCK_DIR/<level>/gh.sock, or None when the host
+    mounted no folder for that level. Says what the level allows beyond
+    hardened, so the log records each level's effective list."""
+    folder = os.path.join(SOCK_DIR, level)
+    if not os.path.isdir(folder):
+        return None
+    path = os.path.join(folder, "gh.sock")
+    if os.path.exists(path):
+        os.unlink(path)
+    s = socket.socket(socket.AF_UNIX)
+    s.bind(path)
+    os.chmod(path, 0o660)
+    s.listen()
+    beyond = {k: sorted(POLICIES[level][k] - POLICIES["hardened"][k]) for k in LIST_KEYS}
+    beyond = {k: v for k, v in beyond.items() if v}
+    print(f"gh-broker: {level} listening on {path}, beyond hardened: {json.dumps(beyond)}", flush=True)
+    return s
+
+
 def main():
     if not os.environ.get("GH_TOKEN"):
         print("gh-broker: GH_TOKEN is not set; start it with the token's podman secret", file=sys.stderr)
@@ -525,16 +622,20 @@ def main():
     if not OWNERS or len(OWNERS) != len(_OWNER_NAMES):
         print("gh-broker: set GH_BROKER_OWNERS to the GitHub owners it may act on, comma separated (host: WORKBENCH_GH_OWNERS)", file=sys.stderr)
         sys.exit(1)
-    if os.path.exists(SOCK):
-        os.unlink(SOCK)
-    s = socket.socket(socket.AF_UNIX)
-    s.bind(SOCK)
-    os.chmod(SOCK, 0o660)
-    s.listen()
-    print("gh-broker: listening on", SOCK, flush=True)
+    if not os.path.isdir(os.path.join(SOCK_DIR, "hardened")):
+        print(f"gh-broker: no {SOCK_DIR}/hardened to listen in; the host mounts a folder per level", file=sys.stderr)
+        sys.exit(1)
+    # Each socket is registered with its level, once, here: a connection is
+    # served at the level of the socket it came in on.
+    sel = selectors.DefaultSelector()
+    for level in LEVELS:
+        s = listen(level)
+        if s is not None:
+            sel.register(s, selectors.EVENT_READ, level)
     while True:
-        conn, _ = s.accept()
-        threading.Thread(target=serve, args=(conn,), daemon=True).start()
+        for key, _ in sel.select():
+            conn, _ = key.fileobj.accept()
+            threading.Thread(target=serve, args=(conn, key.data), daemon=True).start()
 
 
 if __name__ == "__main__":

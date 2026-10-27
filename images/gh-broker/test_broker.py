@@ -101,7 +101,7 @@ cases += argv_cases
 refusal = ns["refusal"]
 why_cases = [
   ("pr create -t t --body-file /tmp/body.md", "stdin"),
-  ("auth token", "not on the allowlist"),
+  ("auth token", "never run here"), ("repo delete example-org/x", "not on the allowlist"),
   ("pr view 1 -R evil/x", "allowed owner"),
   ("search issues --owner evil", "allowed owner"),
   ("pr merge 25 --admin", "merge queue"),
@@ -109,6 +109,20 @@ why_cases = [
 ]
 bad += [(False, f"{c} (refusal should name {w!r})") for c, w in why_cases if w not in (refusal(c.split()) or "")]
 cases += [(False, c) for c, _ in why_cases]
+# Each level allows everything the one before it does, and what the code
+# refuses (owners, files, --admin, api writes) no level's override lifts.
+levels, policies = ns["LEVELS"], ns["POLICIES"]
+for before, level in zip(levels, levels[1:]):
+    if not all(policies[before][k] <= policies[level][k] for k in ns["LIST_KEYS"]):
+        bad.append((True, f"{level} allows everything {before} does"))
+    cases.append((True, level))
+always = [
+  "pr merge 25 --admin", "pr view 1 -R evil/x", "pr create -t t --body-file /proc/self/environ",
+  "api -X DELETE repos/example-org/x", "api graphql -f query=mutation{x}", "auth token",
+  "auth status --show-token", "secret list", "ssh-key list", "gpg-key list",
+]
+bad += [(False, f"{c} ({lv})") for lv in levels for c in always if ns["allowed"](c.split(), lv)]
+cases += [(False, c) for lv in levels for c in always]
 for exp, c in bad: print("WRONG", "expected", "allow" if exp else "refuse", ":", c)
 print(f"{len(cases)-len(bad)}/{len(cases)} cases as expected")
 sys.exit(1 if bad else 0)

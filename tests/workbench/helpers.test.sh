@@ -26,6 +26,8 @@ check "no key, no ssh-agent" 0 err \
   "workbench: no ${key}, so no ssh-agent; git push will not work (docs/LAYERS.md)"
 refute "none is started" "--name devcontainer-ssh-agent"
 assert "the broker's folder is private" test "$(stat -c %a "${XDG_RUNTIME_DIR}/workbench/gh")" = 700
+assert "so is each other level's" test "$(stat -c %a "${XDG_RUNTIME_DIR}/workbench-gh/unattended")" = 700
+assert "and the folder holding them" test "$(stat -c %a "${XDG_RUNTIME_DIR}/workbench-gh")" = 700
 assert "the proxy's is readable by its account" test "$(stat -c %a "${egress}")" = 755
 
 mkdir -p "$(dirname "${key}")" "${XDG_RUNTIME_DIR}/devcontainer-ssh"
@@ -37,6 +39,12 @@ check "known hosts already fetched are kept" 0 calls "podman run -d --name devco
 refute "not fetched again" "api.github.com"
 run "${wb}" helpers
 refute "helpers already running are left alone" "podman run"
+check "a broker from before levels, with no unattended socket, is named" 0 err \
+  "workbench: the gh broker running predates session levels, so an assisted or unattended session has no gh until host/workbench restart-broker"
+touch "${XDG_RUNTIME_DIR}/workbench-gh/unattended/gh.sock"
+run "${wb}" helpers
+assert "one serving every level is not" sh -c '! grep -q "predates session levels" "$1"' _ "${__scratch}/err"
+rm "${XDG_RUNTIME_DIR}/workbench-gh/unattended/gh.sock"
 
 # The proxy starts with the workspaces registered, on their networks.
 printf '10.203.4.0/24' >"${PODMAN_STATE}/net/workbench-net-app"
