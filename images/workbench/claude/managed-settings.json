@@ -3,6 +3,11 @@
   "permissions": {
     "disableBypassPermissionsMode": "disable"
   },
+  "deniedMcpServers": [
+    {
+      "serverName": "sonarqube"
+    }
+  ],
   "statusLine": {
     "type": "command",
     "command": "/usr/local/libexec/workbench/status-line",

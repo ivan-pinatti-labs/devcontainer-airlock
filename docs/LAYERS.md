@@ -1037,5 +1037,29 @@ need `sonarqube.us` hosts in a set of their own. Opening a `git worktree`
 logs a JGit "repository not found" error, harmless, since JGit cannot read
 linked worktrees; a session's independent clone does not.
 
+Since 6.0 the extension has an "AI Integrations" view that offers to wire
+the coding agents to SonarQube. Leave it alone in the workbench; what it
+would do, and what stops it:
+
+- **The SonarQube CLI.** Installing it, and registering agents through it,
+  is refused in a remote window, which is what VS Code's window into the
+  workbench is. Were it offered, it would download and run a binary in the
+  workbench itself rather than in L2, from `binaries.sonarsource.com` once
+  the `sonarqube-cloud` set is on.
+- **A SonarQube MCP server for Claude Code.** Allowed in a remote window: on
+  a click it writes a `sonarqube` entry into `~/.claude.json`, with the
+  connection's token in plain text in its `env`, and a
+  `docker run --pull=always sonarsource/sonarqube-mcp` command the workbench
+  could not run anyway. The managed settings deny a server of that name in
+  every scope (`deniedMcpServers`), so Claude Code never starts it, and the
+  image build fails if the pinned CLI stops knowing the setting. A token
+  written there is still a token on disk: revoke it in SonarQube Cloud.
+- **Codex.** The extension has no standalone MCP path for Codex, only the
+  CLI one refused above. Codex's requirements can allowlist MCP servers but
+  cannot deny one by name, so nothing is set there.
+
+Nothing turns the view off: the extension has no setting for it, and it acts
+only on a click.
+
 Keep the extensions on the host's own VS Code to the Dev Containers extension:
 anything installed there runs on the host.
