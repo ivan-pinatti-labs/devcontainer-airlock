@@ -1029,6 +1029,12 @@ LEVEL_CASES = [
     ),
     ("unattended", False, "workflow run ci.yml -R example-org/x --field=a=@f"),
     ("unattended", False, "workflow run ci.yml -R example-org/x -Fa=@f"),
+    (
+        "unattended",
+        False,
+        "workflow run ci.yml -R example-org/x -F=a=@/proc/self/environ",
+    ),
+    ("unattended", True, "workflow run ci.yml -R example-org/x -F=a=b"),
     ("unattended", False, "workflow run ci.yml -R example-org/x -F @f"),
     ("unattended", False, "workflow run ci.yml -R evil/x"),
     ("unattended", False, "workflow view ci.yml -R example-org/x"),
@@ -1332,7 +1338,11 @@ def test_an_approval_lands_on_the_commit_the_checks_were_read_on(broker, monkeyp
     assert "number=7" in asked[2] and "owner=example-org" in asked[2]
     # The base branch's own requirements, its name kept to one path segment.
     assert asked[3] == ["gh", "api", "repos/example-org/x/branches/release%2F1"]
-    assert asked[4] == ["gh", "api", "repos/example-org/x/rules/branches/release%2F1"]
+    assert asked[4] == [
+        "gh",
+        "api",
+        "repos/example-org/x/rules/branches/release%2F1?per_page=100",
+    ]
     # The body is a raw field: -f never reads a file, whatever it starts with.
     assert asked[5] == [
         "gh",
@@ -1387,6 +1397,19 @@ def test_an_approval_gh_cannot_start_for_says_so(broker, monkeypatch):
     reply = broker.bot_approval("example-org/x", 7, "checked")
     assert reply["rc"] == 1
     assert "cannot approve example-org/x#7" in reply["err"]
+
+
+def test_a_full_page_of_rules_is_not_read_as_all_of_them(broker, monkeypatch):
+    """A required check could sit on a page past the one read, so a full page
+    stops the approval rather than passing on what it holds."""
+    asked = []
+    full = json.dumps([{"type": "merge_queue", "parameters": {}}] * 100)
+    answers = [*READ, rollup(), protection("SonarQube", "Pin Only"), full]
+    monkeypatch.setattr(broker.subprocess, "run", scripted_gh(answers, asked))
+    reply = broker.bot_approval("example-org/x", 7, "checked")
+    assert reply["rc"] == 1
+    assert "main has too many rules to read" in reply["err"]
+    assert not any("POST" in a for a in asked)
 
 
 @pytest.mark.parametrize(

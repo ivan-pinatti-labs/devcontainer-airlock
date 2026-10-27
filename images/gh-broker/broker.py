@@ -404,7 +404,8 @@ def workflow_ok(argv):
         elif a.startswith("--field="):
             value = a.split("=", 1)[1]
         elif a.startswith("-F") and len(a) > 2:
-            value = a[2:]
+            # -Fkey=value, and -F=key=value, which gh reads the same way.
+            value = a[3:] if a.startswith("-F=") else a[2:]
         else:
             continue
         if value.split("=", 1)[-1].startswith("@"):
@@ -519,7 +520,12 @@ def required_checks(repo, base):
     branch = urllib.parse.quote(base, safe="")
     protection = gh_api(f"repos/{repo}/branches/{branch}").get("protection") or {}
     names = set((protection.get("required_status_checks") or {}).get("contexts") or [])
-    for rule in gh_api(f"repos/{repo}/rules/branches/{branch}"):
+    rules = gh_api(f"repos/{repo}/rules/branches/{branch}?per_page=100")
+    # One page is read; a full one may have more behind it, which could hold
+    # a required check, so it is not read as the whole set.
+    if len(rules) >= 100:
+        raise ValueError(f"{base} has too many rules to read")
+    for rule in rules:
         if rule.get("type") == "required_status_checks":
             names |= {c["context"] for c in rule["parameters"]["required_status_checks"]}
     return names

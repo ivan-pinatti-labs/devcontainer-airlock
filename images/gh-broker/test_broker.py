@@ -132,6 +132,7 @@ level_cases = [
   ("hardened", False, "workflow run ci.yml -R example-org/x"),
   ("unattended", True, "workflow run ci.yml -R example-org/x -f a=b"),
   ("unattended", False, "workflow run ci.yml -R example-org/x -F a=@/proc/self/environ"),
+  ("unattended", False, "workflow run ci.yml -R example-org/x -F=a=@/proc/self/environ"),
   ("assisted", False, "label create bug -R example-org/x"),
   ("unattended", True, "label create bug -R example-org/x"),
   ("assisted", False, "pr review 7 -R example-org/x --approve --body-file -"),

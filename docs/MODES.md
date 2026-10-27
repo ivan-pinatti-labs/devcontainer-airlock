@@ -49,14 +49,19 @@ would only stall the run, so nothing asks:
 - **Allowed, and checked by the gh broker:** approving a dependency bot's
   pull request the bot lane leaves for a person, a major bump included,
   once the agent has verified it (its tests, the upstream release notes).
-  `gh pr review N -R OWNER/REPO --approve --body-file -` is all the broker
-  takes, and it approves only a pull request `renovate[bot]` or
-  `dependabot[bot]` opened, from a branch in the same repository, whose
-  every commit is the bot's own and signed by GitHub, so nothing anyone
-  else pushed to the branch rides on the approval, and whose every check
-  the base branch requires has reported on the head commit and is green,
-  with no other check failed or still running (a cancelled run, such as a
-  superseded one, is left aside). The approval lands on that commit, so a
+  The broker takes `gh pr review` only as an approval with a body:
+  `gh pr review N -R OWNER/REPO --approve --body-file -` (or the pull
+  request's URL in place of `N -R`, `-a` for `--approve`, `--body TEXT`
+  or `-b` inline, `-F -` for `--body-file -`), and never
+  `--request-changes` or `--comment`. It approves only a pull request
+  `renovate[bot]` or `dependabot[bot]` opened, from a branch in the same
+  repository, whose every commit is the bot's own and signed by GitHub, so
+  nothing anyone else pushed to the branch rides on the approval, and
+  whose every check the base branch requires has reported on the head
+  commit and is green, with no other check failed or still running (a
+  cancelled run, such as a superseded one, is left aside). A base branch
+  that requires no check is refused, since nothing then has to have
+  passed. The approval lands on that commit, so a
   later push leaves it stale. The agent writes its body, which is meant to
   say what it verified; the broker only refuses a blank one. GitHub
   already refuses an approval of the token owner's own pull request, so an
