@@ -343,7 +343,7 @@ GATE_IMAGE="localhost/airlock-mirror-gate:${TAG}"
 # Its gate (above) is the only part clients know, so another backend is
 # another routes file and provisioning under images/mirror-gate/backends/.
 # renovate: datasource=docker depName=docker.io/sonatype/nexus3
-NEXUS_IMAGE="docker.io/sonatype/nexus3:3.97.0@sha256:772ad5badde07e15f2c25c750437fcbb01ebdb84a8c43a3ed38eda60bb6448f1"
+NEXUS_IMAGE="docker.io/sonatype/nexus3:3.97.1@sha256:ffed04698ded3565ca3b40f4abd063d59b63c2fbeb134170e095bc1197931cd5"
 MIRROR="${WORKBENCH_MIRROR:-1}"
 MIRROR_NET=workbench-net-airlock-mirror
 # The one egress proxy of the host, shared by every workspace.
