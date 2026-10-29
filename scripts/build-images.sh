@@ -53,7 +53,7 @@ PREFIX=airlock
 # renovate: datasource=docker depName=docker.io/library/registry
 REGISTRY_IMAGE=docker.io/library/registry:3@sha256:21078ecfcba8a0cd7e1a384f75b3509899661dd21823bf1da21b5a4674aaceb9
 # renovate: datasource=docker depName=docker.io/aquasec/trivy
-TRIVY_IMAGE=docker.io/aquasec/trivy:0.76.0@sha256:166061a4a15c64a94a3aab430659e2c166dc0815fbc54a222c6d56d64132f552
+TRIVY_IMAGE=docker.io/aquasec/trivy:0.76.1@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
 # renovate: datasource=docker depName=quay.io/skopeo/stable
 SKOPEO_IMAGE=quay.io/skopeo/stable:v1.21.0@sha256:8342e1e8d7b12d0bd3bf53ce8f4fde7ed876277aa8e4345f53937a505309e6b5
 
