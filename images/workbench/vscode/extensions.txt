@@ -8,7 +8,7 @@
 # trusted extension is usually found and pulled within days (docs/LAYERS.md,
 # "Extensions"). It reads the releases from the index the Extension Index
 # workflow publishes, and only the version on a line may change unattended.
-anthropic.claude-code@2.1.306
+anthropic.claude-code@2.1.308
 openai.chatgpt@26.908.40401
 ms-vscode.makefile-tools@0.12.17
 vscode-icons-team.vscode-icons@12.19.0
