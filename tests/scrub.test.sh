@@ -279,6 +279,9 @@ transcript "${claude}/todos/${in_id}-agent-${in_id}.json" "${pat}"
 # A project folder holding no transcript, only its memory: in by its name.
 transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}/memory/m.md" "${pat}"
 transcript "${claude}/projects/-other/memory/m.md" "${pat}"
+# One whose name only starts with it could be a sibling (in-x) as well as a
+# folder below it, so it is out.
+transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}-x/memory/m.md" "${pat}"
 ran_in "${codex}/sessions/2026/11/rollout-in.jsonl" "${inside}"
 ran_in "${codex}/sessions/2026/11/rollout-out.jsonl" "${HOME}"
 transcript "${claude}/history.jsonl" "${pat}"
@@ -293,7 +296,8 @@ for f in "projects/-in/${in_id}.jsonl" "file-history/${in_id}/f" "todos/${in_id}
 done
 assert "so is a Codex session that ran there" grep -q REDACTED "${codex}/sessions/2026/11/rollout-in.jsonl"
 for f in "${claude}/projects/-inside/${out_id}.jsonl" "${claude}/file-history/${out_id}/f" \
-  "${claude}/projects/-other/memory/m.md" "${codex}/sessions/2026/11/rollout-out.jsonl" "${claude}/history.jsonl"; do
+  "${claude}/projects/-other/memory/m.md" "${claude}/projects/${inside//[^A-Za-z0-9]/-}-x/memory/m.md" \
+  "${codex}/sessions/2026/11/rollout-out.jsonl" "${claude}/history.jsonl"; do
   assert "not ${f#"${HOME}"/}" grep -qF "${pat}" "${f}"
 done
 run host/scrub scan "${ctx}"

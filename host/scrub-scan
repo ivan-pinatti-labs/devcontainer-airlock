@@ -508,7 +508,7 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
             redact[n].setdefault(value, (finding["RuleID"], None, value))
     for e in entries:
         for block, material in key_blocks(texts[e.n]).items():
-            if not any(block in v for v in redact[e.n]):
+            if not any(block in f for v in redact[e.n] for f in forms(v)):
                 redact[e.n].setdefault(block, (KEY_RULE, None, material))
     for n, values in report.items():
         values -= {v for v in values if any(v in r or r in v for r in redact[n])}

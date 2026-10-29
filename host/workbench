@@ -2105,11 +2105,11 @@ cmd_scrub() {
     SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" list "$@"
     return
   fi
-  while [ "$#" -gt 0 ]; do
+  while [[ "$#" -gt 0 ]]; do
     case "$1" in
     --check | --entropy) args+=("$1") ;;
     --dir)
-      [ "$#" -gt 1 ] && [ -d "$2" ] || die "--dir takes a folder that exists"
+      [[ "$#" -gt 1 ]] && [[ -d "$2" ]] || die "--dir takes a folder that exists"
       args+=(--dir "$2")
       shift
       ;;

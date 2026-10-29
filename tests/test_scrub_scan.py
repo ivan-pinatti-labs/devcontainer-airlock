@@ -492,6 +492,7 @@ KEY_TAIL = "".join(KEY_LINES)[-4:]
         ),
         ("e.jsonl", json.dumps({"t": KEY}, ensure_ascii=True) + "\n"),
         ("f.txt", KEY.replace("\n", "\r\n")),
+        ("g.jsonl", line(t=KEY.replace("\n", "\r\n")) + "\n"),
     ],
 )
 def test_a_private_key_is_redacted_however_it_is_escaped(w, gitleaks, rel, text):
@@ -564,11 +565,12 @@ def test_a_key_named_in_prose_is_no_key(w, gitleaks, monkeypatch, capsys):
     assert scrub.key_blocks(prose) == {}
 
 
-def test_a_key_is_found_once_when_a_known_secret_holds_it(w, gitleaks):
+@pytest.mark.parametrize("escaped", [False, True])
+def test_a_key_is_found_once_when_a_known_secret_holds_it(w, gitleaks, escaped):
     w.known("ssh-key", KEY)
-    n = w.add("a.md", KEY)
+    n = w.add("a.jsonl", line(t=KEY) + "\n") if escaped else w.add("a.md", KEY)
     w.run(gitleaks)
-    assert w.redacted(n) == f"[REDACTED:ssh-key:...{KEY[-4:]}]"
+    assert f"[REDACTED:ssh-key:...{KEY[-4:]}]" in w.redacted(n)
     assert [e["rule"] for e in w.ledger()["entries"]] == ["ssh-key"]
 
 
