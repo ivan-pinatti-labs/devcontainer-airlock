@@ -57,6 +57,7 @@ workbench-help:
 		'  unlock                      Unlock the ssh key for git push, for 12 hours (HOURS= up to 48).' \
 		'  scrub                       Find secrets the agents wrote into their history, redact them, list those not rotated.' \
 		'  scrub-check                 A dry run: what scrub would redact or leave, changing nothing (ENTROPY=1: every random string).' \
+		'                              Both take SCRUB_DIR=<folder>: only the conversations that ran there or below it.' \
 		'  scrub-list                  The secrets not rotated yet, as a table (ALL=1: rotated too; FILES=1: where).' \
 		'  scrub-rotated ID=<n>        Mark secret <n> of that list rotated (several: ID="3 5"; every one: ID=all).' \
 		'  workbench-up                Start this repository workbenches and L2 engine, and the shared services.' \
@@ -128,6 +129,9 @@ unlock:
 ID ?=
 # ENTROPY=1: list each random looking string rather than their count.
 ENTROPY ?=
+# SCRUB_DIR=<folder>: only the conversations that ran there or below it.
+# Not DIR, which a repository's own Makefile may well set.
+SCRUB_DIR ?=
 # scrub-list: ALL=1 shows the rotated secrets too, FILES=1 the files each was
 # in; only the value 1 counts, so a repository's own ALL or FILES does not.
 ALL ?=
@@ -135,12 +139,12 @@ FILES ?=
 # $(call scrub_flag,VALUE,FLAG): FLAG when VALUE is exactly 1, nothing otherwise
 # (not for "1 2", say).
 scrub_flag = $(if $(filter 1,$(1)),$(if $(word 2,$(1)),,$(2)))
-export ID
+export ID SCRUB_DIR
 scrub:
-	@$(WORKBENCH) scrub $(if $(ENTROPY),--entropy)
+	@$(WORKBENCH) scrub $(if $(ENTROPY),--entropy) $(if $(SCRUB_DIR),--dir "$$SCRUB_DIR")
 
 scrub-check:
-	@$(WORKBENCH) scrub --check $(if $(ENTROPY),--entropy)
+	@$(WORKBENCH) scrub --check $(if $(ENTROPY),--entropy) $(if $(SCRUB_DIR),--dir "$$SCRUB_DIR")
 
 scrub-list:
 	@$(WORKBENCH) scrub list $(call scrub_flag,$(ALL),--all) $(call scrub_flag,$(FILES),--files)
