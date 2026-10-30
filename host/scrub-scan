@@ -24,7 +24,7 @@ decoded, so a rule sees `api_key: "..."` rather than its escaped form. A
 hit from a rule in REPORT_ONLY is reported, never redacted or kept.
 """
 
-# cspell:words argparse isdigit ljust CREAT fdopen findall finditer fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
+# cspell:words argparse isdigit ljust CREAT fdopen findall finditer fromhex fullmatch hashlib hexdigest hmac HMACs nistp iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
 from __future__ import annotations
 
 import argparse
@@ -48,6 +48,13 @@ GITLEAKS = "/gitleaks/usr/bin/gitleaks"
 # Long random looking strings with no known format: reported until their
 # hits on real history are measured (make scrub-check), never redacted.
 REPORT_ONLY = {"generic-high-entropy"}
+# What a report only hit is when this comes right before it, wherever it is
+# in the file (a JSON key at any escaping depth): an event, node or tool use
+# id, a policy statement id, a key fingerprint or a public key. Measured on
+# real history, where these were most of the hits.
+BENIGN_BEFORE = re.compile(
+    r"(?:(?:event_id|node_id|tool_use_id|Sid)\\*\"?\s*[:=]\s*\\*\"?|SHA256:|ssh-(?:ed25519|rsa|dss) |ecdsa-sha2-nistp\d+ )\Z"
+)
 # Shorter hits are noise; a secret this long or longer keeps its last four
 # characters in its placeholder, so a rotation can be checked against it.
 MIN_LENGTH = 8
@@ -519,7 +526,14 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
             redact[e.n].setdefault(block, hit)
     for n, values in report.items():
         values -= {v for v in values if any(v in r or r in v for r in redact[n])}
+        values -= {v for v in values if benign(texts[n], v)}
     return redact, report
+
+
+def benign(text: str, value: str) -> bool:
+    """A report only hit that is an identifier everywhere the file holds it."""
+    starts = [m.start() for m in re.finditer(re.escape(value), text)]
+    return bool(starts) and all(BENIGN_BEFORE.search(text[max(0, i - 40) : i]) for i in starts)
 
 
 def redacted(text: str, found: dict[str, tuple[str, str | None, str]]) -> tuple[str, list[str]]:

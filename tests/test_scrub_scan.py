@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA lastindex MIIE NOEQUALS surrogateescape
+# cspell:words AKIA lastindex changeme maa MIIE NOEQUALS Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -16,9 +16,10 @@ import json
 import os
 import re
 import sys
+import tomllib
 
 import pytest
-from conftest import load
+from conftest import REPO_ROOT, load
 
 scrub = load("host/scrub-scan", "scrub_scan")
 
@@ -379,6 +380,26 @@ def test_report_only_hits_are_reported_on_manual_runs_only(w, gitleaks, capsys):
     assert f"generic-high-entropy ...{loud[-4:]}" in printed
     assert "ENTROPY=1 (or --entropy) lists them" not in printed
     assert all(e["rule"] != "generic-high-entropy" for e in w.ledger()["entries"])
+
+
+def test_report_only_identifiers_are_not_reported(w, gitleaks, capsys):
+    base = "ZZq7Rk2LmP9xW4vT8sN1bH6cJ3fD5g"  # pragma: allowlist secret
+    ids = [base + c * 4 for c in "abcdefg"]
+    w.add(
+        "a.jsonl",
+        line(event_id=ids[0], node_id=ids[1])
+        + "\n"
+        # A tool output holding JSON, escaped once more.
+        + line(t=json.dumps({"tool_use_id": ids[2], "Sid": ids[3]}))
+        + "\n"
+        + transcript(f"256 SHA256:{ids[4]} key", f"github.com ssh-ed25519 {ids[5]}"),
+    )
+    # The same value is an identifier in one place and not in another.
+    w.add("b.jsonl", line(event_id=ids[6]) + "\n" + transcript(f"value {ids[6]}"))
+    w.run(gitleaks, "--manual", "--entropy")
+    printed = capsys.readouterr().out
+    assert printed.count("a random looking string") == 1
+    assert f"...{ids[6][-4:]} in " in printed and "b.jsonl" in printed
 
 
 def test_no_report_only_hits_no_count(w, gitleaks, capsys):
@@ -887,3 +908,86 @@ def test_its_folders_are_fixed_not_given():
     assert os.path.basename(scrub.GITLEAKS) == "gitleaks"
     with pytest.raises(SystemExit):
         scrub.main(["scan", "--work", "/elsewhere"])
+
+
+# The rules of host/scrub-gitleaks.toml this repository adds, applied with
+# Python's re as gitleaks applies them with Go's (the same syntax for these):
+# the secret group, then the rule's allowlist on the secret. The real
+# gitleaks runs them in docs/SCRUB.md, Testing.
+
+GITLEAKS_RULES = {
+    r["id"]: r
+    for r in tomllib.loads((REPO_ROOT / "host/scrub-gitleaks.toml").read_text())[
+        "rules"
+    ]
+}
+
+
+def rule_hits(rule_id: str, text: str) -> list[str]:
+    rule = GITLEAKS_RULES[rule_id]
+    allow = [re.compile(p) for a in rule.get("allowlists", []) for p in a["regexes"]]
+    found = [m.group(rule["secretGroup"]) for m in re.finditer(rule["regex"], text)]
+    return [s for s in found if not any(a.search(s) for a in allow)]
+
+
+@pytest.mark.parametrize(
+    "text, secret",
+    [
+        (
+            'REDIS_PASSWORD="j6^kL9!mQ2#wE5"',  # pragma: allowlist secret
+            "j6^kL9!mQ2#wE5",
+        ),
+        ("export PGPASSWORD=Tr0ub4dor&3x", "Tr0ub4dor&3x"),  # pragma: allowlist secret
+        ("db_pwd: 'p@ss w0rd'", "p@ss"),  # pragma: allowlist secret
+        ("password: hunter22", "hunter22"),  # pragma: allowlist secret
+        ("admin_password := Zx81-Spectrum", "Zx81-Spectrum"),
+    ],
+)
+def test_a_password_is_found_whatever_it_holds(text, secret):
+    hits = rule_hits("password-assignment", text)
+    if len(secret) < 8:
+        assert hits == []
+    else:
+        assert hits == [secret]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "PGPASSWORD=$(aws rds generate-db-auth-token)",
+        "password: ${DB_PASSWORD}",
+        "password = getpass()",
+        "password=os.environ['X']",
+        "password = self.password",
+        "password = new_password",
+        "password: newPassword",
+        "PASSWORD=REQUIRED",
+        "password: ********",
+        "password: <your password>",
+        "password: [REDACTED:password-assignment:...wE5x]",
+        "password_file: /run/secrets/db",
+        "password_url: https://vault.example/x",
+        "password: changeme",
+        "a password is hard",
+    ],
+)
+def test_a_reference_or_placeholder_is_no_password(text):
+    assert rule_hits("password-assignment", text) == []
+
+
+@pytest.mark.parametrize(
+    "hash_",
+    [
+        "$2y$10$"
+        + "N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",  # pragma: allowlist secret
+        "$6$rounds=5000$saltsalt$" + "a" * 86,
+        "$5$saltsalt$" + "B" * 43,
+        "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$RdescudvJCsgt3ub+b+dWRWJTmaaJObG",  # pragma: allowlist secret
+    ],
+)
+def test_a_password_hash_is_found(hash_):
+    assert rule_hits("password-hash", f'"user@example.com","{hash_}",') == [hash_]
+
+
+def test_a_dollar_amount_is_no_password_hash():
+    assert rule_hits("password-hash", "it costs $2 or $10, $5 each") == []

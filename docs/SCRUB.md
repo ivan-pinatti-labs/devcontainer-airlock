@@ -1,6 +1,6 @@
 # Secret scan
 
-<!-- cspell:words gitleaks HMAC MIIE showsecret -->
+<!-- cspell:words gitleaks changeme getpass HMAC MIIE showsecret -->
 
 Agents sometimes print a token or a key in a tool output, and it stays on
 disk in plain text, in their transcripts and the files beside them. The
@@ -185,12 +185,32 @@ redacted by the first scan after its session ends.
    start with the same line) is neither's: it stays a `private-key` entry
    until `make scrub-rotated ID=<n>` takes it off, once both keys are
    rotated.
+
+   Two rules of `host/scrub-gitleaks.toml` close what tier 3 showed on real
+   history:
+
+   - `password-assignment`: a value given to a name that ends in
+     `password`, `passwd` or `pwd` (`REDIS_PASSWORD="..."`,
+     `db_pwd: ...`), whatever characters it holds. gitleaks' generic rule
+     wants token characters, so a password with `^` or `!` went by. A
+     reference is no password: a variable (`$X`, `${X}`), a call or an
+     identifier in code (`getpass()`, `self.password`, `newPassword`), a
+     path or URL, a placeholder (`********`, `<...>`, `changeme`). So is a
+     value of lowercase letters only, which a weak password can be too.
+   - `password-hash`: a crypt(3) hash (bcrypt `$2y$...`, sha256crypt,
+     sha512crypt, argon2). Not the password, but it can be cracked offline.
 3. **Long random looking strings** with no known format
    (`generic-high-entropy` in `host/scrub-gitleaks.toml`): **reported only**,
    on `make scrub` and `make scrub-check` as one count (`ENTROPY=1` lists each
    one), and never redacted or kept in the ledger. Run
    `make scrub-check ENTROPY=1` over your history and look at what it lists;
-   making this tier redact is a decision for after that.
+   making this tier redact is a decision for after that. A string is not
+   counted when everywhere the file holds it, it comes right after an
+   `event_id`, `node_id`, `tool_use_id` or `Sid` key, `SHA256:` (a key
+   fingerprint) or a public key type such as `ssh-ed25519`: on real
+   history those were most of the hits. Still counted, and harmless: AWS
+   resource ids and ARNs, and URL encoded one time values (an OAuth
+   `state`).
 
 gitleaks reads a view of each file in which every JSON string is decoded and
 written beside its key, so a rule sees `api_key: "..."` rather than its
@@ -270,6 +290,10 @@ l2 --engine -- podman run --rm --network=none -v "$PWD/fixture:/w:Z" \
   docker.io/zricethezav/gitleaks:v8.30.1 dir /w --config /w/scrub-gitleaks.toml \
   --max-decode-depth 0 --report-format json --report-path -
 ```
+
+The two password rules this repository adds are also held to their cases in
+`tests/test_scrub_scan.py`, with Python's `re` standing in for Go's (the
+same syntax for them), and were run the same way through the real gitleaks.
 
 ## Limits
 
