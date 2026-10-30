@@ -173,7 +173,13 @@ redacted by the first scan after its session ends.
    of key material that mixes cases and digits. A header named in prose,
    or an example such as `MIIE...`, is no key. Part of a key (the first
    lines of one) is redacted too. The ledger knows a key by its material,
-   so the same key written two ways is one secret.
+   so the same key written two ways is one secret. A key block that is all
+   or part of one key the host holds (the ssh key, a value in
+   `WORKBENCH_SCRUB_SECRETS`) is that key's entry, taken off on its own once
+   the key changes. Part that two held keys share (keys of one type can
+   start with the same line) is neither's: it stays a `private-key` entry
+   until `make scrub-rotated ID=<n>` takes it off, once both keys are
+   rotated.
 3. **Long random looking strings** with no known format
    (`generic-high-entropy` in `host/scrub-gitleaks.toml`): **reported only**,
    on `make scrub` and `make scrub-check` as one count (`ENTROPY=1` lists each
