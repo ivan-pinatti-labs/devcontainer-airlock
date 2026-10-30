@@ -122,8 +122,10 @@ list_files() {
 # The files of the conversations that ran in $1 or below it (--dir), from
 # the listing, which they keep their order in. A Claude Code project folder
 # is in when a transcript in it says it ran there (or, holding no
-# transcript, when its name is the one Claude Code gives that very folder:
-# the name of one below it cannot be told from a sibling's), with
+# transcript, when its name is the one Claude Code gives that folder, or
+# starts with it and a dash: the folder it ran in is often gone or moved
+# by then, so the name is all there is, and a sibling whose name starts the
+# same is in too), with
 # the files elsewhere in the home named for its conversations; a Codex
 # session is in when it says so in its first lines. Files every
 # conversation shares (history.jsonl, paste-cache, logs) are out: a scan
@@ -147,7 +149,7 @@ dir_files() {
       cwd="$(find "${p}" -maxdepth 1 -name '*.jsonl' -exec grep -o -h -m1 '"cwd":"[^"]*"' {} + 2>/dev/null | sort -u)" || true
       if [[ -n "${cwd}" ]]; then
         while IFS= read -r c; do under "${c}" "${dir}" && break; done <<<"${cwd}" || continue
-      elif [[ "${p##*/}" != "${name}" ]]; then
+      elif [[ "${p##*/}" != "${name}" ]] && [[ "${p##*/}" != "${name}-"* ]]; then
         continue
       fi
       printf 'd\t%s/\n' "${p}" >>"${WORK}/in"

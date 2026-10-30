@@ -55,7 +55,12 @@ against what each conversation recorded:
 
 - A Claude Code project folder is in when a transcript in it says it ran
   there (its `cwd`), or, holding no transcript (only its memory, say), when
-  its name is the one Claude Code gives that folder. Then all of it is in,
+  its name is the one Claude Code gives that folder or one below it. Claude
+  Code deletes transcripts after 30 days and keeps the memory, and by then
+  the folder may be gone or moved, so the name is all there is to go by. A
+  name cannot tell a folder below from a sibling whose name starts the
+  same (`app-old` beside `app`), so such a sibling's memory is in too. Then
+  all of it is in,
   with the files elsewhere in that home named for its conversations
   (`file-history/`, `todos/`, `debug/`).
 - A Codex session is in when its first lines say it ran there.
