@@ -565,13 +565,38 @@ def test_a_key_named_in_prose_is_no_key(w, gitleaks, monkeypatch, capsys):
     assert scrub.key_blocks(prose) == {}
 
 
-@pytest.mark.parametrize("escaped", [False, True])
-def test_a_key_is_found_once_when_a_known_secret_holds_it(w, gitleaks, escaped):
+@pytest.mark.parametrize(
+    "rel, text",
+    [
+        ("a.md", KEY),
+        ("b.jsonl", line(t=KEY) + "\n"),
+        # Inside a JSON string inside a JSON string, which no form of the
+        # value matches: found as a block, and known by its material.
+        ("c.jsonl", line(t=json.dumps({"output": KEY})) + "\n"),
+    ],
+)
+def test_a_key_is_found_once_when_a_known_secret_holds_it(w, gitleaks, rel, text):
     w.known("ssh-key", KEY)
-    n = w.add("a.jsonl", line(t=KEY) + "\n") if escaped else w.add("a.md", KEY)
+    n = w.add(rel, text)
     w.run(gitleaks)
     assert f"[REDACTED:ssh-key:...{KEY[-4:]}]" in w.redacted(n)
+    assert all(x not in w.redacted(n) for x in KEY_LINES)
     assert [e["rule"] for e in w.ledger()["entries"]] == ["ssh-key"]
+
+
+def test_known_key_with_separate_partial_copy(w, gitleaks, capsys):
+    w.known("ssh-key", KEY)
+    part = "\n".join([BEGIN, *KEY_LINES[:2]])
+    n = w.add(
+        "a.jsonl",
+        line(t=f"cat id\n{KEY}\n") + "\n" + line(t=f"head -3 id\n{part}\n") + "\n",
+    )
+    w.run(gitleaks, "--manual")
+    out = w.redacted(n)
+    assert all(x not in out for x in KEY_LINES) and "BEGIN OPENSSH" not in out
+    assert [e["rule"] for e in w.ledger()["entries"]] == ["ssh-key"]
+    assert w.actions()[-2:] == ["replace 1", f"done 1 {len(out.encode())}"]
+    assert "cannot be redacted in" not in capsys.readouterr().out
 
 
 # The ledger.
