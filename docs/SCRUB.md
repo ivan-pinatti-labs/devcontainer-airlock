@@ -193,13 +193,16 @@ redacted by the first scan after its session ends.
      `password`, `passwd` or `pwd` (`REDIS_PASSWORD="..."`,
      `db_pwd: ...`), whatever characters it holds. gitleaks' generic rule
      wants token characters, so a password with `^` or `!` went by. A
-     quoted value is taken whole, up to its closing quote, spaces and all
-     (`password-assignment-quoted`); a template (`"${X}"`, `'{{ x }}'`,
-     `"<x>"`) and a value already redacted are not. A
-     reference is no password: a variable (`$X`, `${X}`), a call or an
-     identifier in code (`getpass()`, `self.password`, `newPassword`), a
-     path or URL, a placeholder (`********`, `<...>`, `changeme`). So is a
-     value of lowercase letters only, which a weak password can be too.
+     quoted value is taken whole, up to its own closing quote, spaces and
+     the other kind of quote included (`password-assignment-quoted` for
+     double quotes, `password-assignment-single-quoted` for single); a
+     template (`"${X}"`, `'$(...)'`, `'{{ x }}'`, `"<x>"`) and a value
+     already redacted are not. A reference is no password: a variable
+     (`$X`, `${X}`; a value that only starts with `$` still is one), a call
+     or an identifier in code (`getpass()`, `self.password`,
+     `newPassword`), a path or URL, a placeholder (`********`, `<...>`,
+     `changeme`). So is a value of lowercase letters only, which a weak
+     password can be too.
    - `password-hash`: a crypt(3) hash (bcrypt `$2y$...`, sha256crypt,
      sha512crypt, argon2). Not the password, but it can be cracked offline.
 3. **Long random looking strings** with no known format

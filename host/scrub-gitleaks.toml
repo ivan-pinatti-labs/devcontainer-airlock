@@ -16,8 +16,9 @@ useDefault = true
 # token characters, so a password with ^ or ! in it went by. No "generic"
 # in the id, which gitleaks drops when another rule finds the same value.
 # A reference rather than a value (a variable, a placeholder, an
-# identifier in code) is no password. A quoted value is the next rule's,
-# taken whole up to its closing quote, spaces and all.
+# identifier in code) is no password; a value that only starts with $ is.
+# A quoted value is one of the next two rules', taken whole up to its own
+# closing quote, spaces, punctuation and the other kind of quote included.
 [[rules]]
 id = "password-assignment"
 description = "A value given to a password"
@@ -28,7 +29,7 @@ secretGroup = 1
 description = "References and placeholders, not passwords"
 regexTarget = "secret"
 regexes = [
-  '''^\$''',
+  '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
   '''^\*+$''',
   '''^[a-z]+://''',
   '''^[~.]?/''',
@@ -39,23 +40,53 @@ regexes = [
   '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
 ]
 
-# The same for a quoted value, which runs to its closing quote; the quotes
-# stay outside the value, so the allowlist sees what the next one sees.
-# Also a template (${X}, {{ x }}, <x>) and a value already redacted.
+# A double quoted value, up to its closing double quote; the quotes stay
+# outside the value, so the allowlist sees what the first rule's sees.
+# Also a template ($X, ${X}, $(...), {{ x }}, <x>) and a value already
+# redacted.
 [[rules]]
 id = "password-assignment-quoted"
-description = "A quoted value given to a password"
-regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*["']([^"'\n]{8,200})["']'''
+description = "A double quoted value given to a password"
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*"([^"\n]{8,200})"'''
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "References and placeholders, not passwords"
+description = "References, templates and placeholders, not passwords"
 regexTarget = "secret"
 regexes = [
-  '''^\$''',
-  '''^\{\{''',
+  '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
+  '''^\$\{.*\}$''',
+  '''^\$\(.*\)$''',
+  '''^\{\{.*\}\}$''',
   '''^<[^>]*>$''',
-  '''^\[REDACTED''',
+  '''^\[REDACTED:[a-z0-9:-]+(?::\.\.\.[^\]]{4})?\]$''',
+  '''^\*+$''',
+  '''^[a-z]+://''',
+  '''^[~.]?/''',
+  '''^[a-z_]+$''',
+  '''^[A-Z_]+$''',
+  '''^[a-z]+(?:[A-Z][a-z0-9]*)+$''',
+  '''^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$''',
+  '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
+]
+
+# The same for a single quoted value, up to its closing single quote.
+[[rules]]
+id = "password-assignment-single-quoted"
+description = "A single quoted value given to a password"
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*'([^'\n]{8,200})''''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "References, templates and placeholders, not passwords"
+regexTarget = "secret"
+regexes = [
+  '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
+  '''^\$\{.*\}$''',
+  '''^\$\(.*\)$''',
+  '''^\{\{.*\}\}$''',
+  '''^<[^>]*>$''',
+  '''^\[REDACTED:[a-z0-9:-]+(?::\.\.\.[^\]]{4})?\]$''',
   '''^\*+$''',
   '''^[a-z]+://''',
   '''^[~.]?/''',

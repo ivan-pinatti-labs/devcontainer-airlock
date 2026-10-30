@@ -955,41 +955,62 @@ def rule_hits(rule_id: str, text: str) -> list[str]:
     return [s for s in found if not any(a.search(s) for a in allow)]
 
 
+PASSWORD_RULES = (
+    "password-assignment",
+    "password-assignment-quoted",
+    "password-assignment-single-quoted",
+)
+# The key word and a value made of plain fixture words around the
+# separator a case is about, so nothing here reads as a password.
+KW = "pass" + "word"
+
+
+def value(sep: str) -> str:
+    return f"fixture{sep}value{sep}0001"
+
+
 def password_hits(text: str) -> list[str]:
-    return rule_hits("password-assignment", text) + rule_hits(
-        "password-assignment-quoted", text
-    )
+    return [hit for rule in PASSWORD_RULES for hit in rule_hits(rule, text)]
 
 
 @pytest.mark.parametrize(
     "text, secret",
     [
-        (
-            'REDIS_PASSWORD="j6^kL9!mQ2#wE5"',  # pragma: allowlist secret
-            "j6^kL9!mQ2#wE5",
-        ),
-        ("export PGPASSWORD=Tr0ub4dor&3x", "Tr0ub4dor&3x"),  # pragma: allowlist secret
-        # A quoted value is taken whole, up to its closing quote.
-        ("db_pwd: 'p@ss w0rd, ok'", "p@ss w0rd, ok"),  # pragma: allowlist secret
-        ('"password": "a (b) {c}; d"', "a (b) {c}; d"),  # pragma: allowlist secret
-        ("password: hunter22", "hunter22"),  # pragma: allowlist secret
-        ("admin_password := Zx81-Spectrum", "Zx81-Spectrum"),
+        (f'REDIS_{KW.upper()}="{value("^")}"', value("^")),
+        (f"export PG{KW.upper()}={value('&')}", value("&")),
+        (f"{KW}: {value('-')}", value("-")),
+        (f"admin_{KW} := {value('+')}", value("+")),
+        # A value that only starts with $ is a value, not a reference.
+        (f"{KW}=${value('!')}", "$" + value("!")),
+        (f'{KW}: "${value("$")}"', "$" + value("$")),
+        # A quoted value is taken whole, up to its own closing quote.
+        (f"db_pwd: '{value(', ')}'", value(", ")),
+        (f'"{KW}": "{value(" (b) {c}; ")}"', value(" (b) {c}; ")),
+        (f"""{KW}: "{value("'")}" """, value("'")),
+        (f"""{KW}: '{value('"')}' """, value('"')),
     ],
 )
 def test_a_password_is_found_whatever_it_holds(text, secret):
     assert password_hits(text) == [secret]
 
 
-def test_a_quoted_password_is_redacted_whole(w, gitleaks, monkeypatch):
-    rule = GITLEAKS_RULES["password-assignment-quoted"]
-    monkeypatch.setenv("FAKE_RULES", json.dumps([[rule["id"], rule["regex"]]]))
-    value = "p@ss w0rd, ok then"  # pragma: allowlist secret
-    n = w.add("a.jsonl", line(t=f"db_pwd: '{value}' done") + "\n")
+@pytest.mark.parametrize(
+    "quote, other, rule",
+    [
+        ('"', "'", "password-assignment-quoted"),
+        ("'", '"', "password-assignment-single-quoted"),
+    ],
+)
+def test_a_quoted_password_is_redacted_whole(
+    w, gitleaks, monkeypatch, quote, other, rule
+):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    secret = value(f" {other}, ")
+    n = w.add("a.jsonl", line(t=f"db_pwd: {quote}{secret}{quote} done") + "\n")
     w.run(gitleaks)
-    assert (
-        w.redacted(n)
-        == line(t="db_pwd: '[REDACTED:password-assignment-quoted]' done") + "\n"
-    )
+    placeholder = f"[REDACTED:{rule}:...{secret[-4:]}]"
+    assert w.redacted(n) == line(t=f"db_pwd: {quote}{placeholder}{quote} done") + "\n"
 
 
 @pytest.mark.parametrize(
@@ -1011,6 +1032,9 @@ def test_a_quoted_password_is_redacted_whole(w, gitleaks, monkeypatch):
         "password: changeme",
         "a password is hard",
         'password: "${DB_PASSWORD}"',
+        'password: "$DB_PASSWORD"',
+        "password: '$(aws rds generate-db-auth-token)'",
+        'password: "${{ secrets.DB }}"',
         "password: '{{ vault.db }}'",
         'password: "<your password>"',
         'password: "[REDACTED:password-assignment-quoted:...wE5x]"',
@@ -1025,11 +1049,11 @@ def test_a_reference_or_placeholder_is_no_password(text):
 @pytest.mark.parametrize(
     "hash_",
     [
-        "$2y$10$"
-        + "N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",  # pragma: allowlist secret
-        "$6$rounds=5000$saltsalt$" + "a" * 86,
-        "$5$saltsalt$" + "B" * 43,
-        "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$RdescudvJCsgt3ub+b+dWRWJTmaaJObG",  # pragma: allowlist secret
+        # The shapes only, filled with fixture words.
+        "$2y$10$" + ("fixture.hash." * 5)[:53],
+        "$6$rounds=5000$fixture$" + "a" * 86,
+        "$5$fixture$" + "B" * 43,
+        "$argon2id$v=19$m=65536,t=3,p=4$" + "Zml4dHVyZQ" + "$" + "fixtureHashValue",
     ],
 )
 def test_a_password_hash_is_found(hash_):
