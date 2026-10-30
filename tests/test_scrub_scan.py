@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA fixt lastindex changeme maa MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme maa MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -1050,6 +1050,25 @@ def test_a_quoted_password_is_known_by_its_value(
     assert w.redacted(n) == f'{KW}="{placeholder}"\nit was {placeholder} then\n'
     (entry,) = w.ledger()["entries"]
     assert entry["tail"] == tail
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A shell keeps the backslash in single quotes: two values, not one.
+        f"{KW}='fixture\\value-0001'\n{KW}='fixturevalue-0001'\n",
+        # \n is a newline in Python and two characters in a shell: neither
+        # is guessed, so it is not merged with an n.
+        f'{KW}="fixture\\nvalue-0001"\n{KW}="fixturenvalue-0001"\n',
+    ],
+)
+def test_only_the_values_own_quote_is_unescaped(w, gitleaks, monkeypatch, text):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    n = w.add("notes.md", text)
+    w.run(gitleaks)
+    assert len(w.ledger()["entries"]) == 2
+    assert "fixture" not in w.redacted(n)
 
 
 @pytest.mark.parametrize(

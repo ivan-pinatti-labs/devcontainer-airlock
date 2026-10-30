@@ -69,10 +69,12 @@ TAIL_SAFE = re.compile(r"[A-Za-z0-9+/=_.-]{4}")
 # which no file holds as it is: its hits are left out, and this is matched
 # against the file itself.
 KEY_RULE = "private-key"
-# Rules whose value is quoted and may hold backslash escapes (\" in a
-# double quoted value, say): host/scrub-gitleaks.toml.
-QUOTED = {"password-assignment-quoted", "password-assignment-single-quoted"}
-BACKSLASH_PAIR = re.compile(r"\\(.)")
+# Rules whose value is quoted and may hold its own quote escaped (\" in a
+# double quoted value, \' in a single quoted one): host/scrub-gitleaks.toml.
+# Only that escape is undone. What any other backslash means depends on
+# the language (a newline in Python, a backslash in a shell), so it is
+# left as written.
+QUOTED = {"password-assignment-quoted": '"', "password-assignment-single-quoted": "'"}
 KEY_NEWLINE = r"(?:\\+[rn]|[\r\n])+(?:[ \t]*\d+(?:\u2192|\\+u2192|\t|\\+t))?"
 KEY_BLOCK = re.compile(
     r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----"
@@ -516,10 +518,11 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
         if finding["RuleID"] in REPORT_ONLY:
             report[n].add(value)
         elif finding["RuleID"] in QUOTED:
-            # Known by its value with the escapes undone (its tail and its
-            # length for showing one too), and redacted in that spelling
-            # as well, wherever the file holds it so.
-            plain = BACKSLASH_PAIR.sub(r"\1", value)
+            # Known by its value with its own quote unescaped (its tail and
+            # its length for showing one too), and redacted in that
+            # spelling as well, wherever the file holds it so.
+            quote = QUOTED[finding["RuleID"]]
+            plain = value.replace("\\" + quote, quote)
             redact[n].setdefault(value, (finding["RuleID"], None, plain))
             if plain != value and any(f in texts[n] for f in forms(plain)):
                 redact[n].setdefault(plain, (finding["RuleID"], None, plain))
