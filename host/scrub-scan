@@ -53,7 +53,7 @@ REPORT_ONLY = {"generic-high-entropy"}
 # id, a policy statement id, a key fingerprint or a public key. Measured on
 # real history, where these were most of the hits.
 BENIGN_BEFORE = re.compile(
-    r"(?:(?:event_id|node_id|tool_use_id|Sid)\\*\"?\s*[:=]\s*\\*\"?|SHA256:|ssh-(?:ed25519|rsa|dss) |ecdsa-sha2-nistp\d+ )\Z"
+    r"(?:(?<![A-Za-z0-9_])(?:event_id|node_id|tool_use_id|Sid)\\*\"?\s*[:=]\s*\\*\"?|SHA256:|ssh-(?:ed25519|rsa|dss) |ecdsa-sha2-nistp\d+ )\Z"
 )
 # Shorter hits are noise; a secret this long or longer keeps its last four
 # characters in its placeholder, so a rotation can be checked against it.

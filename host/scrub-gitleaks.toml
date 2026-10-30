@@ -16,11 +16,12 @@ useDefault = true
 # token characters, so a password with ^ or ! in it went by. No "generic"
 # in the id, which gitleaks drops when another rule finds the same value.
 # A reference rather than a value (a variable, a placeholder, an
-# identifier in code) is no password.
+# identifier in code) is no password. A quoted value is the next rule's,
+# taken whole up to its closing quote, spaces and all.
 [[rules]]
 id = "password-assignment"
 description = "A value given to a password"
-regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*["']?([^\s"'\\(){}\[\],;<>`]{8,200})'''
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*([^\s"'\\(){}\[\],;<>`]{8,200})'''
 secretGroup = 1
 
 [[rules.allowlists]]
@@ -28,6 +29,33 @@ description = "References and placeholders, not passwords"
 regexTarget = "secret"
 regexes = [
   '''^\$''',
+  '''^\*+$''',
+  '''^[a-z]+://''',
+  '''^[~.]?/''',
+  '''^[a-z_]+$''',
+  '''^[A-Z_]+$''',
+  '''^[a-z]+(?:[A-Z][a-z0-9]*)+$''',
+  '''^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$''',
+  '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
+]
+
+# The same for a quoted value, which runs to its closing quote; the quotes
+# stay outside the value, so the allowlist sees what the next one sees.
+# Also a template (${X}, {{ x }}, <x>) and a value already redacted.
+[[rules]]
+id = "password-assignment-quoted"
+description = "A quoted value given to a password"
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*["']([^"'\n]{8,200})["']'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "References and placeholders, not passwords"
+regexTarget = "secret"
+regexes = [
+  '''^\$''',
+  '''^\{\{''',
+  '''^<[^>]*>$''',
+  '''^\[REDACTED''',
   '''^\*+$''',
   '''^[a-z]+://''',
   '''^[~.]?/''',

@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA lastindex changeme maa MIIE NOEQUALS Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA lastindex changeme maa MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -400,6 +400,31 @@ def test_report_only_identifiers_are_not_reported(w, gitleaks, capsys):
     printed = capsys.readouterr().out
     assert printed.count("a random looking string") == 1
     assert f"...{ids[6][-4:]} in " in printed and "b.jsonl" in printed
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        "ssh-ed25519 ",
+        "ssh-rsa ",
+        "ssh-dss ",
+        "ecdsa-sha2-nistp256 ",
+        "SHA256:",
+        '"Sid":"',
+        "event_id: ",
+    ],
+)
+def test_each_identifier_context_is_benign(before):
+    value = "ZZq7Rk2LmP9xW4vT8sN1bH6cJ3fD5gab"  # pragma: allowlist secret
+    assert scrub.benign(f"x {before}{value} y", value)
+
+
+@pytest.mark.parametrize(
+    "before", ['"passwordSid":"', "my_event_id: ", "ssh-other ", "nistp256 "]
+)
+def test_a_near_miss_is_not_benign(before):
+    value = "ZZq7Rk2LmP9xW4vT8sN1bH6cJ3fD5gab"  # pragma: allowlist secret
+    assert not scrub.benign(f"x {before}{value} y", value)
 
 
 def test_no_report_only_hits_no_count(w, gitleaks, capsys):
@@ -930,6 +955,12 @@ def rule_hits(rule_id: str, text: str) -> list[str]:
     return [s for s in found if not any(a.search(s) for a in allow)]
 
 
+def password_hits(text: str) -> list[str]:
+    return rule_hits("password-assignment", text) + rule_hits(
+        "password-assignment-quoted", text
+    )
+
+
 @pytest.mark.parametrize(
     "text, secret",
     [
@@ -938,17 +969,27 @@ def rule_hits(rule_id: str, text: str) -> list[str]:
             "j6^kL9!mQ2#wE5",
         ),
         ("export PGPASSWORD=Tr0ub4dor&3x", "Tr0ub4dor&3x"),  # pragma: allowlist secret
-        ("db_pwd: 'p@ss w0rd'", "p@ss"),  # pragma: allowlist secret
+        # A quoted value is taken whole, up to its closing quote.
+        ("db_pwd: 'p@ss w0rd, ok'", "p@ss w0rd, ok"),  # pragma: allowlist secret
+        ('"password": "a (b) {c}; d"', "a (b) {c}; d"),  # pragma: allowlist secret
         ("password: hunter22", "hunter22"),  # pragma: allowlist secret
         ("admin_password := Zx81-Spectrum", "Zx81-Spectrum"),
     ],
 )
 def test_a_password_is_found_whatever_it_holds(text, secret):
-    hits = rule_hits("password-assignment", text)
-    if len(secret) < 8:
-        assert hits == []
-    else:
-        assert hits == [secret]
+    assert password_hits(text) == [secret]
+
+
+def test_a_quoted_password_is_redacted_whole(w, gitleaks, monkeypatch):
+    rule = GITLEAKS_RULES["password-assignment-quoted"]
+    monkeypatch.setenv("FAKE_RULES", json.dumps([[rule["id"], rule["regex"]]]))
+    value = "p@ss w0rd, ok then"  # pragma: allowlist secret
+    n = w.add("a.jsonl", line(t=f"db_pwd: '{value}' done") + "\n")
+    w.run(gitleaks)
+    assert (
+        w.redacted(n)
+        == line(t="db_pwd: '[REDACTED:password-assignment-quoted]' done") + "\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -969,10 +1010,16 @@ def test_a_password_is_found_whatever_it_holds(text, secret):
         "password_url: https://vault.example/x",
         "password: changeme",
         "a password is hard",
+        'password: "${DB_PASSWORD}"',
+        "password: '{{ vault.db }}'",
+        'password: "<your password>"',
+        'password: "[REDACTED:password-assignment-quoted:...wE5x]"',
+        'password = "new_password"',  # pragma: allowlist secret
+        'password: "********"',
     ],
 )
 def test_a_reference_or_placeholder_is_no_password(text):
-    assert rule_hits("password-assignment", text) == []
+    assert password_hits(text) == []
 
 
 @pytest.mark.parametrize(
@@ -986,7 +1033,7 @@ def test_a_reference_or_placeholder_is_no_password(text):
     ],
 )
 def test_a_password_hash_is_found(hash_):
-    assert rule_hits("password-hash", f'"user@example.com","{hash_}",') == [hash_]
+    assert rule_hits("password-hash", f'"account-1","{hash_}",') == [hash_]
 
 
 def test_a_dollar_amount_is_no_password_hash():
