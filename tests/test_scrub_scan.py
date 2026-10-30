@@ -963,6 +963,9 @@ PASSWORD_RULES = (
 # The key word and a value made of plain fixture words around the
 # separator a case is about, so nothing here reads as a password.
 KW = "pass" + "word"
+# An escaped double and an escaped single quote.
+BSQ = '\\"'
+BSA = "\\'"
 
 
 def value(sep: str) -> str:
@@ -988,6 +991,9 @@ def password_hits(text: str) -> list[str]:
         (f'"{KW}": "{value(" (b) {c}; ")}"', value(" (b) {c}; ")),
         (f"""{KW}: "{value("'")}" """, value("'")),
         (f"""{KW}: '{value('"')}' """, value('"')),
+        # An escaped quote of its own kind is part of it too.
+        (f'{KW}="{value(BSQ)}"', value(BSQ)),
+        (f"{KW}='{value(BSA)}'", value(BSA)),
     ],
 )
 def test_a_password_is_found_whatever_it_holds(text, secret):
@@ -995,18 +1001,20 @@ def test_a_password_is_found_whatever_it_holds(text, secret):
 
 
 @pytest.mark.parametrize(
-    "quote, other, rule",
+    "quote, inner, rule",
     [
         ('"', "'", "password-assignment-quoted"),
         ("'", '"', "password-assignment-single-quoted"),
+        ('"', '\\"', "password-assignment-quoted"),
+        ("'", "\\'", "password-assignment-single-quoted"),
     ],
 )
 def test_a_quoted_password_is_redacted_whole(
-    w, gitleaks, monkeypatch, quote, other, rule
+    w, gitleaks, monkeypatch, quote, inner, rule
 ):
     rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
     monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
-    secret = value(f" {other}, ")
+    secret = value(f" {inner}, ")
     n = w.add("a.jsonl", line(t=f"db_pwd: {quote}{secret}{quote} done") + "\n")
     w.run(gitleaks)
     placeholder = f"[REDACTED:{rule}:...{secret[-4:]}]"

@@ -40,14 +40,15 @@ regexes = [
   '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
 ]
 
-# A double quoted value, up to its closing double quote; the quotes stay
+# A double quoted value, up to its closing double quote: an escaped one
+# (\") and any other backslash pair are part of the value. The quotes stay
 # outside the value, so the allowlist sees what the first rule's sees.
 # Also a template ($X, ${X}, $(...), {{ x }}, <x>) and a value already
 # redacted.
 [[rules]]
 id = "password-assignment-quoted"
 description = "A double quoted value given to a password"
-regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*"([^"\n]{8,200})"'''
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*"((?:[^"\\\n]|\\.){8,200})"'''
 secretGroup = 1
 
 [[rules.allowlists]]
@@ -74,7 +75,7 @@ regexes = [
 [[rules]]
 id = "password-assignment-single-quoted"
 description = "A single quoted value given to a password"
-regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*'([^'\n]{8,200})''''
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*'((?:[^'\\\n]|\\.){8,200})''''
 secretGroup = 1
 
 [[rules.allowlists]]
