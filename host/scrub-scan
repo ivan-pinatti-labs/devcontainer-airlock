@@ -69,6 +69,10 @@ TAIL_SAFE = re.compile(r"[A-Za-z0-9+/=_.-]{4}")
 # which no file holds as it is: its hits are left out, and this is matched
 # against the file itself.
 KEY_RULE = "private-key"
+# Rules whose value is quoted and may hold backslash escapes (\" in a
+# double quoted value, say): host/scrub-gitleaks.toml.
+QUOTED = {"password-assignment-quoted", "password-assignment-single-quoted"}
+BACKSLASH_PAIR = re.compile(r"\\(.)")
 KEY_NEWLINE = r"(?:\\+[rn]|[\r\n])+(?:[ \t]*\d+(?:\u2192|\\+u2192|\t|\\+t))?"
 KEY_BLOCK = re.compile(
     r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----"
@@ -511,6 +515,14 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
             continue
         if finding["RuleID"] in REPORT_ONLY:
             report[n].add(value)
+        elif finding["RuleID"] in QUOTED:
+            # Known by its value with the escapes undone (its tail and its
+            # length for showing one too), and redacted in that spelling
+            # as well, wherever the file holds it so.
+            plain = BACKSLASH_PAIR.sub(r"\1", value)
+            redact[n].setdefault(value, (finding["RuleID"], None, plain))
+            if plain != value and any(f in texts[n] for f in forms(plain)):
+                redact[n].setdefault(plain, (finding["RuleID"], None, plain))
         else:
             redact[n].setdefault(value, (finding["RuleID"], None, value))
     # A key block that is all or part of one key the host holds is that

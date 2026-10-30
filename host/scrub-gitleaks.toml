@@ -71,11 +71,16 @@ regexes = [
   '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
 ]
 
-# The same for a single quoted value, up to its closing single quote.
+# The same for a single quoted value, up to its closing single quote. A
+# shell knows no \' inside single quotes: there 'abc\' ends at that quote.
+# So when the value read with escapes finds no closing quote, it is read
+# again without them. When both readings close, the escaped one is taken,
+# which is the longer: it holds the shell's value, and redacting more than
+# the value leaves nothing of it behind.
 [[rules]]
 id = "password-assignment-single-quoted"
 description = "A single quoted value given to a password"
-regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*'((?:[^'\\\n]|\\.){8,200})''''
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*'((?:[^'\\\n]|\\.){8,200}|[^'\n]{8,200})''''
 secretGroup = 1
 
 [[rules.allowlists]]

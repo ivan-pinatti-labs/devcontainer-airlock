@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA lastindex changeme maa MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA fixt lastindex changeme maa MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -994,6 +994,12 @@ def password_hits(text: str) -> list[str]:
         # An escaped quote of its own kind is part of it too.
         (f'{KW}="{value(BSQ)}"', value(BSQ)),
         (f"{KW}='{value(BSA)}'", value(BSA)),
+        # A shell has no \' in single quotes: with no later quote, the value
+        # ends at that quote, its backslash kept.
+        (f"{KW}='{value('-')}\\'", value("-") + "\\"),
+        # With a later quote, more than the shell's value (fixture\) is
+        # taken, so nothing of it is left.
+        (f"{KW}='fixture\\'; echo 'ok'", "fixture\\'; echo "),
     ],
 )
 def test_a_password_is_found_whatever_it_holds(text, secret):
@@ -1019,6 +1025,31 @@ def test_a_quoted_password_is_redacted_whole(
     w.run(gitleaks)
     placeholder = f"[REDACTED:{rule}:...{secret[-4:]}]"
     assert w.redacted(n) == line(t=f"db_pwd: {quote}{placeholder}{quote} done") + "\n"
+
+
+@pytest.mark.parametrize(
+    "escaped, tail",
+    [
+        # 21 characters as written, 17 once read: too short to show a tail.
+        ('fixt\\"ure\\"val\\"ue\\"0', ""),
+        ('fixture\\"value\\"00001234', "1234"),
+    ],
+)
+def test_a_quoted_password_is_known_by_its_value(
+    w, gitleaks, monkeypatch, escaped, tail
+):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    plain = escaped.replace("\\", "")
+    n = w.add("notes.md", f'{KW}="{escaped}"\nit was {plain} then\n')
+    w.run(gitleaks)
+    placeholder = "[REDACTED:password-assignment-quoted" + (
+        f":...{tail}]" if tail else "]"
+    )
+    # Both spellings are gone, and they are one secret.
+    assert w.redacted(n) == f'{KW}="{placeholder}"\nit was {placeholder} then\n'
+    (entry,) = w.ledger()["entries"]
+    assert entry["tail"] == tail
 
 
 @pytest.mark.parametrize(
