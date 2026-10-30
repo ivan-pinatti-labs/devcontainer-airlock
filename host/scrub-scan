@@ -506,14 +506,16 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
             report[n].add(value)
         else:
             redact[n].setdefault(value, (finding["RuleID"], None, value))
-    # A key block that is all or part of a key the host holds is that
+    # A key block that is all or part of one key the host holds is that
     # secret, however deep in JSON it sits, so it closes when that key
-    # changes; a block inside the key's own text is replaced with it.
+    # changes; a block inside the key's own text is replaced with it. Part
+    # that two held keys share (keys of one type can start alike) is
+    # neither's, and stays open until marked rotated by hand.
     held = {name: m for name, value in known.items() for m in key_blocks(value).values()}
     for e in entries:
         for block, material in key_blocks(texts[e.n]).items():
-            name = next((n for n, m in held.items() if material in m), None)
-            hit = (name, name, known[name]) if name else (KEY_RULE, None, material)
+            names = [n for n, m in held.items() if material in m]
+            hit = (names[0], names[0], known[names[0]]) if len(names) == 1 else (KEY_RULE, None, material)
             redact[e.n].setdefault(block, hit)
     for n, values in report.items():
         values -= {v for v in values if any(v in r or r in v for r in redact[n])}

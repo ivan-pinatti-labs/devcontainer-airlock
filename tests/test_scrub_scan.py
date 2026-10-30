@@ -584,6 +584,17 @@ def test_a_key_is_found_once_when_a_known_secret_holds_it(w, gitleaks, rel, text
     assert [e["rule"] for e in w.ledger()["entries"]] == ["ssh-key"]
 
 
+def test_part_two_known_keys_share_is_neither(w, gitleaks):
+    other = "\n".join([BEGIN, KEY_LINES[0], *(x[::-1] for x in KEY_LINES[1:]), END])
+    w.known("ssh-key", KEY)
+    w.known("other-key", other)
+    n = w.add("a.md", "\n".join([BEGIN, KEY_LINES[0]]) + "\n$ ")
+    w.run(gitleaks)
+    assert KEY_LINES[0] not in w.redacted(n)
+    (entry,) = w.ledger()["entries"]
+    assert entry["rule"] == "private-key" and entry["known"] is None
+
+
 def test_known_key_with_separate_partial_copy(w, gitleaks, capsys):
     w.known("ssh-key", KEY)
     part = "\n".join([BEGIN, *KEY_LINES[:2]])
