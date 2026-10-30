@@ -279,9 +279,11 @@ transcript "${claude}/todos/${in_id}-agent-${in_id}.json" "${pat}"
 # A project folder holding no transcript, only its memory: in by its name.
 transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}/memory/m.md" "${pat}"
 transcript "${claude}/projects/-other/memory/m.md" "${pat}"
-# One whose name only starts with it could be a sibling (in-x) as well as a
-# folder below it, so it is out.
-transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}-x/memory/m.md" "${pat}"
+# One whose name starts with it and a dash: a folder below it, perhaps gone
+# since (a sibling named in-x looks the same, and is in too).
+transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}-gone/memory/m.md" "${pat}"
+# One whose name only starts with it, with no dash, is a sibling (inx).
+transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}x/memory/m.md" "${pat}"
 ran_in "${codex}/sessions/2026/11/rollout-in.jsonl" "${inside}"
 ran_in "${codex}/sessions/2026/11/rollout-out.jsonl" "${HOME}"
 transcript "${claude}/history.jsonl" "${pat}"
@@ -291,12 +293,12 @@ check "--dir needs a folder" 2 err "host/scrub scan CONTEXT"
 run host/scrub scan "${ctx}" --manual --dir "${inside}/../in"
 check "it says which folder" 0 out "(only the conversations that ran in ${inside})"
 for f in "projects/-in/${in_id}.jsonl" "file-history/${in_id}/f" "todos/${in_id}-agent-${in_id}.json" \
-  "projects/${inside//[^A-Za-z0-9]/-}/memory/m.md"; do
+  "projects/${inside//[^A-Za-z0-9]/-}/memory/m.md" "projects/${inside//[^A-Za-z0-9]/-}-gone/memory/m.md"; do
   assert "its conversation's ${f%%/*} is redacted" grep -q REDACTED "${claude}/${f}"
 done
 assert "so is a Codex session that ran there" grep -q REDACTED "${codex}/sessions/2026/11/rollout-in.jsonl"
 for f in "${claude}/projects/-inside/${out_id}.jsonl" "${claude}/file-history/${out_id}/f" \
-  "${claude}/projects/-other/memory/m.md" "${claude}/projects/${inside//[^A-Za-z0-9]/-}-x/memory/m.md" \
+  "${claude}/projects/-other/memory/m.md" "${claude}/projects/${inside//[^A-Za-z0-9]/-}x/memory/m.md" \
   "${codex}/sessions/2026/11/rollout-out.jsonl" "${claude}/history.jsonl"; do
   assert "not ${f#"${HOME}"/}" grep -qF "${pat}" "${f}"
 done
