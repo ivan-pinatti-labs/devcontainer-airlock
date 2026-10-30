@@ -31,7 +31,7 @@ scan_rule() {
 scan_rule
 
 run "${wb}" scrub bogus
-check "scrub takes --check or rotated" 2 err "workbench: host/workbench scrub [--check] [--entropy] | scrub list [--all] [--files] | scrub rotated ID"
+check "scrub takes --check or rotated" 2 err "workbench: host/workbench scrub [--check] [--entropy] [--dir DIR] | scrub list [--all] [--files] | scrub rotated ID"
 run "${wb}" scrub rotated
 check "rotated needs an id" 1 err "workbench: which secret? host/workbench scrub rotated ID"
 run "${wb}" scrub rotated 3
@@ -98,6 +98,12 @@ run "${wb}" scrub --check
 check "check only reports" 0 calls "python3 -I - scan --check --manual"
 run "${wb}" scrub --check --entropy
 check "and --entropy lists each random looking string" 0 calls "python3 -I - scan --entropy --check --manual"
+run "${wb}" scrub --check --dir "${HOME}"
+check "--dir looks at the conversations of one folder" 0 calls "python3 -I - scan --scope $(realpath "${HOME}") --check --manual"
+run "${wb}" scrub --dir "${HOME}/no-such-folder"
+check "one that exists" 1 err "--dir takes a folder that exists"
+run "${wb}" scrub --dir
+check "and is given" 1 err "--dir takes a folder that exists"
 assert "with no secret the host does not hold" test -z "$(ls "${got}/known")"
 touch "${PODMAN_STATE}/secret/gh-devcontainer" "${HOME}/.ssh/devcontainer/id_ed25519"
 

@@ -7,14 +7,16 @@
   the scan runs in a container with no network, on copies.
 
   Usage:
-    host/scrub scan CONTEXT [--full] [--check] [--manual] [--entropy]
+    host/scrub scan CONTEXT [--full] [--check] [--manual] [--entropy] [--dir DIR]
                         look at the files in the homes CONTEXT names that
                         changed since the last scan (--full: every one),
                         redact what no live session holds and report the
                         rest; --check redacts nothing and keeps nothing;
                         --manual waits for another scan instead of skipping
                         and reports more; --entropy lists each random
-                        looking string instead of counting them
+                        looking string instead of counting them; --dir
+                        looks only at the conversations that ran in DIR or
+                        below it, every one of their files
     host/scrub rotated ID... | all
                         mark those secrets of the ledger rotated, or every one
     host/scrub list [--all] [--files]
@@ -50,7 +52,7 @@ die() {
   exit 1
 }
 usage() {
-  sed -n '9,22p' "$0" >&2
+  sed -n '9,24p' "$0" >&2
   exit 2
 }
 
@@ -115,6 +117,58 @@ list_files() {
         -printf "%s\t%T@\t${kind}\t${fmt}\t%p\n" 2>/dev/null || true
     done
   done <"${WORK}/homes" | awk -F'\t' -v OFS='\t' '{ sub(/\..*/, "", $2); print }'
+}
+
+# The files of the conversations that ran in $1 or below it (--dir), from
+# the listing, which they keep their order in. A Claude Code project folder
+# is in when a transcript in it says it ran there (or, holding no
+# transcript, when its name is the one Claude Code gives that very folder:
+# the name of one below it cannot be told from a sibling's), with
+# the files elsewhere in the home named for its conversations; a Codex
+# session is in when it says so in its first lines. Files every
+# conversation shares (history.jsonl, paste-cache, logs) are out: a scan
+# of everything looks at them.
+dir_files() {
+  local dir="$1" kind agent home p cwd id name
+  name="${dir//[^A-Za-z0-9]/-}"
+  : >"${WORK}/in"
+  while read -r kind agent home; do
+    if [[ "${agent}" = codex ]]; then
+      [[ -d "${home}/sessions" ]] || continue
+      while IFS= read -r -d '' p; do
+        cwd="$(head -c 65536 -- "${p}" | grep -o -m1 '"cwd":"[^"]*"' | head -n1)" || true
+        if under "${cwd}" "${dir}"; then printf 'f\t%s\n' "${p}" >>"${WORK}/in"; fi
+      done < <(find "${home}/sessions" -type f -name '*.jsonl' -print0 2>/dev/null)
+      continue
+    fi
+    for p in "${home}"/projects/*/; do
+      [[ -d "${p}" ]] || continue
+      p="${p%/}"
+      cwd="$(find "${p}" -maxdepth 1 -name '*.jsonl' -exec grep -o -h -m1 '"cwd":"[^"]*"' {} + 2>/dev/null | sort -u)" || true
+      if [[ -n "${cwd}" ]]; then
+        while IFS= read -r c; do under "${c}" "${dir}" && break; done <<<"${cwd}" || continue
+      elif [[ "${p##*/}" != "${name}" ]]; then
+        continue
+      fi
+      printf 'd\t%s/\n' "${p}" >>"${WORK}/in"
+      for id in "${p}"/*.jsonl; do
+        id="${id##*/}"
+        id="${id%.jsonl}"
+        [[ "${id}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || continue
+        printf 'd\t%s/file-history/%s/\nc\t%s/todos/%s\nc\t%s/debug/%s\n' "${home}" "${id}" "${home}" "${id}" "${home}" "${id}" >>"${WORK}/in"
+      done
+    done
+  done <"${WORK}/homes"
+  # d: a folder, every file under it; c: files whose name starts with it;
+  # f: one file.
+  awk -F'\t' 'FILENAME == ARGV[1] { if ($1 == "f") file[$2] = 1; else if ($1 == "d") folder[$2] = 1; else start[$2] = 1; next } { p = $5; if (p in file) { print; next } for (i = length(p); i > 0; i--) if (substr(p, i, 1) == "/" && substr(p, 1, i) in folder) { print; next } for (s in start) if (index(p, s) == 1) { print; next } }' \
+    "${WORK}/in" "${WORK}/listing"
+}
+# Whether a transcript's `"cwd":"PATH"` is $2 or below it.
+under() {
+  local cwd="${1#\"cwd\":\"}"
+  cwd="${cwd%\"}"
+  [[ -n "$1" ]] && { [[ "${cwd}" = "$2" ]] || [[ "${cwd}" = "$2/"* ]]; }
 }
 
 # Read CONTEXT: the homes that exist, once each by their real path, into
@@ -192,17 +246,23 @@ said() {
 }
 
 cmd_scan() {
-  local context="${1:-}" full="" check="" manual="" wait=skip args=() n=0 size mtime kind home path verb m s index
+  local context="${1:-}" full="" check="" manual="" dir="" wait=skip args=() n=0 size mtime kind home path verb m s index
   [[ -f "${context}" ]] || usage
   shift
-  for a in "$@"; do
-    case "${a}" in
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
     --full) full=1 ;;
     --check) check=1 ;;
     --manual) manual=1 wait=wait ;;
     --entropy) args+=(--entropy) ;;
+    --dir)
+      [[ $# -gt 1 ]] && [[ -n "$2" ]] || usage
+      dir="$(realpath -m -- "$2")"
+      shift
+      ;;
     *) usage ;;
     esac
+    shift
   done
   mkdir -p "${STATE}"
   chmod 700 "${STATE}"
@@ -229,6 +289,12 @@ cmd_scan() {
   [[ -f "${index}" ]] || index=/dev/null
   # The files new or changed since they were last scanned, or every one.
   awk -F'\t' -v full="${full}" 'FILENAME == ARGV[1] { seen[$3] = $1 "\t" $2; next } full || seen[$5] != $1 "\t" $2' "${index}" "${WORK}/listing" >"${WORK}/changed"
+  # Only one folder's conversations, every file of them; the index keeps
+  # what it knew of the rest.
+  if [[ -n "${dir}" ]]; then
+    dir_files "${dir}" >"${WORK}/changed"
+    args+=(--scope "${dir}")
+  fi
   while IFS="${TAB}" read -r size mtime kind home path; do
     n=$((n + 1))
     cp -- "${path}" "${WORK}/files/${n}" 2>/dev/null || continue

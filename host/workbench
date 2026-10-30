@@ -53,15 +53,16 @@
                                     copy the local L2 images into the shared L2
                                     store now (up does it when they differ)
     host/workbench status           what is running
-    host/workbench scrub [--check] [--entropy]
+    host/workbench scrub [--check] [--entropy] [--dir DIR]
                                     look for secrets the agents wrote into
                                     their history, redact them where no
                                     session runs, and list the ones not
                                     rotated yet (docs/SCRUB.md); --check is
                                     a dry run; --entropy lists each random
-                                    looking string, not just their count.
-                                    Every session start and end runs it
-                                    over what changed
+                                    looking string, not just their count;
+                                    --dir only the conversations that ran
+                                    in DIR or below it. Every session start
+                                    and end runs it over what changed
     host/workbench scrub rotated ID... | all
                                     mark those secrets rotated, or every one
     host/workbench scrub list [--all] [--files]
@@ -2104,14 +2105,20 @@ cmd_scrub() {
     SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" list "$@"
     return
   fi
-  for a in "$@"; do
-    case "${a}" in
-    --check | --entropy) args+=("${a}") ;;
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+    --check | --entropy) args+=("$1") ;;
+    --dir)
+      [[ "$#" -gt 1 ]] && [[ -d "$2" ]] || die "--dir takes a folder that exists"
+      args+=(--dir "$2")
+      shift
+      ;;
     *)
-      echo "workbench: host/workbench scrub [--check] [--entropy] | scrub list [--all] [--files] | scrub rotated ID... | all" >&2
+      echo "workbench: host/workbench scrub [--check] [--entropy] [--dir DIR] | scrub list [--all] [--files] | scrub rotated ID... | all" >&2
       exit 2
       ;;
     esac
+    shift
   done
   scrub_pass "" "${args[@]}"
 }

@@ -24,7 +24,7 @@ decoded, so a rule sees `api_key: "..."` rather than its escaped form. A
 hit from a rule in REPORT_ONLY is reported, never redacted or kept.
 """
 
-# cspell:words argparse isdigit ljust CREAT fdopen findall fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
+# cspell:words argparse isdigit ljust CREAT fdopen findall finditer fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
 from __future__ import annotations
 
 import argparse
@@ -53,6 +53,24 @@ REPORT_ONLY = {"generic-high-entropy"}
 MIN_LENGTH = 8
 TAIL_FROM = 20
 TAIL_SAFE = re.compile(r"[A-Za-z0-9+/=_.-]{4}")
+# A private key as a file holds it, at any depth of JSON escaping: its
+# lines split by newlines, real or escaped, each perhaps after a line
+# number (a file read with its numbers), and enough key material, mixing
+# cases and digits, that it is no header named in prose or an example.
+# gitleaks' own rule runs over the decoded view, where a match can run from
+# a header in one string to one in another, or to one much further on,
+# which no file holds as it is: its hits are left out, and this is matched
+# against the file itself.
+KEY_RULE = "private-key"
+KEY_NEWLINE = r"(?:\\+[rn]|[\r\n])+(?:[ \t]*\d+(?:\u2192|\\+u2192|\t|\\+t))?"
+KEY_BLOCK = re.compile(
+    r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----"
+    rf"(?:{KEY_NEWLINE}(?:Proc-Type|DEK-Info|Comment):[^\\\r\n\"]*)*"
+    rf"(?:{KEY_NEWLINE}[A-Za-z0-9+/=]+)+"
+    rf"(?:{KEY_NEWLINE}-----END[ A-Z0-9_-]{{0,100}}PRIVATE KEY(?: BLOCK)?-----)?"
+)
+KEY_HEADERS = re.compile(r"-----(?:BEGIN|END)[^-]*-----|(?:Proc-Type|DEK-Info|Comment):[^\\\r\n\"]*")
+KEY_MATERIAL = 64
 # A Claude Code conversation id, which names a conversation's own files.
 CONVERSATION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 RED = "\033[1;31m"
@@ -412,11 +430,14 @@ class Ledger:
         entry["status"] = "rotated"
         entry["rotated"] = time.strftime("%Y-%m-%d")
 
-    def report_open(self, out: Output, listed: set[str], every: bool) -> None:
+    def report_open(self, out: Output, listed: set[str], every: bool, among: set[str] | None = None) -> None:
         """The secrets not rotated yet: each one not already said this run
         (`listed`, by HMAC) on a manual run, only their count otherwise, so
-        a session start stays short."""
+        a session start stays short. `among`: only those found in one of
+        these files (a scan of one folder)."""
         still = [e for e in self.data["entries"] if e["status"] == "open"]
+        if among is not None:
+            still = [e for e in still if among.intersection(e["files"])]
         if not still:
             return
         if not every:
@@ -444,42 +465,72 @@ class Ledger:
         os.replace(tmp, self.path)
 
 
+def key_material(block: str) -> str:
+    """A private key's material, the same however the file escaped it: what
+    the ledger knows the key by."""
+    body = KEY_HEADERS.sub("", block)
+    body = re.sub(KEY_NEWLINE, "", body)
+    return re.sub(r"[^A-Za-z0-9+/=]", "", body)
+
+
+def key_blocks(text: str) -> dict[str, str]:
+    """The private keys in a file, each as the file holds it, to its
+    material."""
+    blocks = {}
+    for m in KEY_BLOCK.finditer(text):
+        material = key_material(m.group(0))
+        # Real key material mixes cases and digits; a made up line of
+        # capitals (an example in a test, say) is no key.
+        mixed = all(re.search(c, material) for c in ("[a-z]", "[A-Z]", "[0-9]"))
+        if len(material) >= KEY_MATERIAL and mixed:
+            blocks[m.group(0)] = material
+    return blocks
+
+
 def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], findings: list[dict]):
-    """For each copy, its secrets: value to (rule, known name or None), the
-    tier 1 ones first; and the report only hits apart."""
-    redact: dict[str, dict[str, tuple[str, str | None]]] = {e.n: {} for e in entries}
+    """For each copy, its secrets: value as the file holds it to (rule,
+    known name or None, the value the ledger knows it by), the tier 1 ones
+    first; and the report only hits apart."""
+    redact: dict[str, dict[str, tuple[str, str | None, str]]] = {e.n: {} for e in entries}
     report: dict[str, set[str]] = {e.n: set() for e in entries}
     for e in entries:
         for name, value in known.items():
             if any(f in texts[e.n] for f in forms(value)):
-                redact[e.n][value] = (name, name)
+                redact[e.n][value] = (name, name, value)
     for finding in findings:
         n = Path(finding["File"]).name
         value = finding["Secret"]
-        if n not in redact or len(value) < MIN_LENGTH:
+        if n not in redact or len(value) < MIN_LENGTH or finding["RuleID"] == KEY_RULE:
             continue
         if finding["RuleID"] in REPORT_ONLY:
             report[n].add(value)
         else:
-            redact[n].setdefault(value, (finding["RuleID"], None))
+            redact[n].setdefault(value, (finding["RuleID"], None, value))
+    # A key block that is all or part of one key the host holds is that
+    # secret, however deep in JSON it sits, so it closes when that key
+    # changes; a block inside the key's own text is replaced with it. Part
+    # that two held keys share (keys of one type can start alike) is
+    # neither's, and stays open until marked rotated by hand.
+    held = {name: m for name, value in known.items() for m in key_blocks(value).values()}
+    for e in entries:
+        for block, material in key_blocks(texts[e.n]).items():
+            names = [n for n, m in held.items() if material in m]
+            hit = (names[0], names[0], known[names[0]]) if len(names) == 1 else (KEY_RULE, None, material)
+            redact[e.n].setdefault(block, hit)
     for n, values in report.items():
         values -= {v for v in values if any(v in r or r in v for r in redact[n])}
     return redact, report
 
 
-def redacted(text: str, found: dict[str, tuple[str, str | None]]) -> tuple[str, list[str]]:
+def redacted(text: str, found: dict[str, tuple[str, str | None, str]]) -> tuple[str, list[str]]:
     """The text with every secret replaced, and the secrets not in it as
-    they were found (so not redacted)."""
-    missing = []
+    they were found (so not redacted). One only inside a longer one is
+    replaced with it."""
+    missing = [value for value in found if not any(f in text for f in forms(value))]
     for value in sorted(found, key=len, reverse=True):
-        rule = found[value][0]
-        hit = False
+        rule, _, ident = found[value]
         for form in forms(value):
-            if form in text:
-                text = text.replace(form, placeholder(rule, value))
-                hit = True
-        if not hit:
-            missing.append(value)
+            text = text.replace(form, placeholder(rule, ident))
     return text, missing
 
 
@@ -512,37 +563,38 @@ def scan(args, out: Output) -> int:
         if args.entropy:
             for value in sorted(report[e.n]):
                 out.say(f"{shown('generic-high-entropy', value)} in {e.path}: a random looking string, reported only (docs/SCRUB.md)")
-        for value, (rule, name) in sorted(found.items()):
-            entry = ledger.entry(value) if args.check else ledger.seen(value, rule, e.path, name, out)
-            secrets_found.setdefault(value, Found(rule, value, entry))
+        for rule, name, ident in sorted(found.values(), key=lambda f: f[2]):
+            entry = ledger.entry(ident) if args.check else ledger.seen(ident, rule, e.path, name, out)
+            secrets_found.setdefault(ident, Found(rule, ident, entry))
         if is_live(e, ctx) and found:
-            for value in found:
-                secrets_found[value].waiting.append(e.path)
+            for ident in {f[2] for f in found.values()}:
+                secrets_found[ident].waiting.append(e.path)
             counts["waiting"] += 1
             continue
         if not found:
             actions.append(f"done {e.n} {e.size}")
             continue
         text, missing = redacted(texts[e.n], found)
-        for value in missing:
-            secrets_found[value].kept.append(e.path)
+        kept = {found[value][2] for value in missing}
+        done = {found[value][2] for value in found if value not in missing}
+        for ident in kept:
+            secrets_found[ident].kept.append(e.path)
         if text == texts[e.n]:
             counts["kept"] += 1
             actions.append(f"done {e.n} {e.size}")
             continue
         if not still_valid(e.path, texts[e.n], text):
             out.say(f"{e.path}: redacting it would break its JSON, so it is left as it is", alarm=True)
-            for value in found.keys() - set(missing):
-                secrets_found[value].kept.append(e.path)
+            for ident in done - kept:
+                secrets_found[ident].kept.append(e.path)
             counts["kept"] += 1
             continue
         counts["kept"] += bool(missing)
         counts["redacted"] += 1
-        for value in sorted(found):
-            if value not in missing:
-                secrets_found[value].redacted.append(e.path)
-                if not args.check:
-                    actions.append(f"hit {e.n} {secrets_found[value].label}")
+        for ident in sorted(done):
+            secrets_found[ident].redacted.append(e.path)
+            if not args.check:
+                actions.append(f"hit {e.n} {secrets_found[ident].label}")
         if args.check:
             continue
         copy = work / "out" / "redacted" / e.n
@@ -562,7 +614,8 @@ def scan(args, out: Output) -> int:
     if not args.check:
         ledger.rotate_changed(known, out)
         (work / "out" / "actions").write_text("".join(f"{a}\n" for a in actions))
-    ledger.report_open(out, listed={ledger.digest(v) for v in secrets_found}, every=args.manual)
+    among = {e.path for e in entries} if args.scope else None
+    ledger.report_open(out, listed={ledger.digest(v) for v in secrets_found}, every=args.manual, among=among)
     loud = {n: len(values) for n, values in report.items() if values}
     if args.manual and loud and not args.entropy:
         out.say(
@@ -575,6 +628,7 @@ def scan(args, out: Output) -> int:
             f"{plural(len(entries), 'file')} looked at, {plural(len(secrets_found), 'secret')} in them: "
             f"{counts['redacted']} {verb}, {counts['waiting']} wait for a session to end, "
             f"{counts['kept']} keep something that cannot be redacted"
+            + (f" (only the conversations that ran in {args.scope})" if args.scope else "")
             + ("; dry run, nothing was changed" if args.check else "")
         )
     ledger.save()
@@ -636,6 +690,7 @@ def main(argv: list[str]) -> int:
     s.add_argument("--check", action="store_true")
     s.add_argument("--manual", action="store_true")
     s.add_argument("--entropy", action="store_true")
+    s.add_argument("--scope")
     r = sub.add_parser("rotated")
     r.add_argument("ids", nargs="+")
     ls = sub.add_parser("list")

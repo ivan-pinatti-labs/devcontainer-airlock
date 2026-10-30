@@ -1,6 +1,6 @@
 # Secret scan
 
-<!-- cspell:words gitleaks HMAC showsecret -->
+<!-- cspell:words gitleaks HMAC MIIE showsecret -->
 
 Agents sometimes print a token or a key in a tool output, and it stays on
 disk in plain text, in their transcripts and the files beside them. The
@@ -20,6 +20,7 @@ finding says "rotate it".
 | `make scrub` | every file | the same |
 | `make scrub-check` | every file | nothing: a dry run, see below |
 | `make scrub-list` | the ledger | nothing: the secrets still to rotate, see below |
+| `make scrub SCRUB_DIR=<folder>`, `make scrub-check SCRUB_DIR=<folder>` | every file of the conversations that ran in that folder or below it | as without it, see below |
 
 Each secret is one line, whatever number of files it is in: where it was
 redacted, where it waits for a session to end, where it cannot be redacted.
@@ -43,6 +44,30 @@ session start or end does not run it: until `make scrub` (or
 `make scrub-check`, which keeps nothing, so it does not count) has run once,
 they only say so. Run `make scrub-check` first to see what the first
 `make scrub` would change.
+
+### One folder at a time
+
+`SCRUB_DIR=<folder>` (`--dir` to `host/workbench scrub`) narrows `make scrub`
+or `make scrub-check` to the conversations that ran in that folder or in one
+below it, every file of them, so a large history can be gone through in
+batches. Nothing names a folder ahead of time; the folder given is matched
+against what each conversation recorded:
+
+- A Claude Code project folder is in when a transcript in it says it ran
+  there (its `cwd`), or, holding no transcript (only its memory, say), when
+  its name is the one Claude Code gives that folder. Then all of it is in,
+  with the files elsewhere in that home named for its conversations
+  (`file-history/`, `todos/`, `debug/`).
+- A Codex session is in when its first lines say it ran there.
+- Files every conversation shares (`history.jsonl`, `paste-cache/`,
+  `shell-snapshots/`, Codex's `log/`) are out; a scan of everything looks
+  at them.
+
+The secrets still to rotate it lists are those found in the files it
+looked at. The index keeps what it knew of every other file, so the next
+session start goes on as before. A workbench's own folder records the
+paths inside the workbench, so give the folder as the workbench saw it to
+reach those.
 
 ### The list to rotate
 
@@ -135,8 +160,26 @@ redacted by the first scan after its session ends.
    KEY=value files in `WORKBENCH_SCRUB_SECRETS`. Searched for as they are
    and as a JSON string holds them.
 2. **Known formats**, gitleaks' own rules: GitHub, Anthropic, OpenAI, AWS,
-   Slack tokens, private key blocks and the rest, including its generic rule
-   for a value written beside a word like `token`, `key` or `password`.
+   Slack tokens and the rest, including its generic rule for a value
+   written beside a word like `token`, `key` or `password`.
+
+   Private keys are the exception. gitleaks reads the decoded view, where
+   its key rule can run from a `BEGIN` header in one string to an `END`
+   header in another, or to one named much further on, and that text is in
+   no file to redact. So its key hits are left out, and the scan finds key
+   blocks in each file as the file holds it: the lines split by newlines
+   real or escaped at any depth (a key in a tool output inside a JSON
+   string), each perhaps after a line number, with at least 64 characters
+   of key material that mixes cases and digits. A header named in prose,
+   or an example such as `MIIE...`, is no key. Part of a key (the first
+   lines of one) is redacted too. The ledger knows a key by its material,
+   so the same key written two ways is one secret. A key block that is all
+   or part of one key the host holds (the ssh key, a value in
+   `WORKBENCH_SCRUB_SECRETS`) is that key's entry, taken off on its own once
+   the key changes. Part that two held keys share (keys of one type can
+   start with the same line) is neither's: it stays a `private-key` entry
+   until `make scrub-rotated ID=<n>` takes it off, once both keys are
+   rotated.
 3. **Long random looking strings** with no known format
    (`generic-high-entropy` in `host/scrub-gitleaks.toml`): **reported only**,
    on `make scrub` and `make scrub-check` as one count (`ENTROPY=1` lists each

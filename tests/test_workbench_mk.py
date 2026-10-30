@@ -78,3 +78,15 @@ def test_scrub_list_flags_take_exactly_1() -> None:
     )
     text = WORKBENCH_MK.read_text()
     assert "scrub_flag = $(if $(filter 1,$(1)),$(if $(word 2,$(1)),,$(2)))\n" in text
+
+
+@pytest.mark.parametrize("target, check", [("scrub", ""), ("scrub-check", " --check")])
+def test_scrub_dir_gives_dir_only_when_set(target: str, check: str) -> None:
+    """SCRUB_DIR adds --dir with the folder quoted from the environment,
+    and nothing when it is unset or empty (make's $(if) is false for an
+    empty value). Text stands in for make, as above."""
+    assert recipes()[target] == (
+        f'@$(WORKBENCH) scrub{check} $(if $(ENTROPY),--entropy) $(if $(SCRUB_DIR),--dir "$$SCRUB_DIR")'
+    )
+    text = WORKBENCH_MK.read_text()
+    assert "\nSCRUB_DIR ?=\n" in text and "\nexport ID SCRUB_DIR\n" in text

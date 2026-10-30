@@ -262,6 +262,48 @@ assert "that a full scan cannot copy leaves the index" bash -c "! grep -qF clean
 run host/scrub scan "${ctx}"
 assert "and the next scan looks at it again" grep -qF clean.jsonl "${state}/index"
 
+# --dir: only the conversations that ran in one folder or below it.
+in_id=22222222-3333-4444-8555-666666666666
+out_id=44444444-5555-4666-8777-888888888888
+inside="${HOME}/wo/in"
+mkdir -p "${inside}"
+ran_in() { # FILE CWD: a transcript of a conversation that ran in CWD
+  mkdir -p "$(dirname "$1")"
+  printf '{"cwd":"%s","type":"user","message":{"content":"%s"}}\n' "$2" "${pat}" >"$1"
+}
+ran_in "${claude}/projects/-in/${in_id}.jsonl" "${inside}/sub"
+ran_in "${claude}/projects/-inside/${out_id}.jsonl" "${inside}side"
+transcript "${claude}/file-history/${in_id}/f" "${pat}"
+transcript "${claude}/file-history/${out_id}/f" "${pat}"
+transcript "${claude}/todos/${in_id}-agent-${in_id}.json" "${pat}"
+# A project folder holding no transcript, only its memory: in by its name.
+transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}/memory/m.md" "${pat}"
+transcript "${claude}/projects/-other/memory/m.md" "${pat}"
+# One whose name only starts with it could be a sibling (in-x) as well as a
+# folder below it, so it is out.
+transcript "${claude}/projects/${inside//[^A-Za-z0-9]/-}-x/memory/m.md" "${pat}"
+ran_in "${codex}/sessions/2026/11/rollout-in.jsonl" "${inside}"
+ran_in "${codex}/sessions/2026/11/rollout-out.jsonl" "${HOME}"
+transcript "${claude}/history.jsonl" "${pat}"
+old "${claude}"/projects/-in*/*.jsonl "${codex}"/sessions/2026/11/*.jsonl
+run host/scrub scan "${ctx}" --dir
+check "--dir needs a folder" 2 err "host/scrub scan CONTEXT"
+run host/scrub scan "${ctx}" --manual --dir "${inside}/../in"
+check "it says which folder" 0 out "(only the conversations that ran in ${inside})"
+for f in "projects/-in/${in_id}.jsonl" "file-history/${in_id}/f" "todos/${in_id}-agent-${in_id}.json" \
+  "projects/${inside//[^A-Za-z0-9]/-}/memory/m.md"; do
+  assert "its conversation's ${f%%/*} is redacted" grep -q REDACTED "${claude}/${f}"
+done
+assert "so is a Codex session that ran there" grep -q REDACTED "${codex}/sessions/2026/11/rollout-in.jsonl"
+for f in "${claude}/projects/-inside/${out_id}.jsonl" "${claude}/file-history/${out_id}/f" \
+  "${claude}/projects/-other/memory/m.md" "${claude}/projects/${inside//[^A-Za-z0-9]/-}-x/memory/m.md" \
+  "${codex}/sessions/2026/11/rollout-out.jsonl" "${claude}/history.jsonl"; do
+  assert "not ${f#"${HOME}"/}" grep -qF "${pat}" "${f}"
+done
+run host/scrub scan "${ctx}"
+assert "a scan of everything still looks at the rest" grep -q REDACTED "${claude}/projects/-inside/${out_id}.jsonl"
+assert "and at the shared files" grep -q REDACTED "${claude}/history.jsonl"
+
 # One scan at a time.
 FLOCK_BUSY=1 run host/scrub scan "${ctx}"
 check "a scan while another runs is skipped" 0 out "scrub: another scan is running, so this one is skipped"

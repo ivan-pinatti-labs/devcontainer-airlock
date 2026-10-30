@@ -8,9 +8,10 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA lastindex NOEQUALS surrogateescape
+# cspell:words AKIA lastindex MIIE NOEQUALS surrogateescape
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -405,7 +406,7 @@ def test_hits_of_skips_short_values_and_unknown_files_and_overlaps():
         finding(loud, "/v/1", other),
     ]
     redact, report = scrub.hits_of([e], {"1": ""}, {}, findings)
-    assert redact == {"1": {long: ("r", None)}}
+    assert redact == {"1": {long: ("r", None, long)}}
     assert report == {"1": {other}}
 
 
@@ -456,6 +457,157 @@ def test_a_multi_line_key_is_found_escaped_in_json(w, gitleaks):
     w.run(gitleaks)
     assert "BEGIN KEY" not in w.redacted(n)
     assert "[REDACTED:ssh-key:...----]" in w.redacted(n)
+
+
+# Private keys, matched against the file itself.
+
+# Made up key material, built here so no literal has a key's shape.
+MATERIAL = base64.b64encode(bytes(range(256)) * 2).decode()
+KEY_LINES = [MATERIAL[i : i + 64] for i in range(0, 256, 64)]
+BEGIN = "-----BEGIN OPENSSH " + "PRIVATE KEY-----"
+END = "-----END OPENSSH " + "PRIVATE KEY-----"
+KEY = "\n".join([BEGIN, *KEY_LINES, END])
+KEY_TAIL = "".join(KEY_LINES)[-4:]
+
+
+@pytest.mark.parametrize(
+    "rel, text",
+    [
+        ("notes.md", f"the key:\n{KEY}\nend"),
+        ("a.jsonl", line(t=f"cat id\n{KEY}\n") + "\n"),
+        # A tool's output held as a JSON string inside a JSON string.
+        ("b.jsonl", line(t=json.dumps({"output": KEY})) + "\n"),
+        # A file read with its line numbers, both ways Claude Code writes them.
+        (
+            "c.jsonl",
+            line(
+                t="\n".join(f"{i:6}\u2192{x}" for i, x in enumerate(KEY.split("\n"), 1))
+            )
+            + "\n",
+        ),
+        (
+            "d.jsonl",
+            line(t="\n".join(f"{i:6}\t{x}" for i, x in enumerate(KEY.split("\n"), 1)))
+            + "\n",
+        ),
+        ("e.jsonl", json.dumps({"t": KEY}, ensure_ascii=True) + "\n"),
+        ("f.txt", KEY.replace("\n", "\r\n")),
+        ("g.jsonl", line(t=KEY.replace("\n", "\r\n")) + "\n"),
+    ],
+)
+def test_a_private_key_is_redacted_however_it_is_escaped(w, gitleaks, rel, text):
+    n = w.add(rel, text)
+    assert w.run(gitleaks) == 0
+    out = w.redacted(n)
+    assert all(x not in out for x in KEY_LINES) and "BEGIN OPENSSH" not in out
+    assert f"[REDACTED:private-key:...{KEY_TAIL}]" in out
+    assert scrub.still_valid(rel, text, out)
+    (entry,) = w.ledger()["entries"]
+    assert entry["rule"] == "private-key" and entry["tail"] == KEY_TAIL
+
+
+def test_one_key_written_two_ways_is_one_entry(w, gitleaks):
+    w.add("a.md", KEY)
+    w.add("b.jsonl", line(t=json.dumps({"output": KEY})) + "\n")
+    w.run(gitleaks)
+    (entry,) = w.ledger()["entries"]
+    assert len(entry["files"]) == 2
+
+
+def test_part_of_a_key_is_redacted_and_a_legacy_one_with_its_headers(w, gitleaks):
+    begin = "-----BEGIN RSA " + "PRIVATE KEY-----"
+    head = w.add("a.md", "$ head -3 id\n" + "\n".join([BEGIN, *KEY_LINES[:2]]) + "\n$ ")
+    legacy = "\n".join(
+        [
+            begin,
+            "Proc-Type: 4,ENCRYPTED",
+            "DEK-Info: AES-128-CBC,0011",
+            "",
+            *KEY_LINES,
+            "-----END RSA " + "PRIVATE KEY-----",
+        ]
+    )
+    old = w.add("b.md", legacy)
+    w.run(gitleaks)
+    assert KEY_LINES[0] not in w.redacted(head) and w.redacted(head).endswith("]\n$ ")
+    assert w.redacted(old) == f"[REDACTED:private-key:...{KEY_TAIL}]"
+
+
+def test_a_key_named_in_prose_is_no_key(w, gitleaks, monkeypatch, capsys):
+    # gitleaks' own rule runs over the decoded view, from a header in one
+    # string to one in another, which no file holds as it is: its hits are
+    # left out, and nothing here has key material.
+    monkeypatch.setenv(
+        "FAKE_RULES",
+        json.dumps(
+            [
+                *RULES,
+                [
+                    "private-key",
+                    r"-----BEGIN[ A-Z]*PRIVATE KEY-----[\s\S]{20,}?KEY-----",
+                ],
+            ]
+        ),
+    )
+    prose = transcript(
+        f"The key file starts with {BEGIN} and then",
+        f"{BEGIN}\nMIIE...\n{END}",
+        f"and ends with {END}.",
+        f'grep -q "{BEGIN}" id',
+        f"{BEGIN}\n{'ABCDEFGHIJKLMNOPQRSTUVWXYZ' * 3}\nend",
+    )
+    w.add("a.jsonl", prose)
+    w.run(gitleaks, "--manual")
+    printed = capsys.readouterr().out
+    assert "cannot be redacted in" not in printed and "private-key" not in printed
+    assert "0 keep something that cannot be redacted" in printed
+    assert w.ledger()["entries"] == []
+    assert scrub.key_blocks(prose) == {}
+
+
+@pytest.mark.parametrize(
+    "rel, text",
+    [
+        ("a.md", KEY),
+        ("b.jsonl", line(t=KEY) + "\n"),
+        # Inside a JSON string inside a JSON string, which no form of the
+        # value matches: found as a block, and known by its material.
+        ("c.jsonl", line(t=json.dumps({"output": KEY})) + "\n"),
+    ],
+)
+def test_a_key_is_found_once_when_a_known_secret_holds_it(w, gitleaks, rel, text):
+    w.known("ssh-key", KEY)
+    n = w.add(rel, text)
+    w.run(gitleaks)
+    assert f"[REDACTED:ssh-key:...{KEY[-4:]}]" in w.redacted(n)
+    assert all(x not in w.redacted(n) for x in KEY_LINES)
+    assert [e["rule"] for e in w.ledger()["entries"]] == ["ssh-key"]
+
+
+def test_part_two_known_keys_share_is_neither(w, gitleaks):
+    other = "\n".join([BEGIN, KEY_LINES[0], *(x[::-1] for x in KEY_LINES[1:]), END])
+    w.known("ssh-key", KEY)
+    w.known("other-key", other)
+    n = w.add("a.md", "\n".join([BEGIN, KEY_LINES[0]]) + "\n$ ")
+    w.run(gitleaks)
+    assert KEY_LINES[0] not in w.redacted(n)
+    (entry,) = w.ledger()["entries"]
+    assert entry["rule"] == "private-key" and entry["known"] is None
+
+
+def test_known_key_with_separate_partial_copy(w, gitleaks, capsys):
+    w.known("ssh-key", KEY)
+    part = "\n".join([BEGIN, *KEY_LINES[:2]])
+    n = w.add(
+        "a.jsonl",
+        line(t=f"cat id\n{KEY}\n") + "\n" + line(t=f"head -3 id\n{part}\n") + "\n",
+    )
+    w.run(gitleaks, "--manual")
+    out = w.redacted(n)
+    assert all(x not in out for x in KEY_LINES) and "BEGIN OPENSSH" not in out
+    assert [e["rule"] for e in w.ledger()["entries"]] == ["ssh-key"]
+    assert w.actions()[-2:] == ["replace 1", f"done 1 {len(out.encode())}"]
+    assert "cannot be redacted in" not in capsys.readouterr().out
 
 
 # The ledger.
@@ -552,6 +704,20 @@ def test_no_files_still_lists_open_secrets(w, gitleaks, capsys):
     printed = capsys.readouterr().out
     assert f"secret #1 (github-pat ...{PAT[-4:]}): found before, first on" in printed
     assert "in 1 file, and not rotated yet. Rotate it\n" in printed
+
+
+def test_a_scan_of_one_folder_lists_only_its_open_secrets(w, gitleaks, capsys):
+    w.add("a.jsonl", transcript(PAT))
+    w.add("b.jsonl", transcript(AWS))
+    w.run(gitleaks)
+    w.manifest = []
+    w.n = 0
+    w.add("b.jsonl", transcript("clean now"))
+    capsys.readouterr()
+    w.run(gitleaks, "--manual", "--check", "--scope", "/some/folder")
+    printed = capsys.readouterr().out
+    assert "aws-access-token" in printed and "github-pat" not in printed
+    assert "(only the conversations that ran in /some/folder); dry run" in printed
 
 
 def test_nothing_open_says_nothing(w, gitleaks, capsys):
