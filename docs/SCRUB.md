@@ -99,9 +99,10 @@ list), and neither has a private key from before key blocks were redacted
 whole (its tail is `----`). What is left to tell what it was is the text
 around its placeholder: the command that printed it, the variable it was
 given to, the file being edited. `make scrub-show ID=<n>` (`ID="3 5"` for
-several) prints that, for every file the secret was found in: the secret's
-line from the list, then for each file up to five placeholders with the
-200 characters before each and the 80 after.
+several) prints that, for every file the secret was found in: a summary of
+the secret (number, type, tail, status, when it was first seen, how many
+files), then for each file up to five placeholders with the 200 characters
+before each and the 80 after.
 
 ```text
 #87 private-key ...---- (open), first seen 2026-10-22, 1 file
@@ -111,11 +112,13 @@ line from the list, then for each file up to five placeholders with the
 
 A placeholder with no tail is the same for every secret of its rule, so in
 a file that holds several, each one is shown and the line says it could be
-any of them. A file gone since, or rewritten so it no longer holds the
-placeholder, is said so. It reads copies of the files in the scan's
-container, as everything else here does, and prints to the terminal only;
-anything in a file that is not printable (an escape sequence, say) is shown
-as a space. The text around a placeholder can be sensitive in its own right
+any of them. So is one whose tail another secret of the same rule shares,
+and the line names that secret. A file gone since, or rewritten so it no
+longer holds the placeholder, is said so. It reads copies of the files in
+the scan's container, as everything else here does, and prints to the
+terminal only; anything in a file or a file name that is not printable (an
+escape sequence, say) is shown as a space. The text around a placeholder
+can be sensitive in its own right
 (other people's names or addresses in a tool's output), so read it there
 rather than pasting it elsewhere.
 

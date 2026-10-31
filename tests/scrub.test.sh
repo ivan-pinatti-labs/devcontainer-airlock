@@ -368,7 +368,7 @@ check "only --all and --files" 2 err "host/scrub list [--all] [--files]"
 run host/scrub show 1
 check "show names the secret" 0 out "#1 github-pat ...Q7r8 (rotated 20"
 check "and the text around its placeholder" 0 out "export GITHUB_TOKEN=[REDACTED:github-pat:...Q7r8]"
-refute "never its value" "${pat}"
+assert "never its value" bash -c "! grep -qF '${pat}' '${__scratch}/out'"
 check "the files come from a copy of the ledger" 0 calls "python3 -I - files 1"
 check "and are read in a container, as copies" 0 calls "python3 -I - show 1"
 refute "never mounting the live state" "${state}:/state:Z"

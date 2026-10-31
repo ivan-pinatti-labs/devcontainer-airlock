@@ -756,18 +756,26 @@ def show(args, out: Output) -> int:
         status = f"rotated {entry['rotated']}" if entry["status"] == "rotated" else "open"
         what = f"{entry['rule']} ...{entry['tail']}" if entry["tail"] else entry["rule"]
         print(f"#{entry['id']} {what} ({status}), first seen {entry['first_seen']}, {plural(len(entry['files']), 'file')}")
+        # Secrets of the same rule and tail have the same placeholder.
+        alike = [e["id"] for e in ledger.data["entries"] if e is not entry and e["rule"] == entry["rule"] and e["tail"] == entry["tail"]]
         for path in entry["files"]:
             copy = copies.get(path)
+            shown_path = readable(path)
             if copy is None:
-                print(f"  {path}: gone, or could not be read")
+                print(f"  {shown_path}: gone, or could not be read")
                 continue
             text = copy.read_text(**ENCODING)
             starts = [m.start() for m in re.finditer(re.escape(mark), text)]
             if not starts:
-                print(f"  {path}: no placeholder for it (not redacted yet, or rewritten since)")
+                print(f"  {shown_path}: no placeholder for it (not redacted yet, or rewritten since)")
                 continue
-            note = "" if entry["tail"] else f"; with no tail, {plural(len(starts), 'placeholder')} like it here could be any secret of this kind"
-            print(f"  {path}{note}")
+            note = ""
+            if not entry["tail"]:
+                note = f"; with no tail, {plural(len(starts), 'placeholder')} like it here could be any secret of this kind"
+            elif alike:
+                others = ", ".join(f"#{n}" for n in alike)
+                note = f"; {others} ends the same, so a placeholder here could be either"
+            print(f"  {shown_path}{note}")
             for i in starts[:SHOW_MAX]:
                 before = readable(text[max(0, i - SHOW_BEFORE) : i])
                 after = readable(text[i + len(mark) : i + len(mark) + SHOW_AFTER])

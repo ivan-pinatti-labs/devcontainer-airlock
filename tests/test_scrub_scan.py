@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme Jname maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -918,12 +918,11 @@ def test_show_says_when_a_placeholder_could_be_any_of_its_kind(w, gitleaks, caps
     assert printed.count("\n    ...") == 2
 
 
-def test_show_with_a_file_gone_redacted_since_or_many(w, gitleaks, capsys, monkeypatch):
+def test_show_with_a_file_gone_redacted_since_or_rotated(w, gitleaks, capsys):
     redact_two(w, gitleaks)
     (w.work / "files" / "2").write_text("rewritten, nothing here\n")
     # a.jsonl no longer copied: gone from the host.
     (w.work / "manifest").write_text("".join(f"{m}\n" for m in w.manifest[1:]))
-    monkeypatch.setattr(scrub, "SHOW_MAX", 0)
     capsys.readouterr()
     scrub.main(["show", "1", "99"])
     printed = capsys.readouterr().out
@@ -931,11 +930,43 @@ def test_show_with_a_file_gone_redacted_since_or_many(w, gitleaks, capsys, monke
     assert f"{w.home}/b.md: no placeholder for it" in printed
     assert "scrub: no secret #99 in the ledger" in printed
     scrub.main(["rotated", "1"])
-    (w.work / "files" / "2").write_text(w.redacted("2") * 2)
+    capsys.readouterr()
+    scrub.main(["show", "1"])
+    assert "(rotated 20" in capsys.readouterr().out
+
+
+def test_show_limits_to_five_placeholders(w, gitleaks, capsys):
+    n = w.add("a.md", "".join(f"use {i}: {PAT}\n" for i in range(6)))
+    w.run(gitleaks)
+    (w.work / "files" / n).write_text(w.redacted(n))
     capsys.readouterr()
     scrub.main(["show", "1"])
     printed = capsys.readouterr().out
-    assert "(rotated 20" in printed and "    and 2 more" in printed
+    assert printed.count("\n    ...") == 5 and "    and 1 more\n" in printed
+
+
+def test_show_says_when_another_secret_ends_the_same(w, gitleaks, capsys):
+    # Two tokens of one rule with the same last four characters.
+    twin = "ghp_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4Q7r8"  # pragma: allowlist secret
+    n = w.add("a.md", f"one {PAT}\ntwo {twin}\n")
+    w.run(gitleaks)
+    (w.work / "files" / n).write_text(w.redacted(n))
+    capsys.readouterr()
+    scrub.main(["show", "1"])
+    assert (
+        "; #2 ends the same, so a placeholder here could be either"
+        in capsys.readouterr().out
+    )
+
+
+def test_show_prints_no_escape_from_a_file_name(w, gitleaks, capsys):
+    n = w.add("odd\x1b[2Jname.md", f"token {PAT}\n")
+    w.run(gitleaks)
+    (w.work / "files" / n).write_text(w.redacted(n))
+    capsys.readouterr()
+    scrub.main(["show", "1"])
+    printed = capsys.readouterr().out
+    assert "\x1b" not in printed and "odd [2Jname.md" in printed
 
 
 def test_missing_inputs_are_empty(tmp_path):
