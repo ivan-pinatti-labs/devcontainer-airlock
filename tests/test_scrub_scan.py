@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA lastindex MIIE NOEQUALS surrogateescape
+# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme maa MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -16,9 +16,10 @@ import json
 import os
 import re
 import sys
+import tomllib
 
 import pytest
-from conftest import load
+from conftest import REPO_ROOT, load
 
 scrub = load("host/scrub-scan", "scrub_scan")
 
@@ -379,6 +380,51 @@ def test_report_only_hits_are_reported_on_manual_runs_only(w, gitleaks, capsys):
     assert f"generic-high-entropy ...{loud[-4:]}" in printed
     assert "ENTROPY=1 (or --entropy) lists them" not in printed
     assert all(e["rule"] != "generic-high-entropy" for e in w.ledger()["entries"])
+
+
+def test_report_only_identifiers_are_not_reported(w, gitleaks, capsys):
+    base = "ZZq7Rk2LmP9xW4vT8sN1bH6cJ3fD5g"  # pragma: allowlist secret
+    ids = [base + c * 4 for c in "abcdefg"]
+    w.add(
+        "a.jsonl",
+        line(event_id=ids[0], node_id=ids[1])
+        + "\n"
+        # A tool output holding JSON, escaped once more.
+        + line(t=json.dumps({"tool_use_id": ids[2], "Sid": ids[3]}))
+        + "\n"
+        + transcript(f"256 SHA256:{ids[4]} key", f"github.com ssh-ed25519 {ids[5]}"),
+    )
+    # The same value is an identifier in one place and not in another.
+    w.add("b.jsonl", line(event_id=ids[6]) + "\n" + transcript(f"value {ids[6]}"))
+    w.run(gitleaks, "--manual", "--entropy")
+    printed = capsys.readouterr().out
+    assert printed.count("a random looking string") == 1
+    assert f"...{ids[6][-4:]} in " in printed and "b.jsonl" in printed
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        "ssh-ed25519 ",
+        "ssh-rsa ",
+        "ssh-dss ",
+        "ecdsa-sha2-nistp256 ",
+        "SHA256:",
+        '"Sid":"',
+        "event_id: ",
+    ],
+)
+def test_each_identifier_context_is_benign(before):
+    value = "ZZq7Rk2LmP9xW4vT8sN1bH6cJ3fD5gab"  # pragma: allowlist secret
+    assert scrub.benign(f"x {before}{value} y", value)
+
+
+@pytest.mark.parametrize(
+    "before", ['"passwordSid":"', "my_event_id: ", "ssh-other ", "nistp256 "]
+)
+def test_a_near_miss_is_not_benign(before):
+    value = "ZZq7Rk2LmP9xW4vT8sN1bH6cJ3fD5gab"  # pragma: allowlist secret
+    assert not scrub.benign(f"x {before}{value} y", value)
 
 
 def test_no_report_only_hits_no_count(w, gitleaks, capsys):
@@ -887,3 +933,190 @@ def test_its_folders_are_fixed_not_given():
     assert os.path.basename(scrub.GITLEAKS) == "gitleaks"
     with pytest.raises(SystemExit):
         scrub.main(["scan", "--work", "/elsewhere"])
+
+
+# The rules of host/scrub-gitleaks.toml this repository adds, applied with
+# Python's re as gitleaks applies them with Go's (the same syntax for these):
+# the secret group, then the rule's allowlist on the secret. The real
+# gitleaks runs them in docs/SCRUB.md, Testing.
+
+GITLEAKS_RULES = {
+    r["id"]: r
+    for r in tomllib.loads((REPO_ROOT / "host/scrub-gitleaks.toml").read_text())[
+        "rules"
+    ]
+}
+
+
+def rule_hits(rule_id: str, text: str) -> list[str]:
+    rule = GITLEAKS_RULES[rule_id]
+    allow = [re.compile(p) for a in rule.get("allowlists", []) for p in a["regexes"]]
+    found = [m.group(rule["secretGroup"]) for m in re.finditer(rule["regex"], text)]
+    return [s for s in found if not any(a.search(s) for a in allow)]
+
+
+PASSWORD_RULES = (
+    "password-assignment",
+    "password-assignment-quoted",
+    "password-assignment-single-quoted",
+)
+# The key word and a value made of plain fixture words around the
+# separator a case is about, so nothing here reads as a password.
+KW = "pass" + "word"
+# An escaped double and an escaped single quote.
+BSQ = '\\"'
+BSA = "\\'"
+
+
+def value(sep: str) -> str:
+    return f"fixture{sep}value{sep}0001"
+
+
+def password_hits(text: str) -> list[str]:
+    return [hit for rule in PASSWORD_RULES for hit in rule_hits(rule, text)]
+
+
+@pytest.mark.parametrize(
+    "text, secret",
+    [
+        (f'REDIS_{KW.upper()}="{value("^")}"', value("^")),
+        (f"export PG{KW.upper()}={value('&')}", value("&")),
+        (f"{KW}: {value('-')}", value("-")),
+        (f"admin_{KW} := {value('+')}", value("+")),
+        # A value that only starts with $ is a value, not a reference.
+        (f"{KW}=${value('!')}", "$" + value("!")),
+        (f'{KW}: "${value("$")}"', "$" + value("$")),
+        # A quoted value is taken whole, up to its own closing quote.
+        (f"db_pwd: '{value(', ')}'", value(", ")),
+        (f'"{KW}": "{value(" (b) {c}; ")}"', value(" (b) {c}; ")),
+        (f"""{KW}: "{value("'")}" """, value("'")),
+        (f"""{KW}: '{value('"')}' """, value('"')),
+        # An escaped quote of its own kind is part of it too.
+        (f'{KW}="{value(BSQ)}"', value(BSQ)),
+        (f"{KW}='{value(BSA)}'", value(BSA)),
+        # A shell has no \' in single quotes: with no later quote, the value
+        # ends at that quote, its backslash kept.
+        (f"{KW}='{value('-')}\\'", value("-") + "\\"),
+        # With a later quote, more than the shell's value (fixture\) is
+        # taken, so nothing of it is left.
+        (f"{KW}='fixture\\'; echo 'ok'", "fixture\\'; echo "),
+    ],
+)
+def test_a_password_is_found_whatever_it_holds(text, secret):
+    assert password_hits(text) == [secret]
+
+
+@pytest.mark.parametrize(
+    "quote, inner, rule",
+    [
+        ('"', "'", "password-assignment-quoted"),
+        ("'", '"', "password-assignment-single-quoted"),
+        ('"', '\\"', "password-assignment-quoted"),
+        ("'", "\\'", "password-assignment-single-quoted"),
+    ],
+)
+def test_a_quoted_password_is_redacted_whole(
+    w, gitleaks, monkeypatch, quote, inner, rule
+):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    secret = value(f" {inner}, ")
+    n = w.add("a.jsonl", line(t=f"db_pwd: {quote}{secret}{quote} done") + "\n")
+    w.run(gitleaks)
+    placeholder = f"[REDACTED:{rule}:...{secret[-4:]}]"
+    assert w.redacted(n) == line(t=f"db_pwd: {quote}{placeholder}{quote} done") + "\n"
+
+
+@pytest.mark.parametrize(
+    "escaped, tail",
+    [
+        # 21 characters as written, 17 once read: too short to show a tail.
+        ('fixt\\"ure\\"val\\"ue\\"0', ""),
+        ('fixture\\"value\\"00001234', "1234"),
+    ],
+)
+def test_a_quoted_password_is_known_by_its_value(
+    w, gitleaks, monkeypatch, escaped, tail
+):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    plain = escaped.replace("\\", "")
+    n = w.add("notes.md", f'{KW}="{escaped}"\nit was {plain} then\n')
+    w.run(gitleaks)
+    placeholder = "[REDACTED:password-assignment-quoted" + (
+        f":...{tail}]" if tail else "]"
+    )
+    # Both spellings are gone, and they are one secret.
+    assert w.redacted(n) == f'{KW}="{placeholder}"\nit was {placeholder} then\n'
+    (entry,) = w.ledger()["entries"]
+    assert entry["tail"] == tail
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A shell keeps the backslash in single quotes: two values, not one.
+        f"{KW}='fixture\\value-0001'\n{KW}='fixturevalue-0001'\n",
+        # \n is a newline in Python and two characters in a shell: neither
+        # is guessed, so it is not merged with an n.
+        f'{KW}="fixture\\nvalue-0001"\n{KW}="fixturenvalue-0001"\n',
+    ],
+)
+def test_only_the_values_own_quote_is_unescaped(w, gitleaks, monkeypatch, text):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    n = w.add("notes.md", text)
+    w.run(gitleaks)
+    assert len(w.ledger()["entries"]) == 2
+    assert "fixture" not in w.redacted(n)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "PGPASSWORD=$(aws rds generate-db-auth-token)",
+        "password: ${DB_PASSWORD}",
+        "password = getpass()",
+        "password=os.environ['X']",
+        "password = self.password",
+        "password = new_password",
+        "password: newPassword",
+        "PASSWORD=REQUIRED",
+        "password: ********",
+        "password: <your password>",
+        "password: [REDACTED:password-assignment:...wE5x]",
+        "password_file: /run/secrets/db",
+        "password_url: https://vault.example/x",
+        "password: changeme",
+        "a password is hard",
+        'password: "${DB_PASSWORD}"',
+        'password: "$DB_PASSWORD"',
+        "password: '$(aws rds generate-db-auth-token)'",
+        'password: "${{ secrets.DB }}"',
+        "password: '{{ vault.db }}'",
+        'password: "<your password>"',
+        'password: "[REDACTED:password-assignment-quoted:...wE5x]"',
+        'password = "new_password"',  # pragma: allowlist secret
+        'password: "********"',
+    ],
+)
+def test_a_reference_or_placeholder_is_no_password(text):
+    assert password_hits(text) == []
+
+
+@pytest.mark.parametrize(
+    "hash_",
+    [
+        # The shapes only, filled with fixture words.
+        "$2y$10$" + ("fixture.hash." * 5)[:53],
+        "$6$rounds=5000$fixture$" + "a" * 86,
+        "$5$fixture$" + "B" * 43,
+        "$argon2id$v=19$m=65536,t=3,p=4$" + "Zml4dHVyZQ" + "$" + "fixtureHashValue",
+    ],
+)
+def test_a_password_hash_is_found(hash_):
+    assert rule_hits("password-hash", f'"account-1","{hash_}",') == [hash_]
+
+
+def test_a_dollar_amount_is_no_password_hash():
+    assert rule_hits("password-hash", "it costs $2 or $10, $5 each") == []

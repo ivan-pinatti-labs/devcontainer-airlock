@@ -24,7 +24,7 @@ decoded, so a rule sees `api_key: "..."` rather than its escaped form. A
 hit from a rule in REPORT_ONLY is reported, never redacted or kept.
 """
 
-# cspell:words argparse isdigit ljust CREAT fdopen findall finditer fromhex fullmatch hashlib hexdigest hmac HMACs iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
+# cspell:words argparse isdigit ljust CREAT fdopen findall finditer fromhex fullmatch hashlib hexdigest hmac HMACs nistp iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
 from __future__ import annotations
 
 import argparse
@@ -48,6 +48,13 @@ GITLEAKS = "/gitleaks/usr/bin/gitleaks"
 # Long random looking strings with no known format: reported until their
 # hits on real history are measured (make scrub-check), never redacted.
 REPORT_ONLY = {"generic-high-entropy"}
+# What a report only hit is when this comes right before it, wherever it is
+# in the file (a JSON key at any escaping depth): an event, node or tool use
+# id, a policy statement id, a key fingerprint or a public key. Measured on
+# real history, where these were most of the hits.
+BENIGN_BEFORE = re.compile(
+    r"(?:(?<![A-Za-z0-9_])(?:event_id|node_id|tool_use_id|Sid)\\*\"?\s*[:=]\s*\\*\"?|SHA256:|ssh-(?:ed25519|rsa|dss) |ecdsa-sha2-nistp\d+ )\Z"
+)
 # Shorter hits are noise; a secret this long or longer keeps its last four
 # characters in its placeholder, so a rotation can be checked against it.
 MIN_LENGTH = 8
@@ -62,6 +69,12 @@ TAIL_SAFE = re.compile(r"[A-Za-z0-9+/=_.-]{4}")
 # which no file holds as it is: its hits are left out, and this is matched
 # against the file itself.
 KEY_RULE = "private-key"
+# Rules whose value is quoted and may hold its own quote escaped (\" in a
+# double quoted value, \' in a single quoted one): host/scrub-gitleaks.toml.
+# Only that escape is undone. What any other backslash means depends on
+# the language (a newline in Python, a backslash in a shell), so it is
+# left as written.
+QUOTED = {"password-assignment-quoted": '"', "password-assignment-single-quoted": "'"}
 KEY_NEWLINE = r"(?:\\+[rn]|[\r\n])+(?:[ \t]*\d+(?:\u2192|\\+u2192|\t|\\+t))?"
 KEY_BLOCK = re.compile(
     r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----"
@@ -504,6 +517,15 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
             continue
         if finding["RuleID"] in REPORT_ONLY:
             report[n].add(value)
+        elif finding["RuleID"] in QUOTED:
+            # Known by its value with its own quote unescaped (its tail and
+            # its length for showing one too), and redacted in that
+            # spelling as well, wherever the file holds it so.
+            quote = QUOTED[finding["RuleID"]]
+            plain = value.replace("\\" + quote, quote)
+            redact[n].setdefault(value, (finding["RuleID"], None, plain))
+            if plain != value and any(f in texts[n] for f in forms(plain)):
+                redact[n].setdefault(plain, (finding["RuleID"], None, plain))
         else:
             redact[n].setdefault(value, (finding["RuleID"], None, value))
     # A key block that is all or part of one key the host holds is that
@@ -519,7 +541,14 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
             redact[e.n].setdefault(block, hit)
     for n, values in report.items():
         values -= {v for v in values if any(v in r or r in v for r in redact[n])}
+        values -= {v for v in values if benign(texts[n], v)}
     return redact, report
+
+
+def benign(text: str, value: str) -> bool:
+    """A report only hit that is an identifier everywhere the file holds it."""
+    starts = [m.start() for m in re.finditer(re.escape(value), text)]
+    return bool(starts) and all(BENIGN_BEFORE.search(text[max(0, i - 40) : i]) for i in starts)
 
 
 def redacted(text: str, found: dict[str, tuple[str, str | None, str]]) -> tuple[str, list[str]]:

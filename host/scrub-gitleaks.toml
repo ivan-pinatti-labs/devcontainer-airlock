@@ -1,3 +1,4 @@
+# cspell:words abxy changeme
 # gitleaks configuration for host/scrub (docs/SCRUB.md): gitleaks' own rules,
 # plus a rule for long random looking strings that have no known format,
 # which host/scrub reports and never redacts. That rule alone skips the
@@ -9,6 +10,106 @@ title = "devcontainer-airlock scrub"
 
 [extend]
 useDefault = true
+
+# A value given to a name that ends in password, passwd or pwd, whatever
+# characters it holds: gitleaks' own generic rule wants a value made of
+# token characters, so a password with ^ or ! in it went by. No "generic"
+# in the id, which gitleaks drops when another rule finds the same value.
+# A reference rather than a value (a variable, a placeholder, an
+# identifier in code) is no password; a value that only starts with $ is.
+# A quoted value is one of the next two rules', taken whole up to its own
+# closing quote, spaces, punctuation and the other kind of quote included.
+[[rules]]
+id = "password-assignment"
+description = "A value given to a password"
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*([^\s"'\\(){}\[\],;<>`]{8,200})'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "References and placeholders, not passwords"
+regexTarget = "secret"
+regexes = [
+  '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
+  '''^\*+$''',
+  '''^[a-z]+://''',
+  '''^[~.]?/''',
+  '''^[a-z_]+$''',
+  '''^[A-Z_]+$''',
+  '''^[a-z]+(?:[A-Z][a-z0-9]*)+$''',
+  '''^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$''',
+  '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
+]
+
+# A double quoted value, up to its closing double quote: an escaped one
+# (\") and any other backslash pair are part of the value. The quotes stay
+# outside the value, so the allowlist sees what the first rule's sees.
+# Also a template ($X, ${X}, $(...), {{ x }}, <x>) and a value already
+# redacted.
+[[rules]]
+id = "password-assignment-quoted"
+description = "A double quoted value given to a password"
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*"((?:[^"\\\n]|\\.){8,200})"'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "References, templates and placeholders, not passwords"
+regexTarget = "secret"
+regexes = [
+  '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
+  '''^\$\{.*\}$''',
+  '''^\$\(.*\)$''',
+  '''^\{\{.*\}\}$''',
+  '''^<[^>]*>$''',
+  '''^\[REDACTED:[a-z0-9:-]+(?::\.\.\.[^\]]{4})?\]$''',
+  '''^\*+$''',
+  '''^[a-z]+://''',
+  '''^[~.]?/''',
+  '''^[a-z_]+$''',
+  '''^[A-Z_]+$''',
+  '''^[a-z]+(?:[A-Z][a-z0-9]*)+$''',
+  '''^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$''',
+  '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
+]
+
+# The same for a single quoted value, up to its closing single quote. A
+# shell knows no \' inside single quotes: there 'abc\' ends at that quote.
+# So when the value read with escapes finds no closing quote, it is read
+# again without them. When both readings close, the escaped one is taken,
+# which is the longer: it holds the shell's value, and redacting more than
+# the value leaves nothing of it behind.
+[[rules]]
+id = "password-assignment-single-quoted"
+description = "A single quoted value given to a password"
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*'((?:[^'\\\n]|\\.){8,200}|[^'\n]{8,200})''''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "References, templates and placeholders, not passwords"
+regexTarget = "secret"
+regexes = [
+  '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
+  '''^\$\{.*\}$''',
+  '''^\$\(.*\)$''',
+  '''^\{\{.*\}\}$''',
+  '''^<[^>]*>$''',
+  '''^\[REDACTED:[a-z0-9:-]+(?::\.\.\.[^\]]{4})?\]$''',
+  '''^\*+$''',
+  '''^[a-z]+://''',
+  '''^[~.]?/''',
+  '''^[a-z_]+$''',
+  '''^[A-Z_]+$''',
+  '''^[a-z]+(?:[A-Z][a-z0-9]*)+$''',
+  '''^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$''',
+  '''(?i)^(?:x+|changeme|example|placeholder|redacted|required|optional|string)$''',
+]
+
+# A password hash as crypt(3) writes it: bcrypt, sha256crypt, sha512crypt,
+# argon2. It is not the password, but it can be cracked offline.
+[[rules]]
+id = "password-hash"
+description = "A crypt(3) password hash"
+regex = '''(\$(?:2[abxy]\$[0-9]{2}\$[./A-Za-z0-9]{53}|[56]\$(?:rounds=[0-9]+\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{43,86}|argon2(?:id|i|d)\$v=[0-9]+\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+))'''
+secretGroup = 1
 
 # A run of 32 to 200 token characters with neither base64 nor the token
 # alphabet on either side, so a long base64 blob (an image in a transcript)
