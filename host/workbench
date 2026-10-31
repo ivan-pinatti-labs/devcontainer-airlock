@@ -68,6 +68,9 @@
     host/workbench scrub list [--all] [--files]
                                     the secrets not rotated yet as a table
                                     (--all: every one; --files: where)
+    host/workbench scrub show ID...
+                                    the text around those secrets'
+                                    placeholders, to tell what each was
     host/workbench down [WORKSPACE] stop that workspace (its workbenches,
                                     engine and network) and take it off the
                                     egress proxy. When no other workspace is
@@ -2105,6 +2108,12 @@ cmd_scrub() {
     SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" list "$@"
     return
   fi
+  if [ "${1:-}" = show ]; then
+    shift
+    [ "$#" -gt 0 ] || die "which secret? host/workbench scrub show ID..."
+    SCRUB_IMAGE="${BASE}" "${HERE}/host/scrub" show "$@"
+    return
+  fi
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
     --check | --entropy) args+=("$1") ;;
@@ -2114,7 +2123,7 @@ cmd_scrub() {
       shift
       ;;
     *)
-      echo "workbench: host/workbench scrub [--check] [--entropy] [--dir DIR] | scrub list [--all] [--files] | scrub rotated ID... | all" >&2
+      echo "workbench: host/workbench scrub [--check] [--entropy] [--dir DIR] | scrub list [--all] [--files] | scrub show ID... | scrub rotated ID... | all" >&2
       exit 2
       ;;
     esac

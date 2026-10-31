@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme maa MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -866,6 +866,76 @@ def test_list_with_nothing_to_show(w, gitleaks, capsys):
     )
     assert scrub.main(["list", "--all"]) == 0
     assert "gh-broker-token" in capsys.readouterr().out
+
+
+# show: what is around a secret's placeholder, to tell what it was.
+
+
+def redact_two(w, gitleaks):
+    """A PAT (with a tail) in two files, and two short API keys (no tail) in
+    a third; then the copies host/scrub would make, by original path."""
+    other = "Yp7Kd93L" + "mx0Pw2Rt"
+    w.add("a.jsonl", transcript(f"export GITHUB_TOKEN={PAT} for the deploy"))
+    w.add("b.md", f"step 1\n\x1b[31mtoken\x1b[0m: {PAT}\n")
+    w.add("c.md", f'config: api_key: "{API}"\nother: api_key: "{other}"\n')
+    w.run(gitleaks)
+    for e in scrub.read_manifest(w.work / "manifest"):
+        (w.work / "files" / e.n).write_text(w.redacted(e.n))
+
+
+def test_files_lists_where_each_secret_was(w, gitleaks, capsys):
+    redact_two(w, gitleaks)
+    capsys.readouterr()
+    assert scrub.main(["files", "1", "1", "99"]) == 0
+    assert capsys.readouterr().out == f"{w.home}/a.jsonl\n{w.home}/b.md\n"
+
+
+def test_show_prints_the_text_around_a_placeholder(w, gitleaks, capsys):
+    redact_two(w, gitleaks)
+    capsys.readouterr()
+    assert scrub.main(["show", "1"]) == 0
+    printed = capsys.readouterr().out
+    mark = f"[REDACTED:github-pat:...{PAT[-4:]}]"
+    assert printed.startswith(f"#1 github-pat ...{PAT[-4:]} (open), first seen ")
+    assert ", 2 files\n" in printed
+    assert f"export GITHUB_TOKEN={mark} for the deploy" in printed
+    # Escape sequences from a file never reach the terminal.
+    assert "\x1b" not in printed and f" [31mtoken [0m: {mark}" in printed
+    assert PAT not in printed
+
+
+def test_show_says_when_a_placeholder_could_be_any_of_its_kind(w, gitleaks, capsys):
+    redact_two(w, gitleaks)
+    capsys.readouterr()
+    keys = [e["id"] for e in w.ledger()["entries"] if e["rule"] == "generic-api-key"]
+    scrub.main(["show", str(keys[0])])
+    printed = capsys.readouterr().out
+    assert (
+        "with no tail, 2 placeholders like it here could be any secret of this kind"
+        in printed
+    )
+    # Each one shown, the other within the text around it.
+    assert printed.count("\n    ...") == 2
+
+
+def test_show_with_a_file_gone_redacted_since_or_many(w, gitleaks, capsys, monkeypatch):
+    redact_two(w, gitleaks)
+    (w.work / "files" / "2").write_text("rewritten, nothing here\n")
+    # a.jsonl no longer copied: gone from the host.
+    (w.work / "manifest").write_text("".join(f"{m}\n" for m in w.manifest[1:]))
+    monkeypatch.setattr(scrub, "SHOW_MAX", 0)
+    capsys.readouterr()
+    scrub.main(["show", "1", "99"])
+    printed = capsys.readouterr().out
+    assert f"{w.home}/a.jsonl: gone, or could not be read" in printed
+    assert f"{w.home}/b.md: no placeholder for it" in printed
+    assert "scrub: no secret #99 in the ledger" in printed
+    scrub.main(["rotated", "1"])
+    (w.work / "files" / "2").write_text(w.redacted("2") * 2)
+    capsys.readouterr()
+    scrub.main(["show", "1"])
+    printed = capsys.readouterr().out
+    assert "(rotated 20" in printed and "    and 2 more" in printed
 
 
 def test_missing_inputs_are_empty(tmp_path):

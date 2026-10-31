@@ -20,6 +20,7 @@ finding says "rotate it".
 | `make scrub` | every file | the same |
 | `make scrub-check` | every file | nothing: a dry run, see below |
 | `make scrub-list` | the ledger | nothing: the secrets still to rotate, see below |
+| `make scrub-show ID=<n>` | the files that secret was found in | nothing: the text around its placeholder, see below |
 | `make scrub SCRUB_DIR=<folder>`, `make scrub-check SCRUB_DIR=<folder>` | every file of the conversations that ran in that folder or below it | as without it, see below |
 
 Each secret is one line, whatever number of files it is in: where it was
@@ -90,6 +91,33 @@ scrub: 2 secrets open, 0 secrets rotated; once rotated: make scrub-rotated ID=<n
 The value itself is gone; the four characters it ends in are what a
 provider's console shows to tell keys apart (AWS lists the whole access key
 id). After rotating, `make scrub-rotated ID=2` takes it off.
+
+### What a secret was
+
+A secret shorter than 20 characters has no tail to go by (`-` in the
+list), and neither has a private key from before key blocks were redacted
+whole (its tail is `----`). What is left to tell what it was is the text
+around its placeholder: the command that printed it, the variable it was
+given to, the file being edited. `make scrub-show ID=<n>` (`ID="3 5"` for
+several) prints that, for every file the secret was found in: the secret's
+line from the list, then for each file up to five placeholders with the
+200 characters before each and the 80 after.
+
+```text
+#87 private-key ...---- (open), first seen 2026-10-22, 1 file
+  /home/me/.codex/sessions/2026/04/10/rollout-....jsonl
+    ...$ cat ~/.ssh/deploy_key [REDACTED:private-key:...----] ...
+```
+
+A placeholder with no tail is the same for every secret of its rule, so in
+a file that holds several, each one is shown and the line says it could be
+any of them. A file gone since, or rewritten so it no longer holds the
+placeholder, is said so. It reads copies of the files in the scan's
+container, as everything else here does, and prints to the terminal only;
+anything in a file that is not printable (an escape sequence, say) is shown
+as a space. The text around a placeholder can be sensitive in its own right
+(other people's names or addresses in a tool's output), so read it there
+rather than pasting it elsewhere.
 
 ### Dry run
 

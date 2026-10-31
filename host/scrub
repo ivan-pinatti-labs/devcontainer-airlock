@@ -22,6 +22,10 @@
     host/scrub list [--all] [--files]
                         the ledger as a table: the secrets not rotated yet
                         (--all: every one; --files: with the files each was in)
+    host/scrub show ID...
+                        for each of those secrets, the text around its
+                        placeholder in every file it was found in, to tell
+                        what it was; on this terminal only
 
   CONTEXT, which host/workbench writes, holds one fact a line:
     home host|workbench claude|codex PATH
@@ -52,7 +56,7 @@ die() {
   exit 1
 }
 usage() {
-  sed -n '9,24p' "$0" >&2
+  sed -n '9,28p' "$0" >&2
   exit 2
 }
 
@@ -378,6 +382,35 @@ cmd_list() {
   scan_container list "$@"
 }
 
+# What is around each placeholder of the secrets named, in the files the
+# ledger says they were found in: a container lists those files from a
+# copy of the ledger, they are copied, and a second container reads the
+# copies. Read only, like list.
+cmd_show() {
+  local id n=0 path
+  [[ $# -gt 0 ]] || usage
+  for id in "$@"; do
+    [[ "${id}" =~ ^[0-9]+$ ]] || usage
+  done
+  exec {LOCK}</dev/null
+  STATE_MOUNT="$(mktemp -d)"
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "${STATE_MOUNT}" "${WORK}"' EXIT
+  if [[ -f "${STATE}/ledger.json" ]]; then cp "${STATE}/ledger.json" "${STATE_MOUNT}/"; fi
+  mkdir "${WORK}/files"
+  : >"${WORK}/manifest"
+  MOUNTS=()
+  scan_container files "$@" >"${WORK}/paths" || die "could not read the ledger"
+  while IFS= read -r path; do
+    n=$((n + 1))
+    if cp -- "${path}" "${WORK}/files/${n}" 2>/dev/null; then
+      printf '%s\t0\t0\t-\t-\t%s\n' "${n}" "${path}" >>"${WORK}/manifest"
+    fi
+  done <"${WORK}/paths"
+  MOUNTS=(-v "${WORK}:/work:Z")
+  scan_container show "$@"
+}
+
 case "${1:-}" in
 scan)
   shift
@@ -390,6 +423,10 @@ rotated)
 list)
   shift
   cmd_list "$@"
+  ;;
+show)
+  shift
+  cmd_show "$@"
   ;;
 *) usage ;;
 esac

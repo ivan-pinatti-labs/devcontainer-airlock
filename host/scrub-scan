@@ -24,7 +24,7 @@ decoded, so a rule sees `api_key: "..."` rather than its escaped form. A
 hit from a rule in REPORT_ONLY is reported, never redacted or kept.
 """
 
-# cspell:words argparse isdigit ljust CREAT fdopen findall finditer fromhex fullmatch hashlib hexdigest hmac HMACs nistp iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
+# cspell:words argparse isdigit isprintable ljust CREAT fdopen findall finditer fromhex fullmatch hashlib hexdigest hmac HMACs nistp iterdir removeprefix setdefault strftime subparsers surrogateescape TRUNC WRONLY
 from __future__ import annotations
 
 import argparse
@@ -60,6 +60,11 @@ BENIGN_BEFORE = re.compile(
 MIN_LENGTH = 8
 TAIL_FROM = 20
 TAIL_SAFE = re.compile(r"[A-Za-z0-9+/=_.-]{4}")
+# `show`: how much text around a placeholder, and how many placeholders a
+# file, are shown.
+SHOW_BEFORE = 200
+SHOW_AFTER = 80
+SHOW_MAX = 5
 # A private key as a file holds it, at any depth of JSON escaping: its
 # lines split by newlines, real or escaped, each perhaps after a line
 # number (a file read with its numbers), and enough key material, mixing
@@ -711,6 +716,67 @@ def rotated(args, out: Output) -> int:
     return 0
 
 
+def files(args, out: Output) -> int:
+    """The files the secrets named were found in, one a line, each once, for
+    host/scrub to copy for `show`."""
+    ledger = Ledger(STATE, writable=False)
+    seen: set[str] = set()
+    for raw in args.ids:
+        entry = ledger.by_id(int(raw))
+        for path in entry["files"] if entry else []:
+            if path not in seen and "\n" not in path:
+                seen.add(path)
+                print(path)
+    return 0
+
+
+def readable(text: str) -> str:
+    """Text from a file, made safe and short for a terminal: the usual JSON
+    escapes read, anything that is not printable (an escape sequence, say)
+    a space, and runs of spaces one."""
+    for escape, char in (("\\n", " "), ("\\t", " "), ('\\"', '"')):
+        text = text.replace(escape, char)
+    text = "".join(c if c.isprintable() else " " for c in text)
+    return re.sub(r"\s+", " ", text)
+
+
+def show(args, out: Output) -> int:
+    """For each secret named, the text around its placeholder in every file
+    it was found in (the copies host/scrub made), so its owner can tell what
+    it was. A placeholder with no tail is the same for every secret of its
+    rule, so then each one in the file is shown, and it says so."""
+    ledger = Ledger(STATE, writable=False)
+    copies = {e.path: WORK / "files" / e.n for e in read_manifest(WORK / "manifest")}
+    for raw in args.ids:
+        entry = ledger.by_id(int(raw))
+        if entry is None:
+            out.say(f"no secret #{raw} in the ledger")
+            continue
+        mark = f"[REDACTED:{entry['rule']}:...{entry['tail']}]" if entry["tail"] else f"[REDACTED:{entry['rule']}]"
+        status = f"rotated {entry['rotated']}" if entry["status"] == "rotated" else "open"
+        what = f"{entry['rule']} ...{entry['tail']}" if entry["tail"] else entry["rule"]
+        print(f"#{entry['id']} {what} ({status}), first seen {entry['first_seen']}, {plural(len(entry['files']), 'file')}")
+        for path in entry["files"]:
+            copy = copies.get(path)
+            if copy is None:
+                print(f"  {path}: gone, or could not be read")
+                continue
+            text = copy.read_text(**ENCODING)
+            starts = [m.start() for m in re.finditer(re.escape(mark), text)]
+            if not starts:
+                print(f"  {path}: no placeholder for it (not redacted yet, or rewritten since)")
+                continue
+            note = "" if entry["tail"] else f"; with no tail, {plural(len(starts), 'placeholder')} like it here could be any secret of this kind"
+            print(f"  {path}{note}")
+            for i in starts[:SHOW_MAX]:
+                before = readable(text[max(0, i - SHOW_BEFORE) : i])
+                after = readable(text[i + len(mark) : i + len(mark) + SHOW_AFTER])
+                print(f"    ...{before}{mark}{after}...")
+            if len(starts) > SHOW_MAX:
+                print(f"    and {len(starts) - SHOW_MAX} more")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="scrub-scan")
     parser.add_argument("--color", action="store_true")
@@ -725,6 +791,8 @@ def main(argv: list[str]) -> int:
     ls = sub.add_parser("list")
     ls.add_argument("--all", action="store_true")
     ls.add_argument("--files", action="store_true")
+    for name in ("files", "show"):
+        sub.add_parser(name).add_argument("ids", nargs="+", type=int)
     args = parser.parse_args(argv)
     out = Output(color=args.color)
     try:
@@ -732,6 +800,10 @@ def main(argv: list[str]) -> int:
             return scan(args, out)
         if args.command == "list":
             return listing(args, out)
+        if args.command == "files":
+            return files(args, out)
+        if args.command == "show":
+            return show(args, out)
         return rotated(args, out)
     except (ScrubError, OSError, ValueError) as error:
         out.say(f"the scan failed, nothing was changed: {error}", alarm=True)
