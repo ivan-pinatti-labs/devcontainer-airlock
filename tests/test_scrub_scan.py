@@ -959,14 +959,21 @@ def test_show_says_when_another_secret_ends_the_same(w, gitleaks, capsys):
     )
 
 
-def test_show_prints_no_escape_from_a_file_name(w, gitleaks, capsys):
-    n = w.add("odd\x1b[2Jname.md", f"token {PAT}\n")
+@pytest.mark.parametrize("state", ["redacted", "rewritten", "gone"])
+def test_show_prints_no_escape_from_a_file_name(w, gitleaks, capsys, state):
+    # Two spaces and a literal \n are kept as they are: only what is not
+    # printable becomes a space, so the name still points at its file.
+    n = w.add("odd\x1b[2J  re\\n.md", f"token {PAT}\n")
     w.run(gitleaks)
-    (w.work / "files" / n).write_text(w.redacted(n))
+    (w.work / "files" / n).write_text(
+        w.redacted(n) if state == "redacted" else "nothing\n"
+    )
+    if state == "gone":
+        (w.work / "manifest").write_text("")
     capsys.readouterr()
     scrub.main(["show", "1"])
     printed = capsys.readouterr().out
-    assert "\x1b" not in printed and "odd [2Jname.md" in printed
+    assert "\x1b" not in printed and "odd [2J  re\\n.md" in printed
 
 
 def test_missing_inputs_are_empty(tmp_path):

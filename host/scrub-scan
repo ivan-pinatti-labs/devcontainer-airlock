@@ -760,7 +760,7 @@ def show(args, out: Output) -> int:
         alike = [e["id"] for e in ledger.data["entries"] if e is not entry and e["rule"] == entry["rule"] and e["tail"] == entry["tail"]]
         for path in entry["files"]:
             copy = copies.get(path)
-            shown_path = readable(path)
+            shown_path = "".join(c if c.isprintable() else " " for c in path)
             if copy is None:
                 print(f"  {shown_path}: gone, or could not be read")
                 continue
