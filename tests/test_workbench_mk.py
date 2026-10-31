@@ -90,3 +90,13 @@ def test_scrub_dir_gives_dir_only_when_set(target: str, check: str) -> None:
     )
     text = WORKBENCH_MK.read_text()
     assert "\nSCRUB_DIR ?=\n" in text and "\nexport ID SCRUB_DIR\n" in text
+
+
+def test_scrub_show_takes_the_ids_from_the_environment() -> None:
+    """ID reaches show as the exported variable, so several ids split into
+    arguments, and no ID stops make with how to give one. Text stands in for
+    make, as above."""
+    assert recipes()["scrub-show"] == (
+        '@$(WORKBENCH) scrub show $(if $(ID),$$ID,$(error which secret? ID=<n>, several as ID="3 5"))'
+    )
+    assert " scrub-show " in WORKBENCH_MK.read_text().splitlines()[19]

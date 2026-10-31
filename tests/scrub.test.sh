@@ -365,4 +365,20 @@ check "with their date" 0 out "rotated 20"
 run host/scrub list --bogus
 check "only --all and --files" 2 err "host/scrub list [--all] [--files]"
 
+run host/scrub show 1
+check "show names the secret" 0 out "#1 github-pat ...Q7r8 (rotated 20"
+check "and the text around its placeholder" 0 out "export GITHUB_TOKEN=[REDACTED:github-pat:...Q7r8]"
+assert "never its value" bash -c "! grep -qF '${pat}' '${__scratch}/out'"
+check "the files come from a copy of the ledger" 0 calls "python3 -I - files 1"
+check "and are read in a container, as copies" 0 calls "python3 -I - show 1"
+refute "never mounting the live state" "${state}:/state:Z"
+CP_FAILS=projects/-w/ run host/scrub show 1
+check "a file that cannot be copied is said" 0 out "${claude}/projects/-w/${done_id}.jsonl: gone, or could not be read"
+PODMAN_RUN='exit 3' run host/scrub show 1
+check "a ledger that cannot be read stops it" 1 err "scrub: could not read the ledger"
+run host/scrub show
+check "show needs a secret" 2 err "host/scrub show ID..."
+run host/scrub show all
+check "by number" 2 err "host/scrub show ID..."
+
 finish

@@ -17,7 +17,7 @@
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
-.PHONY: claude codex sessions prune claude-shell codex-shell claude-remote claude-plain claude-assisted claude-unattended unlock scrub scrub-check scrub-list scrub-rotated workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
+.PHONY: claude codex sessions prune claude-shell codex-shell claude-remote claude-plain claude-assisted claude-unattended unlock scrub scrub-check scrub-list scrub-rotated scrub-show workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 VOICE ?= 1
@@ -60,6 +60,7 @@ workbench-help:
 		'                              Both take SCRUB_DIR=<folder>: only the conversations that ran there or below it.' \
 		'  scrub-list                  The secrets not rotated yet, as a table (ALL=1: rotated too; FILES=1: where).' \
 		'  scrub-rotated ID=<n>        Mark secret <n> of that list rotated (several: ID="3 5"; every one: ID=all).' \
+		'  scrub-show ID=<n>           The text around secret <n> where it was, to tell what it was (several: ID="3 5").' \
 		'  workbench-up                Start this repository workbenches and L2 engine, and the shared services.' \
 		'  workbench-down              Stop them; the shared services too when nothing else uses them.' \
 		'  workbench-status            What is running.' \
@@ -151,6 +152,9 @@ scrub-list:
 
 scrub-rotated:
 	@$(WORKBENCH) scrub rotated $(if $(ID),$$ID,$(error which secret? ID=<n>, several as ID="3 5", or ID=all))
+
+scrub-show:
+	@$(WORKBENCH) scrub show $(if $(ID),$$ID,$(error which secret? ID=<n>, several as ID="3 5"))
 
 workbench-up:
 	@$(WORKBENCH) up
