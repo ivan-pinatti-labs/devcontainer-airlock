@@ -11,5 +11,5 @@
 anthropic.claude-code@2.1.310
 openai.chatgpt@26.908.40401
 ms-vscode.makefile-tools@0.12.17
-vscode-icons-team.vscode-icons@12.19.0
+vscode-icons-team.vscode-icons@13.0.0
 sonarsource.sonarlint-vscode@5.10.0
