@@ -1186,6 +1186,22 @@ def test_only_the_values_own_quote_is_unescaped(w, gitleaks, monkeypatch, text):
     assert "fixture" not in w.redacted(n)
 
 
+def test_an_unquoted_password_is_redacted_as_a_shell_reads_it_too(
+    w, gitleaks, monkeypatch
+):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    n = w.add(
+        "notes.md",
+        f"{KW}=fixture\\!value-00001234 then\nit was fixture!value-00001234 here\n",
+    )
+    w.run(gitleaks)
+    placeholder = "[REDACTED:password-assignment:...1234]"
+    assert w.redacted(n) == f"{KW}={placeholder} then\nit was {placeholder} here\n"
+    (entry,) = w.ledger()["entries"]
+    assert entry["tail"] == "1234"
+
+
 @pytest.mark.parametrize(
     "text",
     [

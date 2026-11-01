@@ -238,8 +238,11 @@ redacted by the first scan after its session ends.
      `changeme`). So is a value of lowercase letters only, which a weak
      password can be too. A value CircleCI shows masked (`xxxx` and its
      last four) is still taken, since from the value alone it cannot be
-     told from a password shaped the same; `make scrub-show` tells them
-     apart, and `make scrub-rotated` takes a mask off the list.
+     told from a password shaped the same. The text around it, which
+     `make scrub-show` prints, usually tells (a tool listing masked
+     variables), though not always; `make scrub-rotated` takes a mask off
+     the list. An unquoted value is also redacted as a shell reads it
+     (`abc\!def` as `abc!def` too), wherever the file holds that.
    - `password-hash`: a crypt(3) hash (bcrypt `$2y$...`, sha256crypt,
      sha512crypt, argon2). Not the password, but it can be cracked offline.
 3. **Long random looking strings** with no known format

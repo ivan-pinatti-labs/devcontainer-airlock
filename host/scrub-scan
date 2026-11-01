@@ -74,12 +74,13 @@ SHOW_MAX = 5
 # which no file holds as it is: its hits are left out, and this is matched
 # against the file itself.
 KEY_RULE = "private-key"
-# Rules whose value is quoted and may hold its own quote escaped (\" in a
-# double quoted value, \' in a single quoted one): host/scrub-gitleaks.toml.
-# Only that escape is undone. What any other backslash means depends on
-# the language (a newline in Python, a backslash in a shell), so it is
-# left as written.
-QUOTED = {"password-assignment-quoted": '"', "password-assignment-single-quoted": "'"}
+# Rules whose value may hold backslash escapes (host/scrub-gitleaks.toml),
+# and the escape each undoes to read the value. A quoted value: only its
+# own quote (\" in a double quoted one, \' in a single quoted one), since
+# what any other backslash means there depends on the language. An
+# unquoted value: every backslash pair, as a shell reads it (\! is !).
+QUOTED = {"password-assignment-quoted": '"', "password-assignment-single-quoted": "'", "password-assignment": None}
+BACKSLASH_PAIR = re.compile(r"\\(.)")
 KEY_NEWLINE = r"(?:\\+[rn]|[\r\n])+(?:[ \t]*\d+(?:\u2192|\\+u2192|\t|\\+t))?"
 KEY_BLOCK = re.compile(
     r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----"
@@ -523,11 +524,11 @@ def hits_of(entries: list[Entry], texts: dict[str, str], known: dict[str, str], 
         if finding["RuleID"] in REPORT_ONLY:
             report[n].add(value)
         elif finding["RuleID"] in QUOTED:
-            # Known by its value with its own quote unescaped (its tail and
-            # its length for showing one too), and redacted in that
-            # spelling as well, wherever the file holds it so.
+            # Known by its value as read, escapes undone (its tail and its
+            # length for showing one too), and redacted in that spelling as
+            # well, wherever the file holds it so.
             quote = QUOTED[finding["RuleID"]]
-            plain = value.replace("\\" + quote, quote)
+            plain = BACKSLASH_PAIR.sub(r"\1", value) if quote is None else value.replace("\\" + quote, quote)
             redact[n].setdefault(value, (finding["RuleID"], None, plain))
             if plain != value and any(f in texts[n] for f in forms(plain)):
                 redact[n].setdefault(plain, (finding["RuleID"], None, plain))
