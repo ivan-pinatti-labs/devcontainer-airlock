@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme Jname xxxxab maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA abcdéfgh fixt fixturenvalue fixturevalue lastindex changeme Jname xxxxab maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -367,20 +367,47 @@ def test_a_line_that_would_break_leaves_only_itself(w, gitleaks, capsys):
         in printed
     )
     assert re.search(
-        r"secret #\d+ \(cut\): cannot be redacted in .*a\.jsonl\. Rotate it", printed
+        r"secret #\d+ \(cut\): cannot be redacted in .*a\.jsonl \(line 1\)\. Rotate it",
+        printed,
+    )
+    assert (
+        "1 to redact, 0 wait for a session to end, 1 keep something that cannot be redacted"
+        in printed
     )
     assert "replace 1" in w.actions()
 
 
-def test_in_json_a_value_with_a_backslash_is_replaced_as_escaped(w, gitleaks):
+@pytest.mark.parametrize("name", ["a.jsonl", "a.json"])
+def test_in_json_a_value_with_a_backslash_is_replaced_as_escaped(w, gitleaks, name):
     # Its escaped spelling is the value in "a"; as it is, it would also match
     # the first half of the \" in "b", which is another string.
     w.known("tail-slash", "abcdefgh\\")
     text = '{"a":"abcdefgh\\\\","b":"abcdefgh\\"x"}\n'
-    n = w.add("a.jsonl", text)
+    n = w.add(name, text)
     w.run(gitleaks)
     out = w.redacted(n)
     assert json.loads(out) == {"a": "[REDACTED:tail-slash]", "b": 'abcdefgh"x'}
+
+
+def test_a_non_ascii_value_is_replaced_as_its_unescaped_json_spelling(w, gitleaks):
+    # Written with non-ASCII kept (ensure_ascii off), the escaped spelling
+    # holds the é as it is.
+    w.known("accent", "abcdéfgh\\")
+    n = w.add(
+        "a.json", json.dumps({"a": "abcdéfgh\\", "b": 'abcdéfgh"x'}, ensure_ascii=False)
+    )
+    w.run(gitleaks)
+    assert json.loads(w.redacted(n)) == {"a": "[REDACTED:accent]", "b": 'abcdéfgh"x'}
+
+
+def test_a_line_that_is_not_json_is_redacted_as_text(w, gitleaks):
+    # The JSON line has the escaped spelling; the other is plain text and
+    # holds the value as it is.
+    w.known("tail-slash", "abcdefgh\\")
+    n = w.add("a.jsonl", '{"a":"abcdefgh\\\\"}\nnot json: abcdefgh\\ end\n')
+    w.run(gitleaks)
+    out = w.redacted(n)
+    assert out == '{"a":"[REDACTED:tail-slash]"}\nnot json: [REDACTED:tail-slash] end\n'
 
 
 def test_a_whole_json_file_must_still_parse():
