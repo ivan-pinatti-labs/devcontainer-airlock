@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme Jname xxxxab maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA abcdéfgh fixt fixturenvalue fixturevalue lastindex changeme Jname xxxxab maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -336,6 +336,82 @@ def test_redaction_that_would_break_json_is_refused(w, gitleaks, capsys):
     assert "would break its JSON" in capsys.readouterr().out
 
 
+def test_a_whole_json_file_that_would_break_is_refused(w, gitleaks, capsys):
+    # A JSON file is one document, with no lines to leave apart.
+    w.known("cut", "n0123456789")
+    n = w.add("a.json", json.dumps({"t": "a\n0123456789", "u": f"token {PAT}"}))
+    w.run(gitleaks, "--manual")
+    assert w.actions() == []
+    assert not (w.work / "out" / "redacted" / n).exists()
+    printed = capsys.readouterr().out
+    assert (
+        "a.json: redacting it would break its JSON, so it is left as it is" in printed
+    )
+    assert re.search(
+        r"\(github-pat \.\.\.Q7r8\): cannot be redacted in .*a\.json", printed
+    )
+
+
+def test_a_line_that_would_break_leaves_only_itself(w, gitleaks, capsys):
+    w.known("cut", "n0123456789")
+    first = line(t="a\n0123456789")
+    n = w.add("a.jsonl", first + "\n" + line(t=f"token {PAT}") + "\n")
+    w.run(gitleaks, "--manual")
+    printed = capsys.readouterr().out
+    out = w.redacted(n)
+    # The other line is redacted; the one that would break is as it was.
+    assert out.split("\n")[0] == first and PAT not in out
+    assert all(scrub.parses(row) for row in out.splitlines())
+    assert (
+        "a.jsonl: redacting 1 line of it would break its JSON, so those are left as they are"
+        in printed
+    )
+    assert re.search(
+        r"secret #\d+ \(cut\): cannot be redacted in .*a\.jsonl \(line 1\)\. Rotate it",
+        printed,
+    )
+    assert (
+        "1 to redact, 0 wait for a session to end, 1 keep something that cannot be redacted"
+        in printed
+    )
+    assert "replace 1" in w.actions()
+
+
+@pytest.mark.parametrize("name", ["a.jsonl", "a.json"])
+def test_in_json_a_value_with_a_backslash_is_replaced_as_escaped(w, gitleaks, name):
+    # Its escaped spelling is the value in "a"; as it is, it would also match
+    # the first half of the \" in "b", which is another string.
+    w.known("tail-slash", "abcdefgh\\")
+    text = '{"a":"abcdefgh\\\\","b":"abcdefgh\\"x"}\n'
+    n = w.add(name, text)
+    w.run(gitleaks)
+    out = w.redacted(n)
+    assert json.loads(out) == {"a": "[REDACTED:tail-slash]", "b": 'abcdefgh"x'}
+
+
+def test_a_non_ascii_value_is_replaced_as_its_unescaped_json_spelling(w, gitleaks):
+    # Written with non-ASCII kept (ensure_ascii off), the escaped spelling
+    # holds the é as it is.
+    w.known("accent", "abcdéfgh\\")
+    n = w.add(
+        "a.json", json.dumps({"a": "abcdéfgh\\", "b": 'abcdéfgh"x'}, ensure_ascii=False)
+    )
+    w.run(gitleaks)
+    assert json.loads(w.redacted(n)) == {"a": "[REDACTED:accent]", "b": 'abcdéfgh"x'}
+
+
+@pytest.mark.parametrize("name", ["a.jsonl", "a.json"])
+def test_a_line_that_is_not_json_is_redacted_as_text(w, gitleaks, name):
+    # The JSON line has the escaped spelling; the other is plain text and
+    # holds the value as it is. A .json file that is not one document is
+    # read a line at a time, as the scan's view of it is.
+    w.known("tail-slash", "abcdefgh\\")
+    n = w.add(name, '{"a":"abcdefgh\\\\"}\nnot json: abcdefgh\\ end\n')
+    w.run(gitleaks)
+    out = w.redacted(n)
+    assert out == '{"a":"[REDACTED:tail-slash]"}\nnot json: [REDACTED:tail-slash] end\n'
+
+
 def test_a_whole_json_file_must_still_parse():
     assert scrub.still_valid("s.json", "{}", "{}")
     assert not scrub.still_valid("s.json", "{}", "{")
@@ -539,6 +615,9 @@ KEY_TAIL = "".join(KEY_LINES)[-4:]
         ("e.jsonl", json.dumps({"t": KEY}, ensure_ascii=True) + "\n"),
         ("f.txt", KEY.replace("\n", "\r\n")),
         ("g.jsonl", line(t=KEY.replace("\n", "\r\n")) + "\n"),
+        # The same key escaped once and twice on one line: each block keeps
+        # its own spelling, though one is the other escaped once more.
+        ("h.jsonl", line(t=KEY, u=json.dumps({"output": KEY})) + "\n"),
     ],
 )
 def test_a_private_key_is_redacted_however_it_is_escaped(w, gitleaks, rel, text):
@@ -550,6 +629,36 @@ def test_a_private_key_is_redacted_however_it_is_escaped(w, gitleaks, rel, text)
     assert scrub.still_valid(rel, text, out)
     (entry,) = w.ledger()["entries"]
     assert entry["rule"] == "private-key" and entry["tail"] == KEY_TAIL
+
+
+@pytest.mark.parametrize("name", ["a.jsonl", "a.json"])
+def test_a_raw_key_over_plain_lines_is_redacted_beside_its_escaped_copy(
+    w, gitleaks, name
+):
+    # Escaped on a JSON line, and raw over the plain lines after it: both go,
+    # and every line keeps its number.
+    text = line(t=KEY) + "\n" + KEY + "\n" + line(t="after") + "\n"
+    n = w.add(name, text)
+    w.run(gitleaks)
+    out = w.redacted(n)
+    assert all(x not in out for x in KEY_LINES) and "BEGIN OPENSSH" not in out
+    assert out.count("\n") == text.count("\n")
+    assert out.split("\n")[-2] == line(t="after")
+
+
+def test_a_raw_key_over_a_json_line_is_left_and_said(w, gitleaks, capsys):
+    # A key line of digits only is a JSON number: replacing the block would
+    # leave it empty, so the block is left and its first line named.
+    digits = "1234567890" * 7
+    key = "\n".join([BEGIN, KEY_LINES[0], digits, *KEY_LINES[1:], END])
+    n = w.add("a.jsonl", f"{key}\n" + line(t=f"token {PAT}") + "\n")
+    w.run(gitleaks, "--manual")
+    out = w.redacted(n)
+    assert digits in out and PAT not in out
+    assert re.search(
+        r"\(private-key \.\.\..{4}\): cannot be redacted in .*a\.jsonl \(line 1\)",
+        capsys.readouterr().out,
+    )
 
 
 def test_one_key_written_two_ways_is_one_entry(w, gitleaks):
