@@ -17,12 +17,16 @@ useDefault = true
 # in the id, which gitleaks drops when another rule finds the same value.
 # A reference rather than a value (a variable, a placeholder, an
 # identifier in code) is no password; a value that only starts with $ is.
+# A backslash and the character after it (a shell's \!, \$ or an escaped
+# space) are part of the value, not its end. A value shaped like a mask
+# (CircleCI shows xxxx and the last four) is still taken: from the value
+# alone, a mask and a password shaped like one cannot be told apart.
 # A quoted value is one of the next two rules', taken whole up to its own
 # closing quote, spaces, punctuation and the other kind of quote included.
 [[rules]]
 id = "password-assignment"
 description = "A value given to a password"
-regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*([^\s"'\\(){}\[\],;<>`]{8,200})'''
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*((?:[^\s"'\\(){}\[\],;<>`]|\\.){8,200})'''
 secretGroup = 1
 
 [[rules.allowlists]]

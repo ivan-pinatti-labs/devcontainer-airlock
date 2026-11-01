@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme Jname maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme Jname xxxxab maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -1091,6 +1091,13 @@ def password_hits(text: str) -> list[str]:
         (f"export PG{KW.upper()}={value('&')}", value("&")),
         (f"{KW}: {value('-')}", value("-")),
         (f"admin_{KW} := {value('+')}", value("+")),
+        # A shell's backslash pair is part of an unquoted value, not its end,
+        # an escaped space too.
+        (f"PG{KW.upper()}={value(chr(92) + '!')} pg_dump", value("\\!")),
+        (f"{KW}={value(chr(92) + ' ')} next", value("\\ ")),
+        # A value shaped like a CircleCI mask is still taken: from the value
+        # alone it cannot be told from a password shaped the same.
+        (f"DOCKERHUB_{KW.upper()} = xxxxab12", "xxxxab12"),
         # A value that only starts with $ is a value, not a reference.
         (f"{KW}=${value('!')}", "$" + value("!")),
         (f'{KW}: "${value("$")}"', "$" + value("$")),
@@ -1177,6 +1184,22 @@ def test_only_the_values_own_quote_is_unescaped(w, gitleaks, monkeypatch, text):
     w.run(gitleaks)
     assert len(w.ledger()["entries"]) == 2
     assert "fixture" not in w.redacted(n)
+
+
+def test_an_unquoted_password_is_redacted_as_a_shell_reads_it_too(
+    w, gitleaks, monkeypatch
+):
+    rules = [[r, GITLEAKS_RULES[r]["regex"]] for r in PASSWORD_RULES]
+    monkeypatch.setenv("FAKE_RULES", json.dumps(rules))
+    n = w.add(
+        "notes.md",
+        f"{KW}=fixture\\!value-00001234 then\nit was fixture!value-00001234 here\n",
+    )
+    w.run(gitleaks)
+    placeholder = "[REDACTED:password-assignment:...1234]"
+    assert w.redacted(n) == f"{KW}={placeholder} then\nit was {placeholder} here\n"
+    (entry,) = w.ledger()["entries"]
+    assert entry["tail"] == "1234"
 
 
 @pytest.mark.parametrize(
