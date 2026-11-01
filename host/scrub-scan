@@ -557,16 +557,49 @@ def benign(text: str, value: str) -> bool:
     return bool(starts) and all(BENIGN_BEFORE.search(text[max(0, i - 40) : i]) for i in starts)
 
 
-def redacted(text: str, found: dict[str, tuple[str, str | None, str]]) -> tuple[str, list[str]]:
+def spellings(value: str, text: str, json_text: bool) -> list[str]:
+    """The forms of a value to replace in a text. In JSON, a value that has
+    to be escaped there (a backslash, a quote) is written escaped: where
+    that spelling is in the text, the value as it is would only match half
+    of some other escape (the first \\ of a \\\\), so it is left out. A value
+    taken from the file as it is (a key block) has no escaped spelling in
+    it and keeps its own."""
+    found = forms(value)
+    escaped = json.dumps(value)[1:-1]
+    if json_text and escaped != value and escaped in text:
+        found = [f for f in found if f != value]
+    return found
+
+
+def redacted(
+    text: str, found: dict[str, tuple[str, str | None, str]], json_text: bool = False
+) -> tuple[str, list[str]]:
     """The text with every secret replaced, and the secrets not in it as
     they were found (so not redacted). One only inside a longer one is
     replaced with it."""
-    missing = [value for value in found if not any(f in text for f in forms(value))]
+    spelt = {value: spellings(value, text, json_text) for value in found}
+    missing = [value for value in found if not any(f in text for f in spelt[value])]
     for value in sorted(found, key=len, reverse=True):
         rule, _, ident = found[value]
-        for form in forms(value):
+        for form in spelt[value]:
             text = text.replace(form, placeholder(rule, ident))
     return text, missing
+
+
+def redacted_by_line(text: str, found: dict[str, tuple[str, str | None, str]]) -> tuple[str, set[str], int]:
+    """JSON lines redacted one line at a time, for a file whose redaction as
+    a whole breaks a line's JSON: a line that parsed and would not after
+    keeps its text. Returns the text, the secrets those lines hold, and how
+    many lines were left."""
+    lines, left, broken = [], set(), 0
+    for line in text.split("\n"):
+        new, _ = redacted(line, found, json_text=True)
+        if new != line and parses(line) and not parses(new):
+            left |= {v for v in found if any(f in line for f in forms(v))}
+            broken += 1
+            new = line
+        lines.append(new)
+    return "\n".join(lines), left, broken
 
 
 def scan(args, out: Output) -> int:
@@ -609,11 +642,22 @@ def scan(args, out: Output) -> int:
         if not found:
             actions.append(f"done {e.n} {e.size}")
             continue
-        text, missing = redacted(texts[e.n], found)
-        kept = {found[value][2] for value in missing}
-        done = {found[value][2] for value in found if value not in missing}
+        json_text = is_json(e.path) or is_json_lines(e.path)
+        text, missing = redacted(texts[e.n], found, json_text)
+        left: set[str] = set()
+        if is_json_lines(e.path) and not still_valid(e.path, texts[e.n], text):
+            # One line that would break leaves only itself, not the file.
+            text, left, broken = redacted_by_line(texts[e.n], found)
+            out.say(f"{e.path}: redacting {plural(broken, 'line')} of it would break its JSON, so those are left as they are", alarm=True)
+        kept = {found[value][2] for value in set(missing) | left}
+        done = {found[value][2] for value in found if any(texts[e.n].count(f) > text.count(f) for f in forms(value))}
         for ident in kept:
             secrets_found[ident].kept.append(e.path)
+        if left and text == texts[e.n]:
+            # Every line that held a secret would break: left for the next
+            # scan to try again, as a file refused whole is.
+            counts["kept"] += 1
+            continue
         if text == texts[e.n]:
             counts["kept"] += 1
             actions.append(f"done {e.n} {e.size}")

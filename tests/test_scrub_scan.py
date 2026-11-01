@@ -336,6 +336,53 @@ def test_redaction_that_would_break_json_is_refused(w, gitleaks, capsys):
     assert "would break its JSON" in capsys.readouterr().out
 
 
+def test_a_whole_json_file_that_would_break_is_refused(w, gitleaks, capsys):
+    # A JSON file is one document, with no lines to leave apart.
+    w.known("cut", "n0123456789")
+    n = w.add("a.json", json.dumps({"t": "a\n0123456789", "u": f"token {PAT}"}))
+    w.run(gitleaks, "--manual")
+    assert w.actions() == []
+    assert not (w.work / "out" / "redacted" / n).exists()
+    printed = capsys.readouterr().out
+    assert (
+        "a.json: redacting it would break its JSON, so it is left as it is" in printed
+    )
+    assert re.search(
+        r"\(github-pat \.\.\.Q7r8\): cannot be redacted in .*a\.json", printed
+    )
+
+
+def test_a_line_that_would_break_leaves_only_itself(w, gitleaks, capsys):
+    w.known("cut", "n0123456789")
+    first = line(t="a\n0123456789")
+    n = w.add("a.jsonl", first + "\n" + line(t=f"token {PAT}") + "\n")
+    w.run(gitleaks, "--manual")
+    printed = capsys.readouterr().out
+    out = w.redacted(n)
+    # The other line is redacted; the one that would break is as it was.
+    assert out.split("\n")[0] == first and PAT not in out
+    assert all(scrub.parses(row) for row in out.splitlines())
+    assert (
+        "a.jsonl: redacting 1 line of it would break its JSON, so those are left as they are"
+        in printed
+    )
+    assert re.search(
+        r"secret #\d+ \(cut\): cannot be redacted in .*a\.jsonl\. Rotate it", printed
+    )
+    assert "replace 1" in w.actions()
+
+
+def test_in_json_a_value_with_a_backslash_is_replaced_as_escaped(w, gitleaks):
+    # Its escaped spelling is the value in "a"; as it is, it would also match
+    # the first half of the \" in "b", which is another string.
+    w.known("tail-slash", "abcdefgh\\")
+    text = '{"a":"abcdefgh\\\\","b":"abcdefgh\\"x"}\n'
+    n = w.add("a.jsonl", text)
+    w.run(gitleaks)
+    out = w.redacted(n)
+    assert json.loads(out) == {"a": "[REDACTED:tail-slash]", "b": 'abcdefgh"x'}
+
+
 def test_a_whole_json_file_must_still_parse():
     assert scrub.still_valid("s.json", "{}", "{}")
     assert not scrub.still_valid("s.json", "{}", "{")

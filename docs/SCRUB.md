@@ -276,9 +276,15 @@ so you can tell whether a value you hold is the one found. One shorter than
 
 Only the secret's own text changes, in place, with no backup (a backup would
 be another copy of it). A JSON lines file must keep every line that parsed
-before parsing after, and a JSON file must still parse; otherwise it is left
-as it is and the scan says so, loudly. The file keeps its mode and its time,
-so `--resume` still works and Claude Code's 30 day cleanup is not reset.
+before parsing after, and a JSON file must still parse. In a JSON lines
+file, a line whose redaction would break it keeps its text and every other
+line is still redacted; the scan says how many lines it left, loudly, and
+the secrets on them are listed as ones that cannot be redacted there, with
+their numbers. A JSON file, one document, is left whole. In either, a value
+that JSON has to escape (a backslash, a quote) is replaced in its escaped
+spelling where the file has it, never as it is, which would only match half
+of some other escape. The file keeps its mode and its time, so `--resume`
+still works and Claude Code's 30 day cleanup is not reset.
 
 ## The ledger
 
