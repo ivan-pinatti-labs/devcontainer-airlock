@@ -591,11 +591,15 @@ def redacted_by_line(
 ) -> tuple[str, list[str], dict[str, list[int]]]:
     """JSON lines redacted one line at a time: a line that is JSON as JSON
     (a value JSON escapes only in its escaped spelling), any other as text.
-    A line that parsed and would not after keeps its text. Returns the
-    text, the secrets in no line, and for each secret left on such lines
-    their numbers."""
+    A line that parsed and would not after keeps its text. A secret over
+    several lines (a key block left raw on lines that are not JSON) is
+    then replaced across them, its placeholder followed by as many line
+    breaks as it held, so every line keeps its number. Returns the text,
+    the secrets in no line, and for each secret left on such lines their
+    numbers."""
+    old = text.split("\n")
     lines, seen, left = [], set(), {}
-    for number, line in enumerate(text.split("\n"), 1):
+    for number, line in enumerate(old, 1):
         json_line = parses(line)
         new, missing = redacted(line, found, json_text=json_line)
         seen |= found.keys() - set(missing)
@@ -604,7 +608,19 @@ def redacted_by_line(
                 left.setdefault(value, []).append(number)
             new = line
         lines.append(new)
-    return "\n".join(lines), [v for v in found if v not in seen], left
+    joined = "\n".join(lines)
+    for value in sorted((v for v in found if "\n" in v), key=len, reverse=True):
+        start = joined.find(value)
+        if start < 0:
+            continue
+        rule, _, ident = found[value]
+        trial = joined.replace(value, placeholder(rule, ident) + "\n" * value.count("\n"))
+        if all(parses(b) for a, b in zip(old, trial.split("\n"), strict=True) if parses(a)):
+            joined = trial
+        else:
+            left.setdefault(value, []).append(joined.count("\n", 0, start) + 1)
+        seen.add(value)
+    return joined, [v for v in found if v not in seen], left
 
 
 def scan(args, out: Output) -> int:

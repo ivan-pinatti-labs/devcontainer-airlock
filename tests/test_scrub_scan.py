@@ -631,6 +631,36 @@ def test_a_private_key_is_redacted_however_it_is_escaped(w, gitleaks, rel, text)
     assert entry["rule"] == "private-key" and entry["tail"] == KEY_TAIL
 
 
+@pytest.mark.parametrize("name", ["a.jsonl", "a.json"])
+def test_a_raw_key_over_plain_lines_is_redacted_beside_its_escaped_copy(
+    w, gitleaks, name
+):
+    # Escaped on a JSON line, and raw over the plain lines after it: both go,
+    # and every line keeps its number.
+    text = line(t=KEY) + "\n" + KEY + "\n" + line(t="after") + "\n"
+    n = w.add(name, text)
+    w.run(gitleaks)
+    out = w.redacted(n)
+    assert all(x not in out for x in KEY_LINES) and "BEGIN OPENSSH" not in out
+    assert out.count("\n") == text.count("\n")
+    assert out.split("\n")[-2] == line(t="after")
+
+
+def test_a_raw_key_over_a_json_line_is_left_and_said(w, gitleaks, capsys):
+    # A key line of digits only is a JSON number: replacing the block would
+    # leave it empty, so the block is left and its first line named.
+    digits = "1234567890" * 7
+    key = "\n".join([BEGIN, KEY_LINES[0], digits, *KEY_LINES[1:], END])
+    n = w.add("a.jsonl", f"{key}\n" + line(t=f"token {PAT}") + "\n")
+    w.run(gitleaks, "--manual")
+    out = w.redacted(n)
+    assert digits in out and PAT not in out
+    assert re.search(
+        r"\(private-key \.\.\..{4}\): cannot be redacted in .*a\.jsonl \(line 1\)",
+        capsys.readouterr().out,
+    )
+
+
 def test_one_key_written_two_ways_is_one_entry(w, gitleaks):
     w.add("a.md", KEY)
     w.add("b.jsonl", line(t=json.dumps({"output": KEY})) + "\n")
