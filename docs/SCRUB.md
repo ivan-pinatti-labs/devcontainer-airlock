@@ -280,12 +280,14 @@ before parsing after, and a JSON file must still parse. A JSON lines file
 is redacted a line at a time: a line whose redaction would break it keeps
 its text and every other line is still redacted; the scan says how many
 lines it left, loudly, and the secrets on them are listed as ones that
-cannot be redacted there, with the line numbers. A JSON file, one document,
-is left whole. In JSON (a JSON file, or a line of a JSON lines file that
-parses), a value that JSON has to escape (a backslash, a quote) is replaced
-in its escaped spelling where the text has it, with non-ASCII escaped or
-not, never as it is, which would only match half of some other escape; a
-line that is not JSON is redacted as plain text. The file keeps its mode
+cannot be redacted there, with the line numbers. A JSON file that parses,
+one document, is left whole; one that does not is read a line at a time,
+like a JSON lines file. In JSON (a JSON file, or a line that parses), a
+value that JSON has to escape (a backslash, a quote) is replaced in its
+escaped spelling where the text has it, with non-ASCII escaped or not,
+never as it is, which would only match half of some other escape; a line
+that is not JSON is redacted as plain text. A key block is taken from the
+file as it is and always keeps its own spelling. The file keeps its mode
 and its time, so `--resume` still works and Claude Code's 30 day cleanup is
 not reset.
 

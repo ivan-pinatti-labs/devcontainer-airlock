@@ -400,11 +400,13 @@ def test_a_non_ascii_value_is_replaced_as_its_unescaped_json_spelling(w, gitleak
     assert json.loads(w.redacted(n)) == {"a": "[REDACTED:accent]", "b": 'abcdéfgh"x'}
 
 
-def test_a_line_that_is_not_json_is_redacted_as_text(w, gitleaks):
+@pytest.mark.parametrize("name", ["a.jsonl", "a.json"])
+def test_a_line_that_is_not_json_is_redacted_as_text(w, gitleaks, name):
     # The JSON line has the escaped spelling; the other is plain text and
-    # holds the value as it is.
+    # holds the value as it is. A .json file that is not one document is
+    # read a line at a time, as the scan's view of it is.
     w.known("tail-slash", "abcdefgh\\")
-    n = w.add("a.jsonl", '{"a":"abcdefgh\\\\"}\nnot json: abcdefgh\\ end\n')
+    n = w.add(name, '{"a":"abcdefgh\\\\"}\nnot json: abcdefgh\\ end\n')
     w.run(gitleaks)
     out = w.redacted(n)
     assert out == '{"a":"[REDACTED:tail-slash]"}\nnot json: [REDACTED:tail-slash] end\n'
@@ -613,6 +615,9 @@ KEY_TAIL = "".join(KEY_LINES)[-4:]
         ("e.jsonl", json.dumps({"t": KEY}, ensure_ascii=True) + "\n"),
         ("f.txt", KEY.replace("\n", "\r\n")),
         ("g.jsonl", line(t=KEY.replace("\n", "\r\n")) + "\n"),
+        # The same key escaped once and twice on one line: each block keeps
+        # its own spelling, though one is the other escaped once more.
+        ("h.jsonl", line(t=KEY, u=json.dumps({"output": KEY})) + "\n"),
     ],
 )
 def test_a_private_key_is_redacted_however_it_is_escaped(w, gitleaks, rel, text):
