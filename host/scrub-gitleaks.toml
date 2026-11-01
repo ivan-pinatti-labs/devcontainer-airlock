@@ -17,22 +17,23 @@ useDefault = true
 # in the id, which gitleaks drops when another rule finds the same value.
 # A reference rather than a value (a variable, a placeholder, an
 # identifier in code) is no password; a value that only starts with $ is.
-# A backslash pair (a shell's \! or \$) is part of the value, not its end.
-# A value CircleCI shows masked (xxxx and its last four) is no password.
+# A backslash and the character after it (a shell's \!, \$ or an escaped
+# space) are part of the value, not its end. A value shaped like a mask
+# (CircleCI shows xxxx and the last four) is still taken: from the value
+# alone, a mask and a password shaped like one cannot be told apart.
 # A quoted value is one of the next two rules', taken whole up to its own
 # closing quote, spaces, punctuation and the other kind of quote included.
 [[rules]]
 id = "password-assignment"
 description = "A value given to a password"
-regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*((?:[^\s"'\\(){}\[\],;<>`]|\\\S){8,200})'''
+regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*((?:[^\s"'\\(){}\[\],;<>`]|\\.){8,200})'''
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "References, masks and placeholders, not passwords"
+description = "References and placeholders, not passwords"
 regexTarget = "secret"
 regexes = [
   '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
-  '''^x{4}\S{4}$''',
   '''^\*+$''',
   '''^[a-z]+://''',
   '''^[~.]?/''',
@@ -55,11 +56,10 @@ regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*"((
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "References, templates, masks and placeholders, not passwords"
+description = "References, templates and placeholders, not passwords"
 regexTarget = "secret"
 regexes = [
   '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
-  '''^x{4}\S{4}$''',
   '''^\$\{.*\}$''',
   '''^\$\(.*\)$''',
   '''^\{\{.*\}\}$''',
@@ -88,11 +88,10 @@ regex = '''(?i)[a-z0-9_.-]*(?:password|passwd|pwd)["']?[ \t]*(?::=|:|=)[ \t]*'((
 secretGroup = 1
 
 [[rules.allowlists]]
-description = "References, templates, masks and placeholders, not passwords"
+description = "References, templates and placeholders, not passwords"
 regexTarget = "secret"
 regexes = [
   '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
-  '''^x{4}\S{4}$''',
   '''^\$\{.*\}$''',
   '''^\$\(.*\)$''',
   '''^\{\{.*\}\}$''',
