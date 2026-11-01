@@ -223,7 +223,9 @@ redacted by the first scan after its session ends.
    - `password-assignment`: a value given to a name that ends in
      `password`, `passwd` or `pwd` (`REDIS_PASSWORD="..."`,
      `db_pwd: ...`), whatever characters it holds. gitleaks' generic rule
-     wants token characters, so a password with `^` or `!` went by. A
+     wants token characters, so a password with `^` or `!` went by. An
+     unquoted value runs on through a backslash pair (a shell's `\!` or
+     `\$`), so a password holding one is not cut short at it. A
      quoted value is taken whole, up to its own closing quote, spaces and
      the other kind of quote included (`password-assignment-quoted` for
      double quotes, `password-assignment-single-quoted` for single); a
@@ -232,8 +234,9 @@ redacted by the first scan after its session ends.
      (`$X`, `${X}`; a value that only starts with `$` still is one), a call
      or an identifier in code (`getpass()`, `self.password`,
      `newPassword`), a path or URL, a placeholder (`********`, `<...>`,
-     `changeme`). So is a value of lowercase letters only, which a weak
-     password can be too.
+     `changeme`), a value CircleCI shows masked (`xxxx` and its last
+     four). So is a value of lowercase letters only, which a weak password
+     can be too.
    - `password-hash`: a crypt(3) hash (bcrypt `$2y$...`, sha256crypt,
      sha512crypt, argon2). Not the password, but it can be cracked offline.
 3. **Long random looking strings** with no known format

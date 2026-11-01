@@ -8,7 +8,7 @@ image. host/scrub's own end to end run against the real gitleaks is in
 docs/SCRUB.md, Testing. Every secret here is made up.
 """
 
-# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme Jname maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
+# cspell:words AKIA fixt fixturenvalue fixturevalue lastindex changeme Jname xxxxab maa mtoken MIIE NOEQUALS nistp Rdescudv saltsalt WRWJT surrogateescape
 from __future__ import annotations
 
 import base64
@@ -1091,6 +1091,8 @@ def password_hits(text: str) -> list[str]:
         (f"export PG{KW.upper()}={value('&')}", value("&")),
         (f"{KW}: {value('-')}", value("-")),
         (f"admin_{KW} := {value('+')}", value("+")),
+        # A shell's backslash pair is part of an unquoted value, not its end.
+        (f"PG{KW.upper()}={value(chr(92) + '!')} pg_dump", value("\\!")),
         # A value that only starts with $ is a value, not a reference.
         (f"{KW}=${value('!')}", "$" + value("!")),
         (f'{KW}: "${value("$")}"', "$" + value("$")),
@@ -1206,6 +1208,10 @@ def test_only_the_values_own_quote_is_unescaped(w, gitleaks, monkeypatch, text):
         'password: "[REDACTED:password-assignment-quoted:...wE5x]"',
         'password = "new_password"',  # pragma: allowlist secret
         'password: "********"',
+        # CircleCI shows a value masked: xxxx and its last four.
+        "DOCKERHUB_PASSWORD = xxxxab12",
+        'password: "xxxxab12"',  # pragma: allowlist secret
+        "password: 'xxxxab12'",  # pragma: allowlist secret
     ],
 )
 def test_a_reference_or_placeholder_is_no_password(text):
