@@ -144,7 +144,7 @@ credentials and agents in the workbench, project tooling in L2.
 | AWS CLI v2 | AWS's installer archive, version pinned | PGP signature by the AWS CLI team, against its key vendored and fingerprint checked | `l2-aws-devops` |
 | atmos, tflint, kubectl, helmfile, kubeseal, pluto, yq | the projects' official images, pinned by digest | container image published by the project | `l2-aws-devops`, copied out of those images; see "The AWS L2 image" below |
 | helm | the release archive, version pinned | GPG signature by a Helm release manager, against Helm's KEYS vendored and fingerprint checked | `l2-aws-devops` |
-| eksctl | the release archive, version pinned | a SHA-256 reviewed in this repository, and the project's unsigned checksum file | `l2-aws-devops` |
+| eksctl | the release archive, version pinned | cosign keyless signature of the checksums, bound to eksctl's release workflow at that tag | `l2-aws-devops` |
 | hadolint, actionlint, dotenv-linter | the projects' official images, pinned by digest | container image published by the project | L2, copied out of those images, because L2 cannot start containers |
 | Go modules for golang hooks (checkmake, gitleaks) | the Go module proxy, at the versions in `images/l2/go-modules.txt` | Go's checksum database, checked when the image is built; the image digest pins the result | L2, a read only module proxy; the hooks still build from source there |
 | claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | workbench, see below |
@@ -208,18 +208,17 @@ takes the first source in the order this page sets out that exists for it.
     and checked against its fingerprint
     (`FB5DB77FD5C118B80511ADA8A6310ACC4672475C`). It carries its own Python,
     and installs under `/usr/local/aws-cli`.
-  - eksctl is the weakest of them, and the reason is measured. Its ECR
-    Public image stops at v0.225.0 and is a separate build from the release
-    (v0.221.0 there reports `0.221.0-dev` and its binary differs from the
-    archive's), and its releases are signed with cosign only from v0.231.0.
-    The pinned v0.230.0 therefore has no signature to check. Its archive is
-    held to a SHA-256 written in the Dockerfile (`EKSCTL_SHA256`), reviewed
-    in the pull request that sets it, the same trust an image digest gives,
-    and to the project's checksum file. A version moved without that hash
-    fails the build.
+  - eksctl's ECR Public image stops at v0.225.0 and is a separate build
+    from the release (v0.221.0 there reports `0.221.0-dev` and its binary
+    differs from the archive's), so it comes from the release archive.
+    eksctl signs its releases with cosign from v0.231.0, which is why the
+    pin is at least that: the checksum file is verified with
+    `cosign verify-blob`, the certificate identity pinned to
+    `eksctl-io/eksctl`'s `publish-release.yaml` at that very tag, and the
+    archive against the checksum.
 
-  The downloads happen in a throwaway stage and only what was verified is
-  copied into the image.
+  The downloads happen in a throwaway stage, so cosign is not in the image,
+  and only what was verified is copied into it.
 
 The pins are a `FROM` tag and digest for the images and a `_VERSION`
 argument for the rest, graded by `Pin Only`. Renovate is held off them for

@@ -131,3 +131,17 @@ def test_renovate_holds_every_pin_but_tflint() -> None:
 def image_refs() -> set[str]:
     """The upstream images the stages pin."""
     return {match["image"] for line in LINES if (match := IMAGE_STAGE.match(line))}
+
+
+def test_eksctl_is_verified_against_its_release_workflow() -> None:
+    # eksctl signs its checksums with cosign keyless from v0.231.0; the
+    # identity must stay pinned to its release workflow, or any signature
+    # from anywhere would pass.
+    assert "cosign verify-blob" in TEXT
+    assert (
+        "^https://github\\.com/eksctl-io/eksctl/\\.github/workflows/"
+        "publish-release\\.yaml@refs/tags/v?${version}\\$"
+    ) in TEXT
+    assert (
+        "--certificate-oidc-issuer https://token.actions.githubusercontent.com" in TEXT
+    )

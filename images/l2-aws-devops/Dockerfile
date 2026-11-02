@@ -25,7 +25,7 @@ ARG HELM_VERSION=v4.1.1
 # renovate: datasource=github-releases depName=hashicorp/terraform
 ARG TERRAFORM_VERSION=v1.14.9
 # renovate: datasource=github-releases depName=eksctl-io/eksctl
-ARG EKSCTL_VERSION=v0.230.0
+ARG EKSCTL_VERSION=v0.231.0
 # renovate: datasource=github-tags depName=aws/aws-cli
 ARG AWSCLI_VERSION=2.32.6
 
@@ -43,8 +43,8 @@ FROM us-docker.pkg.dev/fairwinds-ops/oss/pluto:v5.22.8@sha256:0254fe08b2eef6661b
 FROM docker.io/mikefarah/yq:4.52.4@sha256:a4c2cafdf4674b2dc3c6ac457fe1486d55d7d93edb3ed4459637afda3c286af6 AS yq
 
 # The tools taken from a release archive, each checked against what its own
-# project signs before anything is unpacked. A throwaway stage, so the
-# downloads stay out of the image; only what was verified is copied out.
+# project signs before anything is unpacked. A throwaway stage, so cosign and
+# the downloads stay out of the image; only what was verified is copied out.
 # hadolint ignore=DL3006
 FROM ${L2_IMAGE} AS releases
 # A build stage only; nothing from it runs in L2.
@@ -85,36 +85,45 @@ RUN set -eu; \
   tar -xzf "${archive}" -C helm linux-amd64/helm; \
   install -m 0755 helm/linux-amd64/helm /out/helm
 
-# The AWS CLI v2: AWS's own installer archive, signed with the AWS CLI team's
-# PGP key, which AWS publishes in the CLI's installation guide and which is
-# vendored as keyrings/aws-cli.asc and checked against its fingerprint first,
-# written as AWS's guide prints it.
-# Ubuntu packages the CLI too, but not at every version, and this image
-# follows a consuming repository's exact one. The archive carries its own
-# Python, so the installer puts the CLI under /usr/local/aws-cli, which is
-# copied out whole. Extraction uses python3 rather than unzip, which the
-# image does not carry; zipfile drops the executable bits, hence the chmod.
 # eksctl: its image on ECR Public stops at v0.225.0 and is not the release
 # build (measured 2026-11-02: v0.221.0 there reports 0.221.0-dev and differs
-# from the archive's binary), and the release archive at this version is
-# signed by nothing; eksctl's cosign signatures start with v0.231.0. So the
-# archive is held to a SHA-256 written here, reviewed in the pull request
-# that sets it, the way an image digest is, and to the project's own
-# checksum file. A version bump without the matching hash fails the build.
+# from the archive's binary), so it comes from the release. v0.231.0 is the
+# first release eksctl signs: its checksum file is signed with cosign
+# keyless, and the identity is pinned to eksctl's own release workflow at
+# this very tag, so a valid signature from any other workflow, repository or
+# tag is refused. The archive is then checked against that file. cosign
+# comes from Ubuntu and stays in this stage.
 ARG EKSCTL_VERSION
-ARG EKSCTL_SHA256=a2060956f117c3065abafda5c1f681679b9c3716675d70ce4ffff46033b02c35
-# hadolint ignore=DL4006
+# hadolint ignore=DL3008,DL4006
 RUN set -eu; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends cosign; \
+  rm -rf /var/lib/apt/lists/*; \
+  mkdir -p "${HOME}"; \
   base="https://github.com/eksctl-io/eksctl/releases/download/${EKSCTL_VERSION}"; \
-  for f in eksctl_checksums.txt eksctl_Linux_amd64.tar.gz; do \
+  for f in eksctl_checksums.txt eksctl_checksums.txt.sigstore.json eksctl_Linux_amd64.tar.gz; do \
     curl --proto '=https' --tlsv1.2 -fsSL -o "${f}" "${base}/${f}"; \
   done; \
-  echo "${EKSCTL_SHA256}  eksctl_Linux_amd64.tar.gz" | sha256sum --check --strict -; \
+  version="$(printf '%s' "${EKSCTL_VERSION#v}" | sed 's/\./\\./g')"; \
+  cosign verify-blob --new-bundle-format \
+    --bundle eksctl_checksums.txt.sigstore.json \
+    --certificate-identity-regexp "^https://github\.com/eksctl-io/eksctl/\.github/workflows/publish-release\.yaml@refs/tags/v?${version}\$" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    eksctl_checksums.txt; \
   grep ' eksctl_Linux_amd64\.tar\.gz$' eksctl_checksums.txt | sha256sum --check --strict -; \
   mkdir -p /out eksctl; \
   tar -xzf eksctl_Linux_amd64.tar.gz -C eksctl eksctl; \
   install -m 0755 eksctl/eksctl /out/eksctl
 
+# The AWS CLI v2: AWS's own installer archive, signed with the AWS CLI team's
+# PGP key, which AWS publishes in the CLI's installation guide and which is
+# vendored as keyrings/aws-cli.asc and checked against its fingerprint first,
+# written as AWS's guide prints it. Ubuntu packages the CLI too, but not at
+# every version, and this image follows a consuming repository's exact one.
+# The archive carries its own Python, so the installer puts the CLI under
+# /usr/local/aws-cli, which is copied out whole. Extraction uses python3
+# rather than unzip, which the image does not carry; zipfile drops the
+# executable bits, hence the chmod.
 COPY keyrings/aws-cli.asc /tmp/releases/aws-cli.asc
 ARG AWSCLI_VERSION
 # hadolint ignore=DL4006

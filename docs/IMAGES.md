@@ -96,7 +96,7 @@ move again.
 | kubectl | 1.35.2 | `registry.k8s.io/kubectl`, copied out | tag and digest |
 | helm | 4.1.1 | the release archive, GPG signature checked against Helm's KEYS | `HELM_VERSION` |
 | helmfile | 1.4.4 | `ghcr.io/helmfile/helmfile`, copied out | tag and digest |
-| eksctl | 0.230.0 | the release archive, held to a reviewed SHA-256 | `EKSCTL_VERSION`, `EKSCTL_SHA256` |
+| eksctl | 0.231.0 | the release archive, cosign keyless signature checked against eksctl's release workflow | `EKSCTL_VERSION` |
 | kubeseal | 0.39.1 | `docker.io/bitnami/sealed-secrets-kubeseal`, the project's own image, copied out | tag and digest |
 | pluto | 5.22.8 | `us-docker.pkg.dev/fairwinds-ops/oss/pluto`, copied out | tag and digest |
 | yq (mikefarah's) | 4.52.4 | `docker.io/mikefarah/yq`, copied out | tag and digest |
@@ -107,9 +107,10 @@ gate (a critical vulnerability with a fix available), the pin is the lowest
 release of the same minor line that does, measured 2026-11-02 with the
 gate's own Trivy check: terraform 1.14.0 to 1.14.9 (gRPC CVE-2026-33186, Go
 CVE-2025-68121), kubectl 1.35.0 to 1.35.2, pluto 5.22.7 to 5.22.8 and yq
-4.45.4 to 4.52.4 (Go CVE-2025-68121). Two had no clearing release in their
-line: helm 4.0.x moved to 4.1.1 and eksctl 0.221.0 to 0.230.0, every
-release between them carrying the same findings.
+4.45.4 to 4.52.4 (Go CVE-2025-68121). helm had no clearing release in its
+line and moved from 4.0.x to 4.1.1. eksctl moved from 0.221.0 to 0.231.0:
+0.230.0 is the first to clear the gate, and 0.231.0 the first eksctl signs,
+so its archive can be verified against a signature, not only a checksum.
 
 `TOOL_SOURCES.md` says why each comes from where it does. The build ends by
 running every tool with no network, and each pinned one has to report the
