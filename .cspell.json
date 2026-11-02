@@ -333,6 +333,15 @@
     "yamllint",
     "ziphash",
     "zizmor",
-    "zricethezav"
+    "zricethezav",
+    "awscli",
+    "cloudposse",
+    "Cloudsmith",
+    "eksctl",
+    "fairwinds",
+    "kislyuk",
+    "kubeseal",
+    "mikefarah",
+    "tlsv"
   ]
 }

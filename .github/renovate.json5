@@ -354,6 +354,22 @@
       labels: ["dependencies", "tooling"],
     },
 
+    // helm and eksctl in the AWS L2 image (images/l2-aws-devops/), the two
+    // tools there installed from a release archive rather than a package or
+    // an image. customManagers:dockerfileVersions reads their annotated
+    // _VERSION arguments, and the build checks each archive against what its
+    // project signs before unpacking it, so a bump that moves the version
+    // to anything the project did not sign fails the build. They take the
+    // seven day window and the patch and minor automerge like any other pin,
+    // and `Pin Only` grades them with arg_pin. Their official image pins,
+    // the FROM lines of the same file, travel with the base image group.
+    {
+      matchManagers: ["custom.regex"],
+      matchDatasources: ["github-releases"],
+      matchFileNames: ["images/l2-aws-devops/Dockerfile"],
+      labels: ["dependencies", "tooling"],
+    },
+
     // The VS Code extensions run with the editor's full permissions, in the
     // workbench where the agents' logins are (docs/LAYERS.md, "Extensions").
     // They take the same lane as the agent CLIs: the seven day window, the

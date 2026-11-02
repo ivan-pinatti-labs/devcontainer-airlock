@@ -20,6 +20,7 @@ allowed_paths:
   - images/base/Dockerfile
   - images/workbench/Dockerfile
   - images/l2/Dockerfile
+  - images/l2-aws-devops/Dockerfile
   - images/l2-engine/Dockerfile
   - images/gh-broker/Dockerfile
   - images/egress-proxy/Dockerfile
@@ -34,11 +35,15 @@ allowed_paths:
   - images/workbench/vscode/extensions.txt
 
 # The coding agent CLI versions and the agent-policy release are annotated
-# ARGs in the workbench's Dockerfile; the script images are annotated shell
-# assignments. Only a name an annotation on the default branch made eligible
-# is graded as a pin.
+# ARGs in the workbench's Dockerfile, and the helm and eksctl releases in
+# the AWS L2 image's; the script images are annotated shell assignments.
+# Only a name an annotation on the default branch made eligible is graded as
+# a pin.
 arg_sources:
   - file: images/workbench/Dockerfile
+    annotations:
+      - '^#\s*renovate:'
+  - file: images/l2-aws-devops/Dockerfile
     annotations:
       - '^#\s*renovate:'
   - file: scripts/build-images.sh

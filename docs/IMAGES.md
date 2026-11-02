@@ -2,12 +2,14 @@
 
 ## What is here
 
-Nine images, each built from `images/<name>/Dockerfile` (the two workbenches
+Ten images, each built from `images/<name>/Dockerfile` (the two workbenches
 from `images/workbench/Dockerfile`) and published as
 `ghcr.io/ivan-pinatti-labs/airlock-<name>`. What each one is trusted
-with, and why they are split this way, is in [LAYERS.md](LAYERS.md). The
-last one, `podman-nested`, is not a layer of the workbench but a test runner
-of its own; see "The nested test runner" below.
+with, and why they are split this way, is in [LAYERS.md](LAYERS.md).
+`l2-aws-devops` is the shared L2 image with an infrastructure toolchain on
+top; see "The AWS L2 image" below. The last one, `podman-nested`, is not a
+layer of the workbench but a test runner of its own; see "The nested test
+runner" below.
 
 | Image | Built on | Carries |
 | --- | --- | --- |
@@ -15,6 +17,7 @@ of its own; see "The nested test runner" below.
 | `workbench-claude` | base | Claude Code, its VS Code extension and the shared ones, its managed policy, `l2`, the `gh` shim, a podman client |
 | `workbench-codex` | base | the same for Codex; both are targets of `images/workbench/Dockerfile` and share every layer below the agent's own |
 | `l2` | base | pre-commit, node, go, shellcheck, the baked linters, a podman client for `--engine` runs |
+| `l2-aws-devops` | l2, the build of the same run | everything in `l2`, plus atmos, terraform, tflint, the AWS CLI, kubectl, helm, helmfile, eksctl, kubeseal, pluto and yq |
 | `l2-engine` | base | rootless podman serving a socket (the nested runtime below) |
 | `gh-broker` | base | gh and the broker |
 | `egress-proxy` | base | squid, the egress sets and the program that refreshes them |
@@ -56,6 +59,55 @@ prevent. Renovate can keep the digest current, and its pull request is then
 the record that the environment changed.
 
 Package versions are deliberately not pinned; `TOOL_SOURCES.md` says why.
+
+### The AWS L2 image
+
+`airlock-l2-aws-devops` is for a repository that manages AWS infrastructure
+with Atmos (Cloud Posse) and Terraform: its hooks (`terraform fmt`,
+`terraform validate`, tflint), its tests and its commands (`atmos describe`,
+`atmos validate`, `atmos vendor pull`, `helmfile template`) call these tools by
+name, and each of them would otherwise be installed again in every such
+repository's own L2 layer. Such a repository builds on it the same way:
+
+```dockerfile
+ARG L2_IMAGE=ghcr.io/ivan-pinatti-labs/airlock-l2-aws-devops@sha256:<digest>
+FROM ${L2_IMAGE}
+```
+
+`host/workbench init` writes exactly that for a repository holding an
+`atmos.yaml` or any `*.tf` file, and lists the `hashicorp` and `aws` egress
+sets for it. It is still L2: no network unless a run asks for one (`l2
+--net`, through those sets) and no credentials, so a plan or an apply that
+needs AWS credentials is not something it is meant to run.
+
+| Tool | From | Pinned |
+| --- | --- | --- |
+| terraform | HashiCorp's apt repository | no, like every apt package |
+| awscli (v2) | Ubuntu | no |
+| atmos | `ghcr.io/cloudposse/atmos`, copied out | tag and digest |
+| tflint | `ghcr.io/terraform-linters/tflint`, copied out | tag and digest |
+| kubectl | `registry.k8s.io/kubectl`, copied out | tag and digest |
+| helmfile | `ghcr.io/helmfile/helmfile`, copied out | tag and digest |
+| kubeseal | `docker.io/bitnami/sealed-secrets-kubeseal`, the project's own image, copied out | tag and digest |
+| pluto | `us-docker.pkg.dev/fairwinds-ops/oss/pluto`, copied out | tag and digest |
+| yq (mikefarah's) | `docker.io/mikefarah/yq`, copied out | tag and digest |
+| helm | the release archive, GPG signature checked against Helm's KEYS | `HELM_VERSION` |
+| eksctl | the release archive, cosign keyless signature checked against eksctl's release workflow | `EKSCTL_VERSION` |
+| jq | Ubuntu, in the base image | no |
+
+`TOOL_SOURCES.md` says why each comes from where it does. The build ends by
+running every tool with no network, and each pinned one has to report the
+version its pin names (the tag on its `FROM` line, or its `_VERSION`
+argument), so a binary copied from the wrong path, or a pin that moved
+without the tool, fails the build rather than a hook. Atmos's update check and
+telemetry are turned off (`ATMOS_VERSION_CHECK_ENABLED`,
+`ATMOS_TELEMETRY_ENABLED`), as `CHECKPOINT_DISABLE` turns off Terraform's.
+
+Measured 2026-11-02: the image is 2.3 GB, against 0.97 GB for `l2`; atmos
+(290 MB) and helmfile (244 MB) are the largest single binaries. Trivy found no
+critical vulnerability with a fix available. Rather than making every L2 image
+that size, the tools live in this variant, which only the repositories that
+need them pull.
 
 ## Running containers inside it
 
@@ -355,7 +407,8 @@ with no capabilities. Started with `--user podman`, or with
 `.github/workflows/build-images.yml` runs `scripts/build-images.sh` on a pull request touching
 `images/**`, on a push to `main`, weekly on a schedule, and on demand. It
 builds the base first and every other image on top of that exact build
-(except `podman-nested`, which builds on its own pinned upstream image), then
+(except `podman-nested`, which builds on its own pinned upstream image, and
+`l2-aws-devops`, which builds on the `l2` of the same run), then
 takes each image through the same steps:
 
 1. Builds it for `linux/amd64`, loading it locally rather than pushing.

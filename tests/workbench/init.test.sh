@@ -19,19 +19,21 @@ touch "${repo}/pyproject.toml" "${repo}/web/package.json" "${repo}/go.mod" "${re
   "${repo}/infra/main.tf" "${repo}/Cargo.toml"
 rule 'pull --quiet *' 'exit 1'
 run "${wb}" init "${repo}"
-check "a failed pull of the L2 image" 1 err "workbench: could not pull ${reg}/airlock-l2; nothing written"
+check "a failed pull of the L2 image" 1 err "workbench: could not pull ${reg}/airlock-l2-aws-devops; nothing written"
 assert "writes nothing" test ! -e "${repo}/.devcontainer"
 unrule
 
 cd "${repo}/web"
 run "${wb}" init
 sets="${repo}/.devcontainer/egress-sets"
-check "init in the repository you are in" 0 out "workbench: wrote ${sets} (python node golang docker-hub hashicorp)"
-assert "the sets its files suggest" test "$(grep -v '^#' "${sets}" | paste -sd' ')" = "python node golang docker-hub hashicorp"
+check "init in the repository you are in" 0 out "workbench: wrote ${sets} (python node golang docker-hub hashicorp aws)"
+assert "the sets its files suggest" test "$(grep -v '^#' "${sets}" | paste -sd' ')" = "python node golang docker-hub hashicorp aws"
 check "a registry no set covers is pointed out" 0 out \
   "workbench: this repository uses a package registry no egress set covers yet"
-check "an L2 image on the published one" 0 out "workbench: wrote ${repo}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2@sha256:mine)"
-assert "pinned by digest" grep -qx "ARG L2_IMAGE=${reg}/airlock-l2@sha256:mine" "${repo}/.devcontainer/l2/Dockerfile"
+check "Terraform files get the AWS L2 image" 0 out "workbench: wrote ${repo}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2-aws-devops@sha256:mine)"
+check "the published one" 0 calls "podman pull --quiet ${reg}/airlock-l2-aws-devops:latest"
+assert "pinned by digest" grep -qx "ARG L2_IMAGE=${reg}/airlock-l2-aws-devops@sha256:mine" "${repo}/.devcontainer/l2/Dockerfile"
+assert "and says what it carries" grep -qx "# kubeseal, pluto and yq." "${repo}/.devcontainer/l2/Dockerfile"
 # What init writes holds make and Dockerfile variables, taken literally.
 # shellcheck disable=SC2016
 assert "built on it" grep -qx 'FROM ${L2_IMAGE}' "${repo}/.devcontainer/l2/Dockerfile"
@@ -56,9 +58,19 @@ touch "${other}/.pre-commit-config.yaml"
 printf '%s\n' 'all:' >"${other}/Makefile"
 run "${wb}" init "${other}"
 check "pre-commit hooks need PyPI and npm" 0 out "(python node)"
+check "and the shared L2 image" 0 out "workbench: wrote ${other}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2@sha256:mine)"
+assert "pinned by digest" grep -qx "ARG L2_IMAGE=${reg}/airlock-l2@sha256:mine" "${other}/.devcontainer/l2/Dockerfile"
+assert "saying what that carries" grep -qx "# carries pre-commit, Python, Node, Go and the common linters." "${other}/.devcontainer/l2/Dockerfile"
 check "a Makefile gains the include" 0 out "workbench: added the workbench targets to ${other}/Makefile"
 assert "after what it had" test "$(head -n 1 "${other}/Makefile")" = "all:"
 assert "no registry warning" test -z "$(grep "no egress set covers" "${__scratch}/out")"
+
+atmos="${WORKBENCH_ROOT}/atmos"
+clone "${atmos}"
+touch "${atmos}/atmos.yaml"
+run "${wb}" init "${atmos}"
+check "an atmos.yaml alone gets HashiCorp and AWS" 0 out "workbench: wrote ${atmos}/.devcontainer/egress-sets (hashicorp aws)"
+check "and the AWS L2 image" 0 out "workbench: wrote ${atmos}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2-aws-devops@sha256:mine)"
 
 bare="${WORKBENCH_ROOT}/bare"
 clone "${bare}"

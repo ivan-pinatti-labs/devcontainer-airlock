@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build, scan and (on request) publish every image, base first and the rest
 # on top of that exact base build, except the few that build on an upstream
-# image of their own (STANDALONE). The CI workflow runs this, and so can you,
+# image of their own (STANDALONE) and the L2 variants that build on that
+# exact L2 build (ON_L2). The CI workflow runs this, and so can you,
 # with rootless podman, which is how its logic is tested before CI ever sees
 # it.
 #
@@ -47,6 +48,9 @@ IMAGES=(workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mir
 # given no BASE_IMAGE: podman-nested is quay.io/podman/stable with a test
 # runner's tools on top.
 STANDALONE=(podman-nested)
+# Built on the L2 image this run just built, given to them as L2_IMAGE, so a
+# variant always carries the very L2 published beside it.
+ON_L2=(l2-aws-devops)
 PREFIX=airlock
 
 # Pinned by digest; Renovate keeps them current.
@@ -83,9 +87,9 @@ staging_up() {
 
 # Build one image, push it to staging, print its digest.
 build() {
-  local name="$1" base="${2:-}" ref dir="$1" args=()
+  local name="$1" base="${2:-}" arg="${3:-BASE_IMAGE}" ref dir="$1" args=()
   ref="${STAGING}/${PREFIX}-${name}:ci"
-  [[ -n "${base}" ]] && args+=(--build-arg "BASE_IMAGE=${base}")
+  [[ -n "${base}" ]] && args+=(--build-arg "${arg}=${base}")
   case "${name}" in
   workbench-*)
     dir=workbench
@@ -168,7 +172,7 @@ SH
 }
 
 main() {
-  local digests=() name digest base_ref
+  local digests=() name digest base_ref l2_ref=""
   if [[ -n "${PUBLISH_TO}" ]] && { [[ -z "${REGISTRY_USER:-}" ]] || [[ -z "${REGISTRY_TOKEN:-}" ]]; }; then
     echo "build-images: PUBLISH_TO needs REGISTRY_USER and REGISTRY_TOKEN" >&2
     exit 2
@@ -183,7 +187,14 @@ main() {
 
   for name in "${IMAGES[@]}"; do
     log "building ${name} on ${base_ref}"
-    digests+=("${name}=$(build "${name}" "${base_ref}")")
+    digest="$(build "${name}" "${base_ref}")"
+    digests+=("${name}=${digest}")
+    [[ "${name}" = l2 ]] && l2_ref="${STAGING}/${PREFIX}-l2@${digest}"
+  done
+
+  for name in "${ON_L2[@]}"; do
+    log "building ${name} on ${l2_ref}"
+    digests+=("${name}=$(build "${name}" "${l2_ref}" L2_IMAGE)")
   done
 
   for name in "${STANDALONE[@]}"; do

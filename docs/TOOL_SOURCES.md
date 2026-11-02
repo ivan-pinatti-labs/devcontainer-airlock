@@ -140,7 +140,11 @@ credentials and agents in the workbench, project tooling in L2.
 | podman, catatonit, podman-compose, make, jq, yq, xmlstarlet, python3-pip, acl, openssl, procps-ng, which, iproute, util-linux (setpriv) | Fedora, on `quay.io/podman/stable` pinned by digest | distribution repository signature | podman-nested, the nested test runner |
 | github-cli | `cli.github.com/packages stable main` | repository signature | gh broker only; the workbench's `gh` is a shim that asks the broker |
 | nodejs | `deb.nodesource.com/node_24.x nodistro main` | repository signature | workbench (the agent CLIs run on it) and L2 (node hooks) |
-| terraform | `apt.releases.hashicorp.com resolute main` | repository signature | the L2 image of the repository that uses it |
+| terraform | `apt.releases.hashicorp.com resolute main` | repository signature | `l2-aws-devops`, or the L2 image of the repository that uses it |
+| awscli (AWS CLI v2) | Ubuntu | distribution repository signature | `l2-aws-devops` |
+| atmos, tflint, kubectl, helmfile, kubeseal, pluto, yq | the projects' official images, pinned by digest | container image published by the project | `l2-aws-devops`, copied out of those images; see "The AWS L2 image" below |
+| helm | the release archive, version pinned | GPG signature by a Helm release manager, against Helm's KEYS vendored and fingerprint checked | `l2-aws-devops` |
+| eksctl | the release archive, version pinned | cosign keyless signature of the checksums, bound to eksctl's release workflow at that tag | `l2-aws-devops` |
 | hadolint, actionlint, dotenv-linter | the projects' official images, pinned by digest | container image published by the project | L2, copied out of those images, because L2 cannot start containers |
 | Go modules for golang hooks (checkmake, gitleaks) | the Go module proxy, at the versions in `images/l2/go-modules.txt` | Go's checksum database, checked when the image is built; the image digest pins the result | L2, a read only module proxy; the hooks still build from source there |
 | claude (Claude Code) | npm `@anthropic-ai/claude-code`, version pinned | npm registry signature only, **no build provenance** | workbench, see below |
@@ -163,6 +167,48 @@ in this organization's images, so it does not appear in their SBOMs and is
 not covered by their vulnerability scans. It is scanned by whoever publishes
 it, not here. That is a real reduction in visibility, accepted because the
 alternative kept an unsigned release download in the build.
+
+### The AWS L2 image
+
+`l2-aws-devops` carries what an Atmos and Terraform infrastructure
+repository runs (docs/IMAGES.md, "The AWS L2 image"), and each tool takes
+the first source in the order this page sets out that exists for it.
+
+- **A distribution package.** The AWS CLI v2 is packaged by Ubuntu
+  (2.31.35 on 26.04), so it comes from there. jq is already in the base
+  image. Ubuntu's `yq` is a different program with the same name (a jq
+  wrapper, kislyuk/yq), not the mikefarah yq that infrastructure scripts and
+  podman-nested's Fedora package mean, so it is not used.
+- **A vendor's signed apt repository.** Terraform, from HashiCorp's, as
+  everywhere else here. Cloud Posse publishes atmos packages and Helm an apt
+  repository, but both live on a package hosting service (Cloudsmith and
+  Buildkite Packages) that signs the index with a key of its own rather than
+  the project's, the reason OpenTofu's is passed over in
+  pre-commit-checklists, so neither counts as the vendor's own.
+- **The project's official image, pinned by digest.** atmos
+  (`ghcr.io/cloudposse/atmos`), tflint, kubectl (`registry.k8s.io`),
+  helmfile, kubeseal (`docker.io/bitnami/sealed-secrets-kubeseal`, which
+  the sealed-secrets project publishes), pluto and yq. Each is a statically
+  linked Go binary copied out, the way L2 takes hadolint and actionlint.
+  Trivy reads the Go module list compiled into each, so unlike a tool run
+  from its own image, these are in this image's vulnerability report.
+- **A release archive checked against its project's signature**, for the
+  two with no current image. helm: Helm publishes no image, so the archive
+  is verified with `gpgv` against Helm's KEYS file, vendored as
+  `images/l2-aws-devops/keyrings/helm.asc` and checked against its exact
+  set of ten primary fingerprints before use, as the base image checks its
+  apt keys. eksctl: its ECR Public image stopped at v0.225.0 (measured
+  2026-11-02, a month after v0.231.0), so its checksum file is verified with
+  `cosign verify-blob`, with the certificate identity pinned to
+  `eksctl-io/eksctl`'s `publish-release.yaml` at that very tag, and the
+  archive against the checksum. Both downloads happen in a throwaway stage,
+  so cosign is not in the image.
+
+The pins are a `FROM` tag and digest for the images and a `_VERSION`
+argument for the two archives, each moved by Renovate under the seven day
+window and graded by `Pin Only`. The two archives are not dpkg entries, so
+they appear in the SBOM and the vulnerability report only through the Go
+module list Trivy reads from the binaries, as the copied ones do.
 
 ### The two coding agent CLIs
 
