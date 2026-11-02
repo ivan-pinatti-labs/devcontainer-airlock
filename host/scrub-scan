@@ -610,16 +610,19 @@ def redacted_by_line(
         lines.append(new)
     joined = "\n".join(lines)
     for value in sorted((v for v in found if "\n" in v), key=len, reverse=True):
-        start = joined.find(value)
-        if start < 0:
-            continue
         rule, _, ident = found[value]
-        trial = joined.replace(value, placeholder(rule, ident) + "\n" * value.count("\n"))
-        if all(parses(b) for a, b in zip(old, trial.split("\n"), strict=True) if parses(a)):
-            joined = trial
-        else:
-            left.setdefault(value, []).append(joined.count("\n", 0, start) + 1)
-        seen.add(value)
+        mark = placeholder(rule, ident) + "\n" * value.count("\n")
+        # Each copy on its own: one that would break a line leaves only itself.
+        start = joined.find(value)
+        while start >= 0:
+            seen.add(value)
+            trial = joined[:start] + mark + joined[start + len(value) :]
+            if all(parses(b) for a, b in zip(old, trial.split("\n"), strict=True) if parses(a)):
+                joined = trial
+                start = joined.find(value, start + len(mark))
+            else:
+                left.setdefault(value, []).append(joined.count("\n", 0, start) + 1)
+                start = joined.find(value, start + len(value))
     return joined, [v for v in found if v not in seen], left
 
 

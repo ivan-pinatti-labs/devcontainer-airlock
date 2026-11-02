@@ -646,6 +646,31 @@ def test_a_raw_key_over_plain_lines_is_redacted_beside_its_escaped_copy(
     assert out.split("\n")[-2] == line(t="after")
 
 
+def test_each_copy_over_several_lines_is_judged_on_its_own(w, gitleaks, capsys):
+    # The first copy ends on a line of its own, a JSON number, which it would
+    # leave empty; the second shares its last line with text, which was no
+    # JSON before. Only the first is left.
+    w.known("multi", "secret-head-line\n12345678")
+    text = (
+        "secret-head-line\n12345678\nsecret-head-line\n12345678 trailing\n"
+        + line(t="x")
+        + "\n"
+    )
+    n = w.add("a.jsonl", text)
+    w.run(gitleaks, "--manual")
+    out = w.redacted(n)
+    assert out.split("\n")[:4] == [
+        "secret-head-line",
+        "12345678",
+        "[REDACTED:multi:...5678]",
+        " trailing",
+    ]
+    assert re.search(
+        r"\(multi \.\.\.5678\): cannot be redacted in .*a\.jsonl \(line 1\)",
+        capsys.readouterr().out,
+    )
+
+
 def test_a_raw_key_over_a_json_line_is_left_and_said(w, gitleaks, capsys):
     # A key line of digits only is a JSON number: replacing the block would
     # leave it empty, so the block is left and its first line named.
