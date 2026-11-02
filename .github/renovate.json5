@@ -354,20 +354,19 @@
       labels: ["dependencies", "tooling"],
     },
 
-    // helm and eksctl in the AWS L2 image (images/l2-aws-devops/), the two
-    // tools there installed from a release archive rather than a package or
-    // an image. customManagers:dockerfileVersions reads their annotated
-    // _VERSION arguments, and the build checks each archive against what its
-    // project signs before unpacking it, so a bump that moves the version
-    // to anything the project did not sign fails the build. They take the
-    // seven day window and the patch and minor automerge like any other pin,
-    // and `Pin Only` grades them with arg_pin. Their official image pins,
-    // the FROM lines of the same file, travel with the base image group.
+    // The AWS L2 image (images/l2-aws-devops/Dockerfile) is pinned to match
+    // a consuming infrastructure repository, and its pins are bumped
+    // deliberately: in that repository first, then here by hand, so a hook
+    // behaves the same in both. Renovate opens no pull request for them
+    // until this rule goes. They stay in the shapes it reads (image FROM
+    // lines by tag and digest, annotated _VERSION arguments through
+    // customManagers:dockerfileVersions) and that `Pin Only` grades, so
+    // removing the rule is all re-enabling takes. tflint is the exception:
+    // nothing pins it there, so it moves with the other image pins.
     {
-      matchManagers: ["custom.regex"],
-      matchDatasources: ["github-releases"],
       matchFileNames: ["images/l2-aws-devops/Dockerfile"],
-      labels: ["dependencies", "tooling"],
+      matchPackageNames: ["!ghcr.io/terraform-linters/tflint"],
+      enabled: false,
     },
 
     // The VS Code extensions run with the editor's full permissions, in the

@@ -80,20 +80,36 @@ sets for it. It is still L2: no network unless a run asks for one (`l2
 --net`, through those sets) and no credentials, so a plan or an apply that
 needs AWS credentials is not something it is meant to run.
 
-| Tool | From | Pinned |
-| --- | --- | --- |
-| terraform | HashiCorp's apt repository | no, like every apt package |
-| awscli (v2) | Ubuntu | no |
-| atmos | `ghcr.io/cloudposse/atmos`, copied out | tag and digest |
-| tflint | `ghcr.io/terraform-linters/tflint`, copied out | tag and digest |
-| kubectl | `registry.k8s.io/kubectl`, copied out | tag and digest |
-| helmfile | `ghcr.io/helmfile/helmfile`, copied out | tag and digest |
-| kubeseal | `docker.io/bitnami/sealed-secrets-kubeseal`, the project's own image, copied out | tag and digest |
-| pluto | `us-docker.pkg.dev/fairwinds-ops/oss/pluto`, copied out | tag and digest |
-| yq (mikefarah's) | `docker.io/mikefarah/yq`, copied out | tag and digest |
-| helm | the release archive, GPG signature checked against Helm's KEYS | `HELM_VERSION` |
-| eksctl | the release archive, cosign keyless signature checked against eksctl's release workflow | `EKSCTL_VERSION` |
-| jq | Ubuntu, in the base image | no |
+Every tool but tflint is pinned to match a consuming infrastructure
+repository, so its hooks and commands behave here exactly as they do there,
+and is bumped deliberately, in that repository first. Renovate is told not
+to propose those bumps (`.github/renovate.json5`); the pins stay in the shapes
+it and `Pin Only` read, so lifting that rule is all it takes to let them
+move again.
+
+| Tool | Version | From | Pinned by |
+| --- | --- | --- | --- |
+| atmos | 1.229.0 | `ghcr.io/cloudposse/atmos`, copied out | tag and digest |
+| terraform | 1.14.9 | HashiCorp's apt repository, that exact package | `TERRAFORM_VERSION` |
+| tflint | 0.65.0 | `ghcr.io/terraform-linters/tflint`, copied out | tag and digest, moved by Renovate |
+| AWS CLI v2 | 2.32.6 | AWS's installer archive, PGP signature checked | `AWSCLI_VERSION` |
+| kubectl | 1.35.2 | `registry.k8s.io/kubectl`, copied out | tag and digest |
+| helm | 4.1.1 | the release archive, GPG signature checked against Helm's KEYS | `HELM_VERSION` |
+| helmfile | 1.4.4 | `ghcr.io/helmfile/helmfile`, copied out | tag and digest |
+| eksctl | 0.230.0 | the release archive, held to a reviewed SHA-256 | `EKSCTL_VERSION`, `EKSCTL_SHA256` |
+| kubeseal | 0.39.1 | `docker.io/bitnami/sealed-secrets-kubeseal`, the project's own image, copied out | tag and digest |
+| pluto | 5.22.8 | `us-docker.pkg.dev/fairwinds-ops/oss/pluto`, copied out | tag and digest |
+| yq (mikefarah's) | 4.52.4 | `docker.io/mikefarah/yq`, copied out | tag and digest |
+| jq | 1.8.1 | Ubuntu, in the base image | no |
+
+Where the consuming repository's own version could not pass the image scan
+gate (a critical vulnerability with a fix available), the pin is the lowest
+release of the same minor line that does, measured 2026-11-02 with the
+gate's own Trivy check: terraform 1.14.0 to 1.14.9 (gRPC CVE-2026-33186, Go
+CVE-2025-68121), kubectl 1.35.0 to 1.35.2, pluto 5.22.7 to 5.22.8 and yq
+4.45.4 to 4.52.4 (Go CVE-2025-68121). Two had no clearing release in their
+line: helm 4.0.x moved to 4.1.1 and eksctl 0.221.0 to 0.230.0, every
+release between them carrying the same findings.
 
 `TOOL_SOURCES.md` says why each comes from where it does. The build ends by
 running every tool with no network, and each pinned one has to report the
@@ -104,8 +120,8 @@ telemetry are turned off (`ATMOS_VERSION_CHECK_ENABLED`,
 `ATMOS_TELEMETRY_ENABLED`), as `CHECKPOINT_DISABLE` turns off Terraform's.
 
 Measured 2026-11-02: the image is 2.3 GB, against 0.97 GB for `l2`; atmos
-(290 MB) and helmfile (244 MB) are the largest single binaries. Trivy found no
-critical vulnerability with a fix available. Rather than making every L2 image
+and helmfile are the largest single binaries. Trivy found no critical
+vulnerability with a fix available. Rather than making every L2 image
 that size, the tools live in this variant, which only the repositories that
 need them pull.
 

@@ -57,7 +57,12 @@ def version_args() -> dict[str, str]:
 def test_there_are_tools_to_check() -> None:
     # Guards the tests below, which would pass on an empty file.
     assert set(image_stages()) >= {"atmos", "tflint", "kubectl", "yq"}
-    assert set(version_args()) == {"HELM_VERSION", "EKSCTL_VERSION"}
+    assert set(version_args()) == {
+        "HELM_VERSION",
+        "EKSCTL_VERSION",
+        "TERRAFORM_VERSION",
+        "AWSCLI_VERSION",
+    }
 
 
 def test_every_image_stage_is_copied_out_and_version_checked() -> None:
@@ -70,7 +75,7 @@ def test_every_image_stage_is_copied_out_and_version_checked() -> None:
 
 def test_every_release_is_annotated_declared_once_and_version_checked() -> None:
     for name, datasource in version_args().items():
-        assert datasource == "github-releases"
+        assert datasource in {"github-releases", "github-tags"}
         # A default given twice would leave the second one unmoved by
         # Renovate, and the version check would then refuse every bump.
         assert TEXT.count(f"ARG {name}=") == 1
@@ -109,3 +114,20 @@ def test_pin_only_grades_its_pins() -> None:
     assert any(source["file"] == path for source in config["arg_sources"])
     # The vendored key is reviewed by a person, never moved by a bot.
     assert not any("keyrings" in allowed for allowed in config["allowed_paths"])
+
+
+def test_renovate_holds_every_pin_but_tflint() -> None:
+    # The pins follow a consuming infrastructure repository and are bumped by
+    # hand. The rule is read as text: the test environment has no json5
+    # parser, and the rule's shape is what matters here.
+    config = (REPO_ROOT / ".github/renovate.json5").read_text()
+    rule = config[config.index('matchFileNames: ["images/l2-aws-devops/Dockerfile"]') :]
+    rule = rule[: rule.index("}")]
+    assert 'matchPackageNames: ["!ghcr.io/terraform-linters/tflint"]' in rule
+    assert "enabled: false" in rule
+    assert "ghcr.io/terraform-linters/tflint" in image_refs()
+
+
+def image_refs() -> set[str]:
+    """The upstream images the stages pin."""
+    return {match["image"] for line in LINES if (match := IMAGE_STAGE.match(line))}
