@@ -76,11 +76,13 @@ FROM ${L2_IMAGE}
 
 `host/workbench init` writes exactly that for a repository holding an
 `atmos.yaml` or a Terraform file on the AWS provider (a `provider "aws"`
-block or a `hashicorp/aws` source), and lists the `hashicorp` and `aws`
-egress sets for it. Other Terraform gets `hashicorp` alone and the shared
-`l2` image. It is still L2: no network unless a run asks for one (`l2
---net`, through those sets) and no credentials, so a plan or an apply that
-needs AWS credentials is not something it is meant to run.
+block or a `hashicorp/aws` source, outside a comment), and lists the
+`hashicorp` and `aws` egress sets for it. Other Terraform gets `hashicorp`
+alone and the shared `l2` image. Init sees only the files git tracks, so
+track an `atmos.yaml` or a `.tf` file before running it. It is still L2: no
+network unless a run asks for one (`l2 --net`, through those sets) and no
+credentials, so a plan or an apply that needs AWS credentials is not
+something it is meant to run.
 
 Every tool but tflint is pinned to match a consuming infrastructure
 repository, so its hooks and commands behave here exactly as they do there,

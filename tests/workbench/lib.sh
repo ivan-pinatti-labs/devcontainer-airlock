@@ -156,7 +156,10 @@ case "$*" in
   "rev-parse --path-format=absolute --git-common-dir") echo "${common}" ;;
   "cat-file -e "*) [ -f "${common}/remote-tree/${3%%:*}/${3#*:}" ] ;;
   "show "*) cat "${common}/remote-tree/${2%%:*}/${2#*:}" 2>/dev/null || exit 128 ;;
-  ls-files) cd "${top}" && find . -path ./.git -prune -o -type f -print | sed "s|^\./||" | sort ;;
+  # Like git, ls-files quotes a path with a byte outside ASCII unless -z.
+  ls-files) cd "${top}" && find . -path ./.git -prune -o -type f -print | sed "s|^\./||" | sort |
+    LC_ALL=C sed "/[^ -~]/s/.*/\"&\"/" ;;
+  "ls-files -z") cd "${top}" && find . -path ./.git -prune -o -type f -print0 | sed -z "s|^\./||" | sort -z ;;
   "status --porcelain") [ ! -f "${gd}/status-fails" ] || exit 1; cat "${gd}/changes" 2>/dev/null || true ;;
   "log --branches --not --remotes --oneline") [ ! -f "${gd}/log-fails" ] || exit 1; cat "${gd}/ahead" 2>/dev/null || true ;;
   "branch --show-current") cat "${gd}/branch" 2>/dev/null || true ;;

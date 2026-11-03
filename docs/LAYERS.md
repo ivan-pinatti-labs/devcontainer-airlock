@@ -270,7 +270,9 @@ kubeseal, pluto and yq ([IMAGES.md](IMAGES.md), "The AWS L2 image"), and its
 egress sets gain `hashicorp` and `aws` (the AWS APIs, and ECR Public for
 Atmos components vendored from there). Atmos vendoring and Terraform modules from GitHub, and
 providers released on GitHub, go through the `github` set, which is always
-on. It writes
+on. It reads only the files git tracks (`git ls-files`), so an untracked
+`atmos.yaml` or `*.tf` file selects nothing: track it before running init. A
+provider or source line that is commented out is no AWS signal. It writes
 only what is missing and never edits anything else, so it is safe to run
 again; check the egress sets it guessed before committing them. A project
 created from `ivan-pinatti-labs/github-template` has all of this already.

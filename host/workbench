@@ -879,18 +879,27 @@ pull_published() {
 # It writes only what is not there yet, and a Makefile gains the include
 # once; it never edits anything else, so it is safe to run again.
 cmd_init() {
-  local top f sets=() l2 files from=l2 tools="pre-commit, Python, Node, Go and the common linters"
+  local top f sets=() l2 files paths=() from=l2 tools="pre-commit, Python, Node, Go and the common linters"
   top="$(git -C "${1:-${PWD}}" rev-parse --show-toplevel 2>/dev/null)" ||
     die "${1:-${PWD}} is not in a git repository"
-  files="$(git -C "${top}" ls-files)"
+  # The tracked files, NUL delimited: without -z git quotes and escapes a
+  # path with a character outside ASCII, and the patterns below miss it.
+  mapfile -d '' -t paths < <(git -C "${top}" ls-files -z)
+  files="$(printf '%s\n' "${paths[@]}")"
   has() { grep -qE "$1" <<<"${files}"; }
   # Whether a tracked Terraform file uses the AWS provider, by a provider
-  # block or a required_providers source.
+  # block or a required_providers source. Full line comments are dropped
+  # first; the source is left unanchored, for the one line form
+  # `aws = { source = "hashicorp/aws" }`. The second grep reads all its
+  # input rather than quitting at the first match, which under pipefail
+  # would fail the first one.
   aws_provider() {
     local tf
-    while read -r tf; do
-      grep -qsE '^[[:space:]]*provider[[:space:]]+"aws"|source[[:space:]]*=[[:space:]]*"(registry\.terraform\.io/)?hashicorp/aws"' "${top}/${tf}" && return 0
-    done < <(grep -E '\.tf$' <<<"${files}")
+    for tf in "${paths[@]}"; do
+      [[ "${tf}" == *.tf ]] || continue
+      grep -vsE '^[[:space:]]*(#|//)' "${top}/${tf}" |
+        grep -E '^[[:space:]]*provider[[:space:]]+"aws"|source[[:space:]]*=[[:space:]]*"(registry\.terraform\.io/)?hashicorp/aws"' >/dev/null && return 0
+    done
     return 1
   }
   # An AWS infrastructure repository (Atmos, or Terraform on the AWS

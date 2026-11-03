@@ -3,6 +3,7 @@
 # host/workbench init: a repository set up for the workbench, its egress
 # sets guessed from its files, an L2 image on the published one, and the
 # make targets; and run again, everything kept.
+# cspell:words produção
 # shellcheck source=tests/workbench/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -85,6 +86,21 @@ printf '%s\n' 'provider "google" {}' >"${gcp}/main.tf"
 run "${wb}" init "${gcp}"
 check "Terraform with no AWS signal gets HashiCorp alone" 0 out "workbench: wrote ${gcp}/.devcontainer/egress-sets (hashicorp)"
 check "and the shared L2 image" 0 out "workbench: wrote ${gcp}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2@sha256:mine)"
+
+commented="${WORKBENCH_ROOT}/commented"
+clone "${commented}"
+printf '%s\n' 'provider "google" {}' '# source = "hashicorp/aws"' '  // aws = { source = "registry.terraform.io/hashicorp/aws" }' >"${commented}/main.tf"
+run "${wb}" init "${commented}"
+check "an AWS provider only in a comment is no AWS signal" 0 out "workbench: wrote ${commented}/.devcontainer/egress-sets (hashicorp)"
+check "and keeps the shared L2 image" 0 out "workbench: wrote ${commented}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2@sha256:mine)"
+
+accented="${WORKBENCH_ROOT}/accented"
+clone "${accented}"
+mkdir -p "${accented}/produção"
+printf '%s\n' 'provider "aws" {}' >"${accented}/produção/main.tf"
+run "${wb}" init "${accented}"
+check "a Terraform path outside ASCII is still seen" 0 out "workbench: wrote ${accented}/.devcontainer/egress-sets (hashicorp aws)"
+check "and gets the AWS L2 image" 0 out "workbench: wrote ${accented}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2-aws-devops@sha256:mine)"
 
 bare="${WORKBENCH_ROOT}/bare"
 clone "${bare}"
