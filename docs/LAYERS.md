@@ -259,15 +259,16 @@ repository, or pass its path): `.devcontainer/egress-sets` from the files it
 finds (Python and Node for any repository with pre-commit hooks, plus Go or
 Docker Hub when it sees their files), `.devcontainer/l2/Dockerfile`
 on the published L2 image pinned by digest, and the `include` that gives its
-Makefile the workbench targets (a new Makefile when there is none). A
-repository with an `atmos.yaml` or any `*.tf` file is taken for an AWS
-infrastructure repository: its Dockerfile starts from the published
+Makefile the workbench targets (a new Makefile when there is none). Any
+`*.tf` file adds the `hashicorp` set (the Terraform registry and provider
+downloads). A repository with an `atmos.yaml`, or a Terraform file on the AWS
+provider (a `provider "aws"` block or a `hashicorp/aws` source), is taken
+for an AWS infrastructure repository: its Dockerfile starts from the published
 `l2-aws-devops` image instead, pinned by digest the same way, which adds
 atmos, terraform, tflint, the AWS CLI, kubectl, helm, helmfile, eksctl,
 kubeseal, pluto and yq ([IMAGES.md](IMAGES.md), "The AWS L2 image"), and its
-egress sets gain `hashicorp` (the Terraform registry and provider
-downloads) and `aws` (the AWS APIs, and ECR Public for Atmos components
-vendored from there). Atmos vendoring and Terraform modules from GitHub, and
+egress sets gain `hashicorp` and `aws` (the AWS APIs, and ECR Public for
+Atmos components vendored from there). Atmos vendoring and Terraform modules from GitHub, and
 providers released on GitHub, go through the `github` set, which is always
 on. It writes
 only what is missing and never edits anything else, so it is safe to run

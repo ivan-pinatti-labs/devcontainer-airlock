@@ -16,7 +16,8 @@ check "init needs a git repository" 1 err "workbench: ${__scratch}/plain is not 
 clone "${repo}"
 mkdir -p "${repo}/web" "${repo}/infra"
 touch "${repo}/pyproject.toml" "${repo}/web/package.json" "${repo}/go.mod" "${repo}/Containerfile" \
-  "${repo}/infra/main.tf" "${repo}/Cargo.toml"
+  "${repo}/infra/variables.tf" "${repo}/Cargo.toml"
+printf '%s\n' 'provider "aws" {' '  region = "us-east-1"' '}' >"${repo}/infra/main.tf"
 rule 'pull --quiet *' 'exit 1'
 run "${wb}" init "${repo}"
 check "a failed pull of the L2 image" 1 err "workbench: could not pull ${reg}/airlock-l2-aws-devops; nothing written"
@@ -30,7 +31,7 @@ check "init in the repository you are in" 0 out "workbench: wrote ${sets} (pytho
 assert "the sets its files suggest" test "$(grep -v '^#' "${sets}" | paste -sd' ')" = "python node golang docker-hub hashicorp aws"
 check "a registry no set covers is pointed out" 0 out \
   "workbench: this repository uses a package registry no egress set covers yet"
-check "Terraform files get the AWS L2 image" 0 out "workbench: wrote ${repo}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2-aws-devops@sha256:mine)"
+check "Terraform on the AWS provider gets the AWS L2 image" 0 out "workbench: wrote ${repo}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2-aws-devops@sha256:mine)"
 check "the published one" 0 calls "podman pull --quiet ${reg}/airlock-l2-aws-devops:latest"
 assert "pinned by digest" grep -qx "ARG L2_IMAGE=${reg}/airlock-l2-aws-devops@sha256:mine" "${repo}/.devcontainer/l2/Dockerfile"
 assert "and says what it carries" grep -qx "# kubeseal, pluto and yq." "${repo}/.devcontainer/l2/Dockerfile"
@@ -71,6 +72,19 @@ touch "${atmos}/atmos.yaml"
 run "${wb}" init "${atmos}"
 check "an atmos.yaml alone gets HashiCorp and AWS" 0 out "workbench: wrote ${atmos}/.devcontainer/egress-sets (hashicorp aws)"
 check "and the AWS L2 image" 0 out "workbench: wrote ${atmos}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2-aws-devops@sha256:mine)"
+
+sourced="${WORKBENCH_ROOT}/sourced"
+clone "${sourced}"
+printf '%s\n' 'terraform {' '  required_providers {' '    aws = { source = "hashicorp/aws" }' '  }' '}' >"${sourced}/versions.tf"
+run "${wb}" init "${sourced}"
+check "so does one naming hashicorp/aws as a source" 0 out "workbench: wrote ${sourced}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2-aws-devops@sha256:mine)"
+
+gcp="${WORKBENCH_ROOT}/gcp"
+clone "${gcp}"
+printf '%s\n' 'provider "google" {}' >"${gcp}/main.tf"
+run "${wb}" init "${gcp}"
+check "Terraform with no AWS signal gets HashiCorp alone" 0 out "workbench: wrote ${gcp}/.devcontainer/egress-sets (hashicorp)"
+check "and the shared L2 image" 0 out "workbench: wrote ${gcp}/.devcontainer/l2/Dockerfile (${reg}/airlock-l2@sha256:mine)"
 
 bare="${WORKBENCH_ROOT}/bare"
 clone "${bare}"
