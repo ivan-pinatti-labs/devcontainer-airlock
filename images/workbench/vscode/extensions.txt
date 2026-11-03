@@ -9,7 +9,7 @@
 # "Extensions"). It reads the releases from the index the Extension Index
 # workflow publishes, and only the version on a line may change unattended.
 anthropic.claude-code@2.1.311
-openai.chatgpt@26.908.40401
+openai.chatgpt@26.1021.22027
 ms-vscode.makefile-tools@0.12.17
 vscode-icons-team.vscode-icons@12.19.0
 sonarsource.sonarlint-vscode@5.10.0
