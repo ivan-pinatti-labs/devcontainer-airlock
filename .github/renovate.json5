@@ -367,6 +367,15 @@
       labels: ["dependencies", "vscode-extension"],
     },
 
+    // The exception: Codex's extension depends on openai.codex-audio and the
+    // two release under the same version, so a bump to one alone would leave
+    // the build installing a pair that does not match. They move together.
+    {
+      matchDatasources: ["custom.vscode-extension"],
+      matchPackageNames: ["openai.chatgpt", "openai.codex-audio"],
+      groupName: "Codex VS Code extensions",
+    },
+
     // The github-actions manager extracts more than uses: pins by default:
     // pull-request.yml's python-version: "3.14" passed to
     // actions/setup-python's with: (depType uses-with) is a shape

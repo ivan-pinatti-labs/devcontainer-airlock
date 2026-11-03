@@ -44,11 +44,11 @@ RUN set -eu; \
   echo "${sum}  /tmp/server.tgz" | sha256sum -c -; \
   mkdir -p /tmp/server; \
   tar -xzf /tmp/server.tgz -C /tmp/server --strip-components=1; \
-  grep -vE '^\s*(#|$)' /tmp/extensions.txt | sort > /tmp/all.txt; \
+  grep -vE '^\s*(#|$)' /tmp/extensions.txt > /tmp/all.txt; \
   for agent in claude codex; do \
     case "${agent}" in \
-      claude) other='^openai\.chatgpt@' ;; \
-      codex) other='^anthropic\.claude-code@' ;; \
+      claude) other='^openai\.' ;; \
+      codex) other='^anthropic\.' ;; \
     esac; \
     grep -viE "${other}" /tmp/all.txt > "/tmp/${agent}.txt"; \
     dir="/opt/vscode-extensions-${agent}"; \
@@ -61,7 +61,7 @@ RUN set -eu; \
     /tmp/server/bin/code-server --accept-server-license-terms \
       --extensions-dir "${dir}" --list-extensions --show-versions \
       | sort > "/tmp/${agent}.installed"; \
-    diff -u "/tmp/${agent}.txt" "/tmp/${agent}.installed"; \
+    sort "/tmp/${agent}.txt" | diff -u - "/tmp/${agent}.installed"; \
     chmod -R a-w,a+rX "${dir}"; \
   done
 
