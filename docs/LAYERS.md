@@ -256,10 +256,26 @@ That is a group workspace:
 
 `host/workbench init` sets up an existing repository (run it in the
 repository, or pass its path): `.devcontainer/egress-sets` from the files it
-finds (Python and Node for any repository with pre-commit hooks, plus Go,
-Docker Hub or HashiCorp when it sees their files), `.devcontainer/l2/Dockerfile`
+finds (Python and Node for any repository with pre-commit hooks, plus Go or
+Docker Hub when it sees their files), `.devcontainer/l2/Dockerfile`
 on the published L2 image pinned by digest, and the `include` that gives its
-Makefile the workbench targets (a new Makefile when there is none). It writes
+Makefile the workbench targets (a new Makefile when there is none). Any
+`*.tf` file adds the `hashicorp` set (the Terraform registry and provider
+downloads). A repository with an `atmos.yaml`, or a Terraform file on the AWS
+provider (a `provider "aws"` block or a `hashicorp/aws` source), is taken
+for an AWS infrastructure repository: its Dockerfile starts from the published
+`l2-aws-devops` image instead, pinned by digest the same way, which adds
+atmos, terraform, tflint, the AWS CLI, kubectl, helm, helmfile, eksctl,
+kubeseal, pluto and yq ([IMAGES.md](IMAGES.md), "The AWS L2 image"), and its
+egress sets gain `hashicorp` and `aws` (the AWS APIs, and ECR Public for
+Atmos components vendored from there). Atmos vendoring and Terraform modules from GitHub, and
+providers released on GitHub, go through the `github` set, which is always
+on. It reads only the files git tracks (`git ls-files`), so an untracked
+`atmos.yaml` or `*.tf` file selects nothing: track it before running init.
+The provider check is a heuristic, not an HCL parser: it drops `/* */`
+blocks and `#` or `//` comments outside quoted strings, so a provider or
+source line that is commented out is no AWS signal, but text in a heredoc is
+read as code. It writes
 only what is missing and never edits anything else, so it is safe to run
 again; check the egress sets it guessed before committing them. A project
 created from `ivan-pinatti-labs/github-template` has all of this already.

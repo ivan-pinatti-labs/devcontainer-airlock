@@ -836,6 +836,8 @@ cmd_build() {
   for i in l2 l2-engine gh-broker egress-proxy mirror-gate; do
     podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/airlock-${i}:${TAG}" "${HERE}/images/${i}"
   done
+  # The L2 variants build on the L2 image just built.
+  podman build --build-arg "L2_IMAGE=localhost/airlock-l2:${TAG}" -t "localhost/airlock-l2-aws-devops:${TAG}" "${HERE}/images/l2-aws-devops"
   # The nested test runner builds on its own upstream image, not on base.
   podman build -t "localhost/airlock-podman-nested:${TAG}" "${HERE}/images/podman-nested"
   lock_state
@@ -848,7 +850,7 @@ cmd_build() {
 # digest, the one to pin by, rather than this platform's manifest.
 cmd_pull() {
   local i ref
-  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate podman-nested; do
+  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate l2-aws-devops podman-nested; do
     ref="$(pull_published "${i}")" || die "could not pull ${REGISTRY}/airlock-${i}"
     echo "workbench: ${i} ${ref}"
   done
@@ -877,15 +879,67 @@ pull_published() {
 # It writes only what is not there yet, and a Makefile gains the include
 # once; it never edits anything else, so it is safe to run again.
 cmd_init() {
-  local top f sets=() l2 files
+  local top f sets=() l2 files paths=() from=l2 tools="pre-commit, Python, Node, Go and the common linters"
   top="$(git -C "${1:-${PWD}}" rev-parse --show-toplevel 2>/dev/null)" ||
     die "${1:-${PWD}} is not in a git repository"
-  files="$(git -C "${top}" ls-files)"
+  # The tracked files, NUL delimited: without -z git quotes and escapes a
+  # path with a character outside ASCII, and the patterns below miss it.
+  # mapfile succeeds whatever git does, so git's status comes from wait: an
+  # index git cannot read stops init before it writes anything.
+  mapfile -d '' -t paths < <(git -C "${top}" ls-files -z)
+  wait "$!" || die "could not list the files git tracks in ${top}; nothing written"
+  files="$(printf '%s\n' "${paths[@]}")"
   has() { grep -qE "$1" <<<"${files}"; }
+  # A Terraform file with its comments taken out: /* */ blocks, which can
+  # span lines, and # or // to the end of a line, but not inside a quoted
+  # string. A heuristic rather than an HCL parser: a heredoc's text is read
+  # as code.
+  hcl_code() {
+    awk -f /dev/fd/3 "$1" 3<<'AWK' 2>/dev/null
+{
+  out = ""; quoted = 0; i = 1; n = length($0)
+  while (i <= n) {
+    c = substr($0, i, 1); two = substr($0, i, 2)
+    if (block) { if (two == "*/") { block = 0; i += 2 } else i++; continue }
+    if (quoted) {
+      out = out c
+      if (c == "\\") { out = out substr($0, i + 1, 1); i++ } else if (c == "\"") quoted = 0
+      i++; continue
+    }
+    if (two == "/*") { block = 1; i += 2; continue }
+    if (c == "#" || two == "//") break
+    if (c == "\"") quoted = 1
+    out = out c; i++
+  }
+  print out
+}
+AWK
+  }
+  # Whether a tracked Terraform file uses the AWS provider, by a provider
+  # block or a required_providers source, outside comments. The source is
+  # left unanchored, for the one line form `aws = { source = "hashicorp/aws" }`.
+  # grep reads all its input rather than quitting at the first match, which
+  # under pipefail would fail awk.
+  aws_provider() {
+    local tf
+    for tf in "${paths[@]}"; do
+      [[ "${tf}" == *.tf ]] || continue
+      hcl_code "${top}/${tf}" |
+        grep -E '^[[:space:]]*provider[[:space:]]+"aws"|source[[:space:]]*=[[:space:]]*"(registry\.terraform\.io/)?hashicorp/aws"' >/dev/null && return 0
+    done
+    return 1
+  }
+  # An AWS infrastructure repository (Atmos, or Terraform on the AWS
+  # provider) builds on the L2 variant that carries its tools. Other
+  # Terraform stays on the shared L2 image, with no AWS egress.
+  if has '(^|/)atmos\.yaml$' || aws_provider; then
+    from=l2-aws-devops
+    tools=$'pre-commit, Python, Node, Go, the common linters,\n# atmos, terraform, tflint, the AWS CLI, kubectl, helm, helmfile, eksctl,\n# kubeseal, pluto and yq'
+  fi
   # The one step that can fail runs before anything is written, so a failed
   # init leaves the repository as it found it.
   if [ ! -e "${top}/.devcontainer/l2/Dockerfile" ]; then
-    l2="$(pull_published l2)" || die "could not pull ${REGISTRY}/airlock-l2; nothing written"
+    l2="$(pull_published "${from}")" || die "could not pull ${REGISTRY}/airlock-${from}; nothing written"
   fi
   mkdir -p "${top}/.devcontainer/l2"
 
@@ -899,7 +953,11 @@ cmd_init() {
     { has '(^|/)package\.json$' || has '^\.pre-commit-config\.yaml$'; } && sets+=(node)
     has '(^|/)go\.mod$' && sets+=(golang)
     has '(^|/)(Dockerfile|Containerfile|[^/]*compose[^/]*\.ya?ml)$' && sets+=(docker-hub)
-    has '\.tf$' && sets+=(hashicorp)
+    # Terraform's registry and provider downloads for any Terraform, and for
+    # an AWS repository the AWS APIs with ECR Public, where Atmos can vendor
+    # components from.
+    { [ "${from}" = l2-aws-devops ] || has '\.tf$'; } && sets+=(hashicorp)
+    [ "${from}" = l2-aws-devops ] && sets+=(aws)
     {
       echo "# The network services this repository's hooks, tests and builds reach,"
       echo "# through its egress proxy (workbench, github and ghcr are always on). One"
@@ -923,11 +981,11 @@ cmd_init() {
 # \`l2\` builds it inside the L2 engine the first time it is needed, and again
 # whenever this file changes. See docs/LAYERS.md in devcontainer-airlock.
 #
-# It starts from the shared L2 image, pinned by digest, which already carries
-# pre-commit, Python, Node, Go and the common linters. Add what this
-# repository's hooks and tests need below: prefer a distribution package,
-# then a vendor's own signed apt repository, then the tool's official
-# container image.
+# It starts from the published ${from} image, pinned by digest. It already
+# carries ${tools}.
+# Add what this repository's hooks and tests need below: prefer a
+# distribution package, then a vendor's own signed apt repository, then the
+# tool's official container image.
 ARG L2_IMAGE=${l2}
 # hadolint ignore=DL3006
 FROM \${L2_IMAGE}

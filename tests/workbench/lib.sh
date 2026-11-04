@@ -33,7 +33,8 @@
 # linked worktree's does), and what a remote's default branch holds is
 # under GIT_DIR/remote-tree/REF/PATH. In GIT_DIR, `branch` holds the
 # current branch, `changes` what status prints, `ahead` the commits on
-# no remote, and `status-fails` or `log-fails` make those commands fail.
+# no remote, `tracked` the index (`track` below) that ls-files lists, and
+# `status-fails`, `log-fails` or `ls-files-fails` make those commands fail.
 
 # shellcheck source=tests/shell-test-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../shell-test-lib.sh"
@@ -103,6 +104,12 @@ image() { printf '%s' "${2}" >"${PODMAN_STATE}/img/$(printf '%s' "${1}" | tr '/:
 # A checkout: clone DIR makes DIR a main clone; worktree MAIN NAME adds a
 # linked worktree at MAIN/.claude/worktrees/NAME and prints its path.
 clone() { mkdir -p "${1}/.git"; }
+# track CLONE PATH...: add PATH (relative to CLONE) to its index, as git add.
+track() {
+  local c="${1}"
+  shift
+  printf '%s\n' "$@" >>"${c}/.git/tracked"
+}
 worktree() {
   local wt="${1}/.claude/worktrees/${2}"
   mkdir -p "${1}/.git/worktrees/${2}" "${wt}"
@@ -156,7 +163,10 @@ case "$*" in
   "rev-parse --path-format=absolute --git-common-dir") echo "${common}" ;;
   "cat-file -e "*) [ -f "${common}/remote-tree/${3%%:*}/${3#*:}" ] ;;
   "show "*) cat "${common}/remote-tree/${2%%:*}/${2#*:}" 2>/dev/null || exit 128 ;;
-  ls-files) cd "${top}" && find . -path ./.git -prune -o -type f -print | sed "s|^\./||" | sort ;;
+  # The index is the paths track added, so a file it never named is
+  # untracked; ls-files-fails is an index git cannot read.
+  "ls-files -z") [ ! -f "${gd}/ls-files-fails" ] || exit 128
+    if [ -f "${gd}/tracked" ]; then LC_ALL=C sort -u "${gd}/tracked" | tr "\n" "\0"; fi ;;
   "status --porcelain") [ ! -f "${gd}/status-fails" ] || exit 1; cat "${gd}/changes" 2>/dev/null || true ;;
   "log --branches --not --remotes --oneline") [ ! -f "${gd}/log-fails" ] || exit 1; cat "${gd}/ahead" 2>/dev/null || true ;;
   "branch --show-current") cat "${gd}/branch" 2>/dev/null || true ;;

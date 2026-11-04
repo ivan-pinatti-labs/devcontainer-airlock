@@ -29,6 +29,16 @@ def domains(name):
         ("aws", "public.ecr.aws"),
         # ECR Public's blob downloads redirect here (measured 2026-10-07).
         ("aws", "d2glxqk2uabbnd.cloudfront.net"),
+        # What `terraform init` and `atmos vendor pull` reach in a repository
+        # built on l2-aws-devops (measured 2026-11-02): the registry, which
+        # sends HashiCorp's own providers to releases.hashicorp.com, a partner
+        # provider to its GitHub release (a redirect to
+        # release-assets.githubusercontent.com) and a module to git over
+        # https on github.com.
+        ("hashicorp", "registry.terraform.io"),
+        ("hashicorp", "releases.hashicorp.com"),
+        ("github", "github.com"),
+        ("github", "release-assets.githubusercontent.com"),
         ("golang", "vuln.go.dev"),
         ("alpine", "gitlab.alpinelinux.org"),
         # A registry's own record of when a digest was pushed, which is what

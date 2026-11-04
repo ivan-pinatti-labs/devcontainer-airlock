@@ -354,6 +354,21 @@
       labels: ["dependencies", "tooling"],
     },
 
+    // The AWS L2 image (images/l2-aws-devops/Dockerfile) is pinned to match
+    // a consuming infrastructure repository, and its pins are bumped
+    // deliberately: in that repository first, then here by hand, so a hook
+    // behaves the same in both. Renovate opens no pull request for them
+    // until this rule goes. They stay in the shapes it reads (image FROM
+    // lines by tag and digest, annotated _VERSION arguments through
+    // customManagers:dockerfileVersions) and that `Pin Only` grades, so
+    // removing the rule is all re-enabling takes. tflint is the exception:
+    // nothing pins it there, so it moves with the other image pins.
+    {
+      matchFileNames: ["images/l2-aws-devops/Dockerfile"],
+      matchPackageNames: ["!ghcr.io/terraform-linters/tflint"],
+      enabled: false,
+    },
+
     // The VS Code extensions run with the editor's full permissions, in the
     // workbench where the agents' logins are (docs/LAYERS.md, "Extensions").
     // They take the same lane as the agent CLIs: the seven day window, the

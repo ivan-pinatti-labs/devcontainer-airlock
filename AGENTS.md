@@ -141,6 +141,7 @@ and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 | base | `images/base/` | the floor: git, common tools, trusted apt keys, the dev account |
 | workbench-claude, workbench-codex | `images/workbench/` | one per agent: that agent, its editor extension, git; no GitHub token, no ssh key, no container runtime, no other agent's login |
 | l2 | `images/l2/` | where hooks, tests and installs run; no network, no credentials |
+| l2-aws-devops | `images/l2-aws-devops/` | L2 for an Atmos and Terraform infrastructure repository: the l2 image plus its toolchain, built on the l2 of the same run |
 | l2-engine | `images/l2-engine/` | the rootless podman that starts L2 containers |
 | gh-broker | `images/gh-broker/` | holds the GitHub token; runs allowlisted gh commands |
 | egress-proxy | `images/egress-proxy/` | one per host, the only way out to the network, by each workspace's egress sets |
