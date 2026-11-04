@@ -245,6 +245,7 @@ repos:
             | ^host/(workbench|scrub|scrub-scan)$
             | ^images/l2/engine-bin/podman$
             | ^images/l2-engine/containers/crun-without-masked-paths$
+            | ^images/workbench/vscode/select-extensions$
             | ^images/workbench/share/git-hook$
           )
         stages: [pre-push]

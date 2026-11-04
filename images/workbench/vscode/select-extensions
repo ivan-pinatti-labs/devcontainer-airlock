@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# select-extensions AGENT LIST: prints the extensions from LIST (the pinned
+# extensions.txt) that AGENT's workbench gets, one `publisher.name@version`
+# per line, in the order LIST gives them. The order is the install order: an
+# extension another one depends on is listed, and so installed from its pin,
+# before the one that needs it. Each agent leaves out every extension from
+# the other agent's publisher. Comments and blank lines are skipped.
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: select-extensions claude|codex LIST" >&2
+  exit 2
+fi
+
+case "$1" in
+claude) other='openai' ;;
+codex) other='anthropic' ;;
+*)
+  echo "select-extensions: unknown agent: $1" >&2
+  exit 2
+  ;;
+esac
+
+while read -r line; do
+  [[ -z "${line}" || "${line}" == \#* ]] && continue
+  [[ "${line,,}" == "${other}".* ]] && continue
+  printf '%s\n' "${line}"
+done <"$2"
