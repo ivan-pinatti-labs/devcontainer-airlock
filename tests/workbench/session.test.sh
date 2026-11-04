@@ -198,6 +198,19 @@ check "the workbench knows its level" 0 calls "-e AGENT_POLICY_MODE=supervised"
 check "supervised runs in auto mode" 0 calls "--permission-mode auto"
 run "${wb}" session attach "${a}"
 check "attach keeps the level" 0 calls "-v ${levels}/supervised/50-agent-policy.json:"
+# A record from assisted, which supervised replaced, runs hardened.
+sed -i 's/^level=supervised$/level=assisted/' "${sessions}/${a}/session"
+run "${wb}" session attach "${a}"
+check "a record from assisted attaches hardened" 0 calls "-e AGENT_POLICY_MODE=hardened"
+refute "with no level's drop-in" "${levels}/supervised/50-agent-policy.json:"
+rule 'ps --filter label=workbench.session *' "printf '%s\n' ${a}"
+run "${wb}" restart-broker
+check "restart-broker names a running one, whose gh it stops" 0 err \
+  "workbench: session ${a} runs at a level the broker no longer serves, so its gh stops; stop it and attach it again, as hardened (docs/MODES.md)"
+sed -i 's/^level=assisted$/level=supervised/' "${sessions}/${a}/session"
+run "${wb}" restart-broker
+assert "but not one at a level it serves" sh -c '! grep -q "no longer serves" "$1"' _ "${__scratch}/err"
+unrule
 refute "copied once per image" "--entrypoint cat localhost"
 unrule
 

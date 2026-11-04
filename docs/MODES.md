@@ -158,9 +158,15 @@ each request to the allowlist of the socket it came in on:
 `allowlist.supervised.json` for supervised, plus `allowlist.unattended.json`
 for unattended (docs/LAYERS.md, "GitHub access"). The supervised file adds
 nothing yet; the unattended one adds what "Unattended" above lists (workflow
-runs, labels and the bot approval). A broker started before
-levels serves the hardened socket alone; `host/workbench restart-broker`
-replaces it.
+runs, labels and the bot approval). A broker started before a level
+existed has no socket for it, and `host/workbench helpers` says so;
+`host/workbench restart-broker` replaces it.
+
+`supervised` replaced an earlier `assisted` level. A session recorded as
+`assisted` attaches as hardened, which asks more, never less. One still
+running when the broker restarts keeps a mount the new broker does not
+serve, so its `gh` stops: `restart-broker` names it, and stopping it and
+attaching it again brings `gh` back, as hardened.
 
 ## Not yet
 

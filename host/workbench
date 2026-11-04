@@ -1331,9 +1331,12 @@ start_broker() {
   done
   chmod 700 "${RUN}/workbench" "${GH_LEVELS}"
   if running gh-broker; then
-    # One from before levels serves the hardened socket alone.
-    [ -e "$(gh_dir unattended)/gh.sock" ] ||
-      echo "workbench: the gh broker running predates session levels, so a supervised or unattended session has no gh until host/workbench restart-broker" >&2
+    # One from before a level (before levels, or before supervised replaced
+    # assisted) has no socket for it.
+    for level in ${LEVELS}; do
+      [ "${level}" = hardened ] || [ -e "$(gh_dir "${level}")/gh.sock" ] ||
+        echo "workbench: the gh broker running predates the ${level} level, so a session at that level has no gh until host/workbench restart-broker" >&2
+    done
     return 0
   fi
   podman secret exists "${GH_SECRET}" ||
@@ -1542,6 +1545,10 @@ cmd_restart_proxy() {
 }
 
 cmd_restart_broker() {
+  local s
+  for s in $(stale_level_sessions); do
+    echo "workbench: session ${s} runs at a level the broker no longer serves, so its gh stops; stop it and attach it again, as hardened (docs/MODES.md)" >&2
+  done
   restart_shared gh-broker
   echo "workbench: gh broker restarted"
 }
@@ -2014,6 +2021,20 @@ session_new_name() {
   die "no free session name; host/workbench session prune"
 }
 
+# The running sessions whose record names a level no longer served (assisted,
+# replaced by supervised): their workbench mounts that level's broker folder,
+# which a new broker leaves without a socket.
+stale_level_sessions() {
+  local s level
+  for s in $(session_names --running); do
+    level="$(sed -n 's/^level=//p' "$(session_dir "${s}")/session")"
+    case " ${LEVELS} " in
+    *" ${level:-hardened} "*) ;;
+    *) echo "${s}" ;;
+    esac
+  done
+}
+
 # Read session $1's record into S_AGENT, S_WS and S_ID: KEY=value
 # lines, read and never run, like the settings file.
 session_read() {
@@ -2031,6 +2052,9 @@ session_read() {
     hours) S_HOURS="${value}" ;;
     esac
   done <"${f}"
+  # assisted, replaced by supervised, runs hardened: it asked more than
+  # supervised does, and hardened asks more still, so nothing is asked less.
+  if [ "${S_LEVEL}" = assisted ]; then S_LEVEL=hardened; fi
 }
 
 # The sessions' names, one a line: every session, or with --running those
