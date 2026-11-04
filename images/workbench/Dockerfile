@@ -32,6 +32,7 @@ USER 0:0
 # exist and match its published checksum.
 ARG VSCODE_COMMIT=7debcd0e2acdea1c52de81bf9ee1620444407dda
 COPY vscode/extensions.txt /tmp/extensions.txt
+COPY vscode/select-extensions /tmp/select-extensions
 # No pipefail (DL4006): Podman's default image format ignores SHELL, so it
 # would not hold under the runtime this builds with. Each pipe below ends in a
 # command that fails on its own when its input is wrong (sha256sum -c, diff).
@@ -44,13 +45,8 @@ RUN set -eu; \
   echo "${sum}  /tmp/server.tgz" | sha256sum -c -; \
   mkdir -p /tmp/server; \
   tar -xzf /tmp/server.tgz -C /tmp/server --strip-components=1; \
-  grep -vE '^\s*(#|$)' /tmp/extensions.txt | sort > /tmp/all.txt; \
   for agent in claude codex; do \
-    case "${agent}" in \
-      claude) other='^openai\.chatgpt@' ;; \
-      codex) other='^anthropic\.claude-code@' ;; \
-    esac; \
-    grep -viE "${other}" /tmp/all.txt > "/tmp/${agent}.txt"; \
+    /tmp/select-extensions "${agent}" /tmp/extensions.txt > "/tmp/${agent}.txt"; \
     dir="/opt/vscode-extensions-${agent}"; \
     mkdir -p "${dir}"; \
     while read -r ext; do \
@@ -61,7 +57,7 @@ RUN set -eu; \
     /tmp/server/bin/code-server --accept-server-license-terms \
       --extensions-dir "${dir}" --list-extensions --show-versions \
       | sort > "/tmp/${agent}.installed"; \
-    diff -u "/tmp/${agent}.txt" "/tmp/${agent}.installed"; \
+    sort "/tmp/${agent}.txt" | diff -u - "/tmp/${agent}.installed"; \
     chmod -R a-w,a+rX "${dir}"; \
   done
 
@@ -76,7 +72,7 @@ FROM ${BASE_IMAGE} AS agent-policy
 # hadolint ignore=DL3002
 USER 0:0
 # renovate: datasource=github-tags depName=ivan-pinatti-labs/agent-policy
-ARG AGENT_POLICY_REF=v0.8.60@8571f287c6923a8b81b65414564db266c87d200e
+ARG AGENT_POLICY_REF=v0.10.0@08f00a88a6fc33fc496ce11e78778c942c170f85
 COPY claude/managed-settings.json /tmp/managed-settings.json
 COPY agent-policy/ /tmp/overlay/
 # The overlay's rule files join agent-policy's own before the render (which
@@ -217,7 +213,7 @@ CMD ["/bin/bash"]
 # and what the package's signature does and does not prove.
 FROM common AS claude
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.310
+ARG CLAUDE_CODE_VERSION=2.1.311
 RUN set -eu; \
   export HOME=/root npm_config_cache=/tmp/npm-cache; \
   npm init --yes >/dev/null; \

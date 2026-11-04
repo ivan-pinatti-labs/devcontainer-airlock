@@ -382,6 +382,18 @@
       labels: ["dependencies", "vscode-extension"],
     },
 
+    // Held: from 26.1021.22027, Codex's extension ships minified webview
+    // assets the image's blocking secret scan flags, and depends on a second
+    // extension, openai.codex-audio. The image build is not a required check,
+    // so that bump merged unattended and broke the build; it was reverted.
+    // Lift this once a release scans clean, pinning any extension it depends
+    // on above it in extensions.txt.
+    {
+      matchDatasources: ["custom.vscode-extension"],
+      matchPackageNames: ["openai.chatgpt"],
+      allowedVersions: "<26.1021.0",
+    },
+
     // The github-actions manager extracts more than uses: pins by default:
     // pull-request.yml's python-version: "3.14" passed to
     // actions/setup-python's with: (depType uses-with) is a shape

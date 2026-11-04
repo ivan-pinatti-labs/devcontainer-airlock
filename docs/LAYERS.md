@@ -1046,6 +1046,13 @@ the editor itself; VS Code has no sandbox for them. What limits them here:
   and holds each one back for seven days. A patch or minor bump merges
   unattended when `Pin Only` sees nothing but the version move; a major,
   and adding or removing an extension, waits for a person.
+- An extension another one depends on is pinned in the same file and listed
+  before it, so it is installed from its pin rather than fetched at whatever
+  version the Marketplace serves. The build fails if anything is installed
+  that the file does not pin, which is how a new dependency shows up.
+- Codex's extension is held below 26.1021 in `.github/renovate.json5`: that
+  release fails the image's secret scan and pulls in an unpinned
+  dependency. The hold comes off once a release scans clean.
 - They are baked into a root owned, read only directory. Neither an
   extension nor anything else in the workbench can install, update or replace
   one. Auto update is off.
