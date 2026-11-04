@@ -43,7 +43,7 @@ import urllib.parse
 
 ALLOW = json.load(open("/etc/gh-broker/allowlist.json"))
 # The session levels, each allowing everything the one before it does.
-LEVELS = ("hardened", "assisted", "unattended")
+LEVELS = ("hardened", "supervised", "unattended")
 # The lists a level's override may add to, and the broker's own commands,
 # the only ones broker_commands may name.
 LIST_KEYS = ("commands", "public_reads", "broker_commands", "graphql_mutations")

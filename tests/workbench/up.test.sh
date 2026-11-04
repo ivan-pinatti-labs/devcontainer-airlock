@@ -23,7 +23,7 @@ check "codex too" 0 out "workbench: codex: host/workbench codex, or attach VS Co
 check "the state is locked meanwhile" 0 calls "flock -w 120 9"
 
 check "the broker holds the token for the owners named" 0 calls \
-  "podman run -d --name gh-broker --userns=keep-id:uid=1000,gid=1000 --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp --secret gh-devcontainer,type=env,target=GH_TOKEN -e GH_BROKER_OWNERS=acme -v ${run_dir}/gh:/run/gh-broker/hardened:Z -v ${XDG_RUNTIME_DIR}/workbench-gh/assisted:/run/gh-broker/assisted:Z -v ${XDG_RUNTIME_DIR}/workbench-gh/unattended:/run/gh-broker/unattended:Z -v ${WORKBENCH_ROOT}:${WORKBENCH_ROOT}:ro localhost/airlock-gh-broker:local"
+  "podman run -d --name gh-broker --userns=keep-id:uid=1000,gid=1000 --security-opt label=type:container_engine_t --security-opt label=level:s0:c555,c666 --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp --secret gh-devcontainer,type=env,target=GH_TOKEN -e GH_BROKER_OWNERS=acme -v ${run_dir}/gh:/run/gh-broker/hardened:Z -v ${XDG_RUNTIME_DIR}/workbench-gh/supervised:/run/gh-broker/supervised:Z -v ${XDG_RUNTIME_DIR}/workbench-gh/unattended:/run/gh-broker/unattended:Z -v ${WORKBENCH_ROOT}:${WORKBENCH_ROOT}:ro localhost/airlock-gh-broker:local"
 check "GitHub's host keys are fetched in a container" 0 calls \
   "podman run --rm --network podman localhost/airlock-base:local sh -c curl -fsS https://api.github.com/meta"
 assert "into known_hosts" grep -q "github.com ssh-ed25519 KEY" "${XDG_RUNTIME_DIR}/devcontainer-ssh/known_hosts"
@@ -74,9 +74,9 @@ check "with your git identity" 0 calls \
 check "git over ssh through the proxy" 0 calls \
   "ProxyCommand='socat - PROXY:10.203.1.2:%h:%p,proxyport=8888'"
 check "the claude login folder and the sockets" 0 calls \
-  "-v ${ws}:${ws}:Z -v ${HOME}/.local/share/workbench/claude:/home/dev/.claude:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-claude-app -e AIRLOCK_HOST_HOME=${HOME} -e AIRLOCK_WORKSPACE=${ws} --hostname workbench-claude-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine --label workbench.voice=ready -v ${run_dir}/voice/workbench-claude-app:/run/workbench-voice:ro,Z -e AIRLOCK_LEVEL=hardened -w ${ws} --entrypoint catatonit localhost/airlock-workbench-claude:local -- workbench-init"
+  "-v ${ws}:${ws}:Z -v ${HOME}/.local/share/workbench/claude:/home/dev/.claude:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-claude-app -e AIRLOCK_HOST_HOME=${HOME} -e AIRLOCK_WORKSPACE=${ws} --hostname workbench-claude-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine --label workbench.voice=ready -v ${run_dir}/voice/workbench-claude-app:/run/workbench-voice:ro,Z -e AGENT_POLICY_MODE=hardened -w ${ws} --entrypoint catatonit localhost/airlock-workbench-claude:local -- workbench-init"
 check "codex has its own login folder and no voice folder" 0 calls \
-  "-v ${HOME}/.local/share/workbench/codex:/home/dev/.codex:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-codex-app -e AIRLOCK_HOST_HOME=${HOME} -e AIRLOCK_WORKSPACE=${ws} --hostname workbench-codex-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine -e AIRLOCK_LEVEL=hardened -w ${ws} --entrypoint catatonit localhost/airlock-workbench-codex:local -- workbench-init"
+  "-v ${HOME}/.local/share/workbench/codex:/home/dev/.codex:Z -e AIRLOCK_SESSION= -e AIRLOCK_WORKBENCH=workbench-codex-app -e AIRLOCK_HOST_HOME=${HOME} -e AIRLOCK_WORKSPACE=${ws} --hostname workbench-codex-app -v ${run_dir}/gh:/run/gh-broker -v ${XDG_RUNTIME_DIR}/devcontainer-ssh:/run/devcontainer-ssh -v ${run_dir}/app:/run/l2-engine -e AGENT_POLICY_MODE=hardened -w ${ws} --entrypoint catatonit localhost/airlock-workbench-codex:local -- workbench-init"
 
 # Everything is running now: a second up starts nothing.
 run "${wb}" up

@@ -40,7 +40,7 @@ refute "not fetched again" "api.github.com"
 run "${wb}" helpers
 refute "helpers already running are left alone" "podman run"
 check "a broker from before levels, with no unattended socket, is named" 0 err \
-  "workbench: the gh broker running predates session levels, so an assisted or unattended session has no gh until host/workbench restart-broker"
+  "workbench: the gh broker running predates session levels, so a supervised or unattended session has no gh until host/workbench restart-broker"
 touch "${XDG_RUNTIME_DIR}/workbench-gh/unattended/gh.sock"
 run "${wb}" helpers
 assert "one serving every level is not" sh -c '! grep -q "predates session levels" "$1"' _ "${__scratch}/err"

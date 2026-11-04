@@ -42,11 +42,11 @@ def recipes() -> dict[str, str]:
     [
         "claude",
         "claude-remote",
-        "claude-assisted",
+        "claude-supervised",
         "claude-unattended",
         "claude-$(1)",
         "claude-$(1)-remote",
-        "claude-$(1)-assisted",
+        "claude-$(1)-supervised",
         "claude-$(1)-unattended",
     ],
 )

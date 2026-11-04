@@ -31,7 +31,7 @@
     host/workbench shell claude|codex[-<account>] [WORKSPACE]
                                     a shell in that agent workbench
     host/workbench session start claude|codex[-<account>] [--remote] [--resume ID]
-                                  [--level hardened|assisted|unattended] [--hours N] [WORKSPACE]
+                                  [--level hardened|supervised|unattended] [--hours N] [WORKSPACE]
                                     a new session (docs/SESSIONS.md): its
                                     own workbench, network and L2 engine,
                                     the clones read only, its own folder in
@@ -211,7 +211,7 @@
         separate from your own ~/.claude and ~/.codex
     ${XDG_RUNTIME_DIR}/workbench/gh           the gh broker socket for hardened
                                               sessions
-    ${XDG_RUNTIME_DIR}/workbench-gh/assisted, unattended
+    ${XDG_RUNTIME_DIR}/workbench-gh/supervised, unattended
                                               the sockets for the other levels
     ${XDG_RUNTIME_DIR}/workbench/egress       the workspaces the egress proxy
                                               serves, and their sets
@@ -1333,7 +1333,7 @@ start_broker() {
   if running gh-broker; then
     # One from before levels serves the hardened socket alone.
     [ -e "$(gh_dir unattended)/gh.sock" ] ||
-      echo "workbench: the gh broker running predates session levels, so an assisted or unattended session has no gh until host/workbench restart-broker" >&2
+      echo "workbench: the gh broker running predates session levels, so a supervised or unattended session has no gh until host/workbench restart-broker" >&2
     return 0
   fi
   podman secret exists "${GH_SECRET}" ||
@@ -1479,7 +1479,7 @@ start_workbench() {
     -v "${SSH_DIR}:/run/devcontainer-ssh" \
     -v "$(engine_dir "${ws}"):/run/l2-engine" \
     "${voice[@]}" "${level[@]}" \
-    -e AIRLOCK_LEVEL="${S_LEVEL:-hardened}" \
+    -e AGENT_POLICY_MODE="${S_LEVEL:-hardened}" \
     -w "${ws}" \
     --entrypoint catatonit "$(wb_image "$(agent_of "${agent}")")" -- workbench-init >/dev/null
 }
@@ -2231,11 +2231,12 @@ session_down() {
 }
 
 # Session levels (docs/MODES.md): how far the agent may go without asking.
-# hardened is the policy as written and the default; assisted asks less
-# about reads, with you there; unattended asks nothing, for runs with nobody
-# at the keyboard, with the ssh key unlocked for the hours picked. Nothing
-# ends it but the agent exiting (or session stop).
-LEVELS="hardened assisted unattended"
+# hardened is the policy as written and the default; supervised asks only
+# for a judgment, with you driving, and leaves the rest to auto mode;
+# unattended asks nothing, for runs with nobody at the keyboard, with the ssh
+# key unlocked for the hours picked. Nothing ends it but the agent exiting
+# (or session stop).
+LEVELS="hardened supervised unattended"
 
 # ", <level>" for a session's start line, nothing for hardened.
 level_note() {
@@ -2389,9 +2390,11 @@ session_run() {
       cmd+=(--session-id "${S_ID}")
     fi
     [ -z "${remote}" ] || cmd+=(--remote-control)
-    # Unattended runs in Claude Code's own auto mode, never with permission
-    # checks bypassed (docs/MODES.md).
-    [ "${S_LEVEL}" != unattended ] || cmd+=(--permission-mode auto)
+    # Supervised and unattended run in Claude Code's own auto mode, never
+    # with permission checks bypassed (docs/MODES.md).
+    case "${S_LEVEL}" in
+    supervised | unattended) cmd+=(--permission-mode auto) ;;
+    esac
   fi
   # Its record's time is when it was last used, for session names --recent.
   touch "$(session_dir "${SESSION}")/session"

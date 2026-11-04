@@ -51,7 +51,7 @@ assert "that folder is made" test -d "${app}/.claude/worktrees/${s}"
 check "told which session it is" 0 calls "-e AIRLOCK_SESSION=${s} -e AIRLOCK_WORKBENCH=workbench-claude-s-${s}"
 check "the gh broker's hardened socket" 0 calls \
   "-v ${XDG_RUNTIME_DIR}/workbench/gh:/run/gh-broker -v"
-refute "not the assisted one" "workbench-gh/assisted:/run/gh-broker -v"
+refute "not the supervised one" "workbench-gh/supervised:/run/gh-broker -v"
 refute "nor the unattended one" "workbench-gh/unattended:/run/gh-broker -v"
 check "Claude Code gets the session's own conversation id" 0 calls \
   "podman exec -it -e TERM -e COLORTERM -w ${app} workbench-claude-s-${s} claude --session-id ${id}"
@@ -164,11 +164,11 @@ unset WORKBENCH_HISTORY
 
 # Levels (docs/MODES.md).
 run "${wb}" session start claude --level
-check "--level needs a level" 1 err "workbench: session start: --level needs one of hardened assisted unattended"
+check "--level needs a level" 1 err "workbench: session start: --level needs one of hardened supervised unattended"
 run "${wb}" session start claude --level lenient
-check "an unknown level is refused" 1 err "workbench: session start: no level 'lenient'; one of hardened assisted unattended (docs/MODES.md)"
-run "${wb}" session start codex --level assisted
-check "Codex runs hardened" 1 err "workbench: only Claude Code has the assisted level so far; Codex runs hardened (docs/MODES.md)"
+check "an unknown level is refused" 1 err "workbench: session start: no level 'lenient'; one of hardened supervised unattended (docs/MODES.md)"
+run "${wb}" session start codex --level supervised
+check "Codex runs hardened" 1 err "workbench: only Claude Code has the supervised level so far; Codex runs hardened (docs/MODES.md)"
 run "${wb}" session start claude --hours
 check "--hours needs hours" 1 err "workbench: session start: --hours needs a number of hours"
 run "${wb}" session start claude --hours 12
@@ -176,28 +176,28 @@ check "hours are for an unattended session" 1 err "workbench: session start: --h
 run "${wb}" session start claude --level unattended --hours 72
 check "two days at most" 1 err "workbench: session start: --hours is a whole number from 1 to 48, not '72'"
 
-run "${wb}" session start claude --level assisted
+run "${wb}" session start claude --level supervised
 check "a level needs the workbench image" 1 err "workbench: cannot read the image localhost/airlock-workbench-claude:local"
 image localhost/airlock-workbench-claude:local sha256:wb
 rule 'run --rm --network none --entrypoint cat *' 'exit 1'
-run "${wb}" session start claude --level assisted
-check "and the level in it" 1 err "workbench: the image localhost/airlock-workbench-claude:local has no assisted level; make workbench-pull, or workbench-build"
+run "${wb}" session start claude --level supervised
+check "and the level in it" 1 err "workbench: the image localhost/airlock-workbench-claude:local has no supervised level; make workbench-pull, or workbench-build"
 unrule
 levels="${HOME}/.local/share/workbench/levels/wb"
 rule 'run --rm --network none --entrypoint cat *' 'echo "{\"level\": true}"'
-run "${wb}" session start claude --level assisted
+run "${wb}" session start claude --level supervised
 a="$(session_name)"
-check "an assisted session says so" 0 out "workbench: session ${a} (claude, ${app}, assisted)"
-assert "and records it" grep -qx "level=assisted" "${sessions}/${a}/session"
+check "a supervised session says so" 0 out "workbench: session ${a} (claude, ${app}, supervised)"
+assert "and records it" grep -qx "level=supervised" "${sessions}/${a}/session"
 check "its drop-in is copied out of the image" 0 calls \
-  "podman run --rm --network none --entrypoint cat localhost/airlock-workbench-claude:local /usr/local/share/workbench/levels/assisted/50-agent-policy.json"
-assert "kept beside the others of that image" grep -q level "${levels}/assisted/50-agent-policy.json"
+  "podman run --rm --network none --entrypoint cat localhost/airlock-workbench-claude:local /usr/local/share/workbench/levels/supervised/50-agent-policy.json"
+assert "kept beside the others of that image" grep -q level "${levels}/supervised/50-agent-policy.json"
 check "and mounted over the image's own, read only, labelled for every session to share" 0 calls \
-  "-v ${levels}/assisted/50-agent-policy.json:/etc/claude-code/managed-settings.d/50-agent-policy.json:ro,z -v ${levels}/assisted/guard-allow.json:/usr/local/libexec/agent-policy/guard-allow.json:ro,z"
-check "the workbench knows its level" 0 calls "-e AIRLOCK_LEVEL=assisted"
-refute "assisted is not auto mode by force" "--permission-mode"
+  "-v ${levels}/supervised/50-agent-policy.json:/etc/claude-code/managed-settings.d/50-agent-policy.json:ro,z -v ${levels}/supervised/guard-allow.json:/usr/local/libexec/agent-policy/guard-allow.json:ro,z"
+check "the workbench knows its level" 0 calls "-e AGENT_POLICY_MODE=supervised"
+check "supervised runs in auto mode" 0 calls "--permission-mode auto"
 run "${wb}" session attach "${a}"
-check "attach keeps the level" 0 calls "-v ${levels}/assisted/50-agent-policy.json:"
+check "attach keeps the level" 0 calls "-v ${levels}/supervised/50-agent-policy.json:"
 refute "copied once per image" "--entrypoint cat localhost"
 unrule
 

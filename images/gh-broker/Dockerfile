@@ -18,7 +18,7 @@ RUN printf '%s\n' \
   && rm -rf /var/lib/apt/lists/*
 COPY broker.py /usr/local/libexec/gh-broker/broker.py
 # The hardened list, and what each other level adds to the one before it.
-COPY allowlist.json allowlist.assisted.json allowlist.unattended.json /etc/gh-broker/
+COPY allowlist.json allowlist.supervised.json allowlist.unattended.json /etc/gh-broker/
 # The allow and refuse cases: a change that reopens one fails the build.
 COPY test_broker.py /tmp/test_broker.py
 RUN python3 /tmp/test_broker.py && rm /tmp/test_broker.py

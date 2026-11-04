@@ -98,7 +98,7 @@ make unlock              # type the key's passphrase; lasts 12 hours (HOURS=, up
 make claude              # a new Claude Code session over the folder you are in,
                          # with voice and remote control (REMOTE=0: without)
 make claude-plain        # neither voice nor remote control
-make claude-assisted     # asks less about reads, with you there (docs/MODES.md)
+make claude-supervised   # you drive; asks only for a judgment (docs/MODES.md)
 make claude-unattended   # nobody to ask, the key unlocked 8 to 48 hours (docs/MODES.md)
 make codex               # a new Codex session (no voice)
 make sessions            # every session, running or stopped, and its branches
@@ -187,7 +187,7 @@ sessions started on the host, and the other way round.
 one agent run with a workbench, an internal network and an L2 engine of its
 own, named at random (`brave-otter`). Sessions run side by side, in any mix
 of agents and accounts, and cannot reach each other's processes, files or
-containers. Each runs at a level, hardened unless `make claude-assisted` or
+containers. Each runs at a level, hardened unless `make claude-supervised` or
 `make claude-unattended` started it: how far the agent goes without asking
 you, never what it can reach, apart from the few GitHub commands the
 unattended level's broker list adds (docs/MODES.md). A session reads the
@@ -620,7 +620,7 @@ socket for each session level (docs/MODES.md), and a session gets only its
 own level's socket mounted at `/run/gh-broker/gh.sock`. A request is held to
 the level of the socket it came in on, never to anything it says itself, so
 a hardened session has no way to reach what an unattended one may do.
-`allowlist.json` is the hardened list; `allowlist.assisted.json` and
+`allowlist.json` is the hardened list; `allowlist.supervised.json` and
 `allowlist.unattended.json` each add to the level before, so every level
 allows everything the one before it does, and the broker logs what each
 allows beyond hardened when it starts. An override holds only lists of
