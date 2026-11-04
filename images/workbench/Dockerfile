@@ -32,6 +32,7 @@ USER 0:0
 # exist and match its published checksum.
 ARG VSCODE_COMMIT=7debcd0e2acdea1c52de81bf9ee1620444407dda
 COPY vscode/extensions.txt /tmp/extensions.txt
+COPY vscode/select-extensions /tmp/select-extensions
 # No pipefail (DL4006): Podman's default image format ignores SHELL, so it
 # would not hold under the runtime this builds with. Each pipe below ends in a
 # command that fails on its own when its input is wrong (sha256sum -c, diff).
@@ -44,13 +45,8 @@ RUN set -eu; \
   echo "${sum}  /tmp/server.tgz" | sha256sum -c -; \
   mkdir -p /tmp/server; \
   tar -xzf /tmp/server.tgz -C /tmp/server --strip-components=1; \
-  grep -vE '^\s*(#|$)' /tmp/extensions.txt > /tmp/all.txt; \
   for agent in claude codex; do \
-    case "${agent}" in \
-      claude) other='^openai\.' ;; \
-      codex) other='^anthropic\.' ;; \
-    esac; \
-    grep -viE "${other}" /tmp/all.txt > "/tmp/${agent}.txt"; \
+    /tmp/select-extensions "${agent}" /tmp/extensions.txt > "/tmp/${agent}.txt"; \
     dir="/opt/vscode-extensions-${agent}"; \
     mkdir -p "${dir}"; \
     while read -r ext; do \
