@@ -367,13 +367,16 @@
       labels: ["dependencies", "vscode-extension"],
     },
 
-    // The exception: Codex's extension depends on openai.codex-audio and the
-    // two release under the same version, so a bump to one alone would leave
-    // the build installing a pair that does not match. They move together.
+    // Held: from 26.1021.22027, Codex's extension ships minified webview
+    // assets the image's blocking secret scan flags, and depends on a second
+    // extension, openai.codex-audio. The image build is not a required check,
+    // so that bump merged unattended and broke the build; it was reverted.
+    // Lift this once a release scans clean, pinning any extension it depends
+    // on above it in extensions.txt.
     {
       matchDatasources: ["custom.vscode-extension"],
-      matchPackageNames: ["openai.chatgpt", "openai.codex-audio"],
-      groupName: "Codex VS Code extensions",
+      matchPackageNames: ["openai.chatgpt"],
+      allowedVersions: "<26.1021.0",
     },
 
     // The github-actions manager extracts more than uses: pins by default:

@@ -14,8 +14,7 @@
 # fetching whatever the Marketplace serves; the check after the install fails
 # on anything installed that this file does not pin.
 anthropic.claude-code@2.1.311
-openai.codex-audio@26.1021.22027
-openai.chatgpt@26.1021.22027
+openai.chatgpt@26.908.40401
 ms-vscode.makefile-tools@0.12.17
 vscode-icons-team.vscode-icons@12.19.0
 sonarsource.sonarlint-vscode@5.10.0
