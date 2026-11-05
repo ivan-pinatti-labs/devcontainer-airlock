@@ -2042,7 +2042,7 @@ session_read() {
   f="$(session_dir "$1")/session"
   [ -f "${f}" ] || die "no session $1 (host/workbench session list)"
   # A record from before levels has none: hardened, which it ran as.
-  S_AGENT="" S_WS="" S_ID="" S_LEVEL=hardened S_HOURS=""
+  S_AGENT="" S_WS="" S_ID="" S_LEVEL=hardened S_HOURS="" S_LEGACY=""
   while IFS='=' read -r key value || [ -n "${key}" ]; do
     case "${key}" in
     agent) S_AGENT="${value}" ;;
@@ -2054,7 +2054,7 @@ session_read() {
   done <"${f}"
   # assisted, replaced by supervised, runs hardened: it asked more than
   # supervised does, and hardened asks more still, so nothing is asked less.
-  if [ "${S_LEVEL}" = assisted ]; then S_LEVEL=hardened; fi
+  if [ "${S_LEVEL}" = assisted ]; then S_LEVEL=hardened S_LEGACY=1; fi
 }
 
 # The sessions' names, one a line: every session, or with --running those
@@ -2530,6 +2530,11 @@ cmd_session_attach() {
   done
   [ -n "${SESSION:-}" ] || die "which session? host/workbench session attach NAME (host/workbench session list)"
   session_read "${SESSION}"
+  # A workbench still running from an assisted session carries that level's
+  # mounts and settings, so it is not resumed as if it were hardened.
+  if [ -n "${S_LEGACY}" ] && running "$(wb_name "${S_WS}" "${S_AGENT}")"; then
+    die "session ${SESSION} runs at the assisted level, which supervised replaced; stop it (host/workbench session stop ${SESSION}) and attach it again, as hardened"
+  fi
   if running "$(wb_name "${S_WS}" "${S_AGENT}")"; then
     # Its agent still running in another terminal: a shell beside it.
     if podman exec "$(wb_name "${S_WS}" "${S_AGENT}")" pgrep -f "agent-clis/.*$(agent_of "${S_AGENT}")" >/dev/null 2>&1; then
@@ -2542,6 +2547,10 @@ cmd_session_attach() {
     return
   fi
   session_up "${S_WS}" "${S_AGENT}"
+  # Its workbench now runs hardened, so the record says so.
+  if [ -n "${S_LEGACY}" ]; then
+    sed -i 's/^level=assisted$/level=hardened/' "$(session_dir "${SESSION}")/session"
+  fi
   session_run resume "${remote}"
 }
 

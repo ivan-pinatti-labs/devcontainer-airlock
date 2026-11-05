@@ -162,11 +162,11 @@ runs, labels and the bot approval). A broker started before a level
 existed has no socket for it, and `host/workbench helpers` says so;
 `host/workbench restart-broker` replaces it.
 
-`supervised` replaced an earlier `assisted` level. A session recorded as
-`assisted` attaches as hardened, which asks more, never less. One still
-running when the broker restarts keeps a mount the new broker does not
-serve, so its `gh` stops: `restart-broker` names it, and stopping it and
-attaching it again brings `gh` back, as hardened.
+`supervised` replaced an earlier `assisted` level. A stopped session
+recorded as `assisted` attaches as hardened, which asks more, never less,
+and its record then says hardened. One whose workbench still runs keeps
+that level's mounts and settings: attach refuses it until it is stopped,
+and its `gh` stops when the broker restarts, which `restart-broker` names.
 
 ## Not yet
 
