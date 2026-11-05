@@ -11,11 +11,11 @@ level also picks which of the broker's lists holds the agent; unattended's
 adds a few commands to the cycle, each held by the broker's code ("How a
 session gets its level" below). Codex runs hardened for now.
 
-| Level        | Start it with            | Who is there           | The agent                                       |
-| ------------ | ------------------------ | ---------------------- | ----------------------------------------------- |
-| `hardened`   | `make claude`            | you, at every step     | asks as the policy is written                   |
-| `assisted`   | `make claude-assisted`   | you, nearby            | also reads paths it cannot resolve, unasked     |
-| `unattended` | `make claude-unattended` | nobody                 | never asks; does the cycle, refuses the rest    |
+| Level        | Start it with            | Who is there       | The agent                                         |
+| ------------ | ------------------------ | ------------------ | ------------------------------------------------- |
+| `hardened`   | `make claude`            | you, at every step | asks as the policy is written                     |
+| `supervised` | `make claude-supervised` | you, driving       | asks only for a judgment; auto mode does the rest |
+| `unattended` | `make claude-unattended` | nobody             | never asks; does the cycle, refuses the rest      |
 
 The rules behind each level are agent-policy's modes; its `docs/POLICY.md`,
 "Modes", lists them one by one.
@@ -28,13 +28,31 @@ run without asking; anything that changes more (a release, discarding work,
 a `gh api` write, removing a container) asks; anything irreversible or that
 touches credentials is refused and handed to you.
 
-## Assisted
+## Supervised
 
-For working alongside the agent. The prompts that come most often in a
-hardened session are reads of a path held in a variable, such as
-`gh pr view 1 > "$f"; grep x "$f"`, because the guard cannot see where `$f`
-leads. Assisted allows those reads. Writing to such a path still asks, as
-does everything else that asks under hardened.
+For a session you drive, without a prompt on every other line. Most prompts
+in a hardened session are not decisions: the guard cannot see where a path
+in a variable leads (`gh pr view 1 > "$f"; grep x "$f"`), cannot read a
+line, or asks for a review reply the gh broker already limits. Supervised
+leaves those out, so a prompt means a decision. Claude Code runs in its own
+auto mode (`--permission-mode auto`), as for unattended (below).
+
+- **Left to auto mode's classifier:** what the guard cannot judge (a read
+  or a write of a path it cannot resolve, a line it cannot parse, a nested
+  script it cannot read) and an AWS write.
+- **Allowed:** `gh api` POST and PATCH, and GraphQL mutations. The broker
+  passes only a reply to a review comment and resolving a thread among
+  them, and refuses the rest.
+- **Still asks:** what needs a judgment. A release, discarding work,
+  pushing straight to `main`, applying infrastructure, `gh api` PUT and
+  DELETE, `curl` or `wget` sending data, `git push --tags`, a `kubeseal`
+  argument the guard cannot read, and the `aws s3` writes.
+- **Refused:** whatever hardened refuses. A refusal written beside a part of
+  the line the guard cannot read is still a refusal.
+
+The guard takes supervised only when the session declares it
+(`AGENT_POLICY_MODE=supervised`) and runs in a container; anywhere else it
+runs hardened and says so on every command.
 
 ## Unattended
 
@@ -123,30 +141,36 @@ needing you (docs/LAYERS.md, "GitHub access").
 ## How a session gets its level
 
 The workbench image carries all three. The hardened drop-in is installed as
-usual; the assisted and unattended drop-ins, each with its guard allow
+usual; the supervised and unattended drop-ins, each with its guard allow
 file, sit in `/usr/local/share/workbench/levels/`. For a session of another
 level, `host/workbench` copies that level's two files out of the image once
 per image, into `~/.local/share/workbench/levels/`, which no container
 mounts, and mounts them read only over the hardened ones. The session
 record keeps the level (`level=`), and an unattended one its key's hours
 (`hours=`), so attach starts it the same way. The workbench sees its level
-as `AIRLOCK_LEVEL`.
+as `AGENT_POLICY_MODE`.
 
 The gh broker listens on a socket per level, and the session gets only its
 own level's socket mounted: `${XDG_RUNTIME_DIR}/workbench/gh` for hardened,
 `${XDG_RUNTIME_DIR}/workbench-gh/<level>` for the others. The broker holds
 each request to the allowlist of the socket it came in on:
 `images/gh-broker/allowlist.json` for hardened, plus
-`allowlist.assisted.json` for assisted, plus `allowlist.unattended.json`
-for unattended (docs/LAYERS.md, "GitHub access"). The assisted file adds
+`allowlist.supervised.json` for supervised, plus `allowlist.unattended.json`
+for unattended (docs/LAYERS.md, "GitHub access"). The supervised file adds
 nothing yet; the unattended one adds what "Unattended" above lists (workflow
-runs, labels and the bot approval). A broker started before
-levels serves the hardened socket alone; `host/workbench restart-broker`
-replaces it.
+runs, labels and the bot approval). A broker started before a level
+existed has no socket for it, and `host/workbench helpers` says so;
+`host/workbench restart-broker` replaces it.
+
+`supervised` replaced an earlier `assisted` level. A stopped session
+recorded as `assisted` attaches as hardened, which asks more, never less,
+and its record then says hardened. One whose workbench still runs keeps
+that level's mounts and settings: attach refuses it until it is stopped,
+and its `gh` stops when the broker restarts, which `restart-broker` names.
 
 ## Not yet
 
 - A GitHub token of its own per level, so an unattended run could hold
   narrower rights than a hardened one. Every level uses the same token
   today, and its level's allowlist is the limit.
-- Codex at the assisted and unattended levels.
+- Codex at the supervised and unattended levels.

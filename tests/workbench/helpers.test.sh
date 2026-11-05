@@ -39,12 +39,19 @@ check "known hosts already fetched are kept" 0 calls "podman run -d --name devco
 refute "not fetched again" "api.github.com"
 run "${wb}" helpers
 refute "helpers already running are left alone" "podman run"
-check "a broker from before levels, with no unattended socket, is named" 0 err \
-  "workbench: the gh broker running predates session levels, so an assisted or unattended session has no gh until host/workbench restart-broker"
+check "a broker from before levels, with no supervised socket, is named" 0 err \
+  "workbench: the gh broker running predates the supervised level, so a session at that level has no gh until host/workbench restart-broker"
+check "nor an unattended one" 0 err \
+  "workbench: the gh broker running predates the unattended level, so a session at that level has no gh until host/workbench restart-broker"
 touch "${XDG_RUNTIME_DIR}/workbench-gh/unattended/gh.sock"
 run "${wb}" helpers
-assert "one serving every level is not" sh -c '! grep -q "predates session levels" "$1"' _ "${__scratch}/err"
-rm "${XDG_RUNTIME_DIR}/workbench-gh/unattended/gh.sock"
+check "one from before supervised replaced assisted is named too" 0 err \
+  "workbench: the gh broker running predates the supervised level"
+assert "but not for unattended" sh -c '! grep -q "predates the unattended level" "$1"' _ "${__scratch}/err"
+touch "${XDG_RUNTIME_DIR}/workbench-gh/supervised/gh.sock"
+run "${wb}" helpers
+assert "one serving every level is not" sh -c '! grep -q "predates the" "$1"' _ "${__scratch}/err"
+rm "${XDG_RUNTIME_DIR}/workbench-gh/unattended/gh.sock" "${XDG_RUNTIME_DIR}/workbench-gh/supervised/gh.sock"
 
 # The proxy starts with the workspaces registered, on their networks.
 printf '10.203.4.0/24' >"${PODMAN_STATE}/net/workbench-net-app"

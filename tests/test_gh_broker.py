@@ -562,7 +562,7 @@ def test_main_listens_on_each_level_mounted_and_serves_it_at_that_level(
         (f"conn on {tmp_path}/hardened/gh.sock", "hardened"),
         (f"conn on {tmp_path}/unattended/gh.sock", "unattended"),
     ]
-    assert not (tmp_path / "assisted").exists()
+    assert not (tmp_path / "supervised").exists()
     for level in ("hardened", "unattended"):
         sock = tmp_path / level / "gh.sock"
         assert sock.read_text() == ""
@@ -593,7 +593,7 @@ def test_each_level_adds_to_the_one_before_it(monkeypatch):
     fresh = load_broker(
         monkeypatch,
         overrides={
-            "assisted": json.dumps(
+            "supervised": json.dumps(
                 {"comment": "c", "add": {"commands": ["label create"]}}
             ),
             "unattended": ADDS_GIST,
@@ -601,16 +601,16 @@ def test_each_level_adds_to_the_one_before_it(monkeypatch):
     )
     commands = {level: fresh.POLICIES[level]["commands"] for level in fresh.LEVELS}
     assert "label create" not in commands["hardened"]
-    assert "label create" in commands["assisted"]
-    assert "gist create" not in commands["assisted"]
+    assert "label create" in commands["supervised"]
+    assert "gist create" not in commands["supervised"]
     assert {"label create", "gist create"} <= commands["unattended"]
-    assert commands["hardened"] < commands["assisted"] < commands["unattended"]
+    assert commands["hardened"] < commands["supervised"] < commands["unattended"]
 
 
 def test_a_level_with_no_override_is_the_level_before_it(monkeypatch):
-    fresh = load_broker(monkeypatch, overrides={"assisted": None, "unattended": None})
+    fresh = load_broker(monkeypatch, overrides={"supervised": None, "unattended": None})
     policies = fresh.POLICIES
-    assert policies["hardened"] == policies["assisted"] == policies["unattended"]
+    assert policies["hardened"] == policies["supervised"] == policies["unattended"]
 
 
 def test_the_trees_levels_each_hold_the_one_before(broker):
@@ -674,7 +674,7 @@ def test_what_the_code_refuses_holds_at_every_level(monkeypatch, command):
     fresh = load_broker(
         monkeypatch,
         overrides={
-            "assisted": None,
+            "supervised": None,
             "unattended": json.dumps(
                 {"add": {"commands": ["release create", "pr merge"]}}
             ),
@@ -686,8 +686,8 @@ def test_what_the_code_refuses_holds_at_every_level(monkeypatch, command):
 
 def test_a_refusal_names_the_level(monkeypatch):
     fresh = load_broker(monkeypatch, overrides={"unattended": ADDS_GIST})
-    assert fresh.refusal(["gist", "create", "f"], "assisted") == (
-        "'gh gist create' is not on the allowlist at the assisted level"
+    assert fresh.refusal(["gist", "create", "f"], "supervised") == (
+        "'gh gist create' is not on the allowlist at the supervised level"
     )
     assert fresh.refusal(["gist", "create", "f"], "unattended") is None
 
@@ -705,7 +705,7 @@ def test_the_level_is_the_socket_a_request_came_in_on(monkeypatch):
     """End to end over real sockets: the same request on each level's
     socket. A request naming a level of its own changes nothing."""
     fresh = load_broker(
-        monkeypatch, overrides={"assisted": None, "unattended": ADDS_GIST}
+        monkeypatch, overrides={"supervised": None, "unattended": ADDS_GIST}
     )
     ran = []
 
@@ -739,7 +739,7 @@ def test_the_level_is_the_socket_a_request_came_in_on(monkeypatch):
 
         gist = {"argv": ["gist", "create", "-R", "example-org/x"]}
         assert ask("hardened", gist) == 126
-        assert ask("assisted", gist) == 126
+        assert ask("supervised", gist) == 126
         assert ask("hardened", {**gist, "level": "unattended"}) == 126
         assert ran == []
         assert ask("unattended", gist) == 0
@@ -1015,7 +1015,7 @@ LEVEL_CASES = [
     ("unattended", False, "release create v1 a b -R example-org/x"),
     # Unattended only: workflow runs, labels, and the bot approval.
     ("hardened", False, "workflow run ci.yml -R example-org/x"),
-    ("assisted", False, "workflow run ci.yml -R example-org/x"),
+    ("supervised", False, "workflow run ci.yml -R example-org/x"),
     (
         "unattended",
         True,
@@ -1043,7 +1043,7 @@ LEVEL_CASES = [
     ("unattended", True, "label edit bug -R example-org/x --description d"),
     ("unattended", False, "label delete bug -R example-org/x"),
     ("hardened", False, "pr review 7 -R example-org/x --approve --body-file -"),
-    ("assisted", False, "pr review 7 -R example-org/x --approve --body-file -"),
+    ("supervised", False, "pr review 7 -R example-org/x --approve --body-file -"),
     ("unattended", True, "pr review 7 -R example-org/x --approve --body-file -"),
     ("unattended", True, "pr review 7 --repo=example-org/x -a -b checked"),
     (
@@ -1474,6 +1474,6 @@ def test_serve_logs_a_refused_approval(broker, monkeypatch, capsys):
 def test_serve_refuses_a_review_below_unattended(broker, monkeypatch):
     monkeypatch.setattr(broker, "bot_approval", lambda *args: pytest.fail("approved"))
     request = {"argv": ["pr", "review", "7", "-R", "example-org/x", "-a", "-b", "x"]}
-    for level in ("hardened", "assisted"):
+    for level in ("hardened", "supervised"):
         reply = serve_request(broker, json.dumps(request).encode() + b"\n", level)
         assert reply["rc"] == 126

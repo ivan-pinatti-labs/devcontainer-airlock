@@ -17,7 +17,7 @@
 #
 # checkmake reads only the first physical line of a .PHONY declaration, so
 # this one stays on one line.
-.PHONY: claude codex sessions prune claude-shell codex-shell claude-remote claude-plain claude-assisted claude-unattended unlock scrub scrub-check scrub-list scrub-rotated scrub-show workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
+.PHONY: claude codex sessions prune claude-shell codex-shell claude-remote claude-plain claude-supervised claude-unattended unlock scrub scrub-check scrub-list scrub-rotated scrub-show workbench-help workbench-up workbench-down workbench-status workbench-build workbench-pull
 
 WORKBENCH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/workbench
 VOICE ?= 1
@@ -45,7 +45,7 @@ workbench-help:
 		'                              resume=<id>: continue that conversation instead (any claude target).' \
 		'  claude-remote               The same as claude, whatever REMOTE says.' \
 		'  claude-plain                Claude Code with neither voice nor remote control.' \
-		'  claude-assisted             Claude Code that asks less about reads, with you there (docs/MODES.md).' \
+		'  claude-supervised           Claude Code that asks only for a judgment, with you driving (docs/MODES.md).' \
 		'  claude-unattended           Claude Code with nobody to ask, the ssh key unlocked 8 to 48 hours (a menu, or HOURS=).' \
 		'  codex                       A new Codex session, here.' \
 		'  sessions                    Every session: running or stopped, and its clones and branches.' \
@@ -66,13 +66,13 @@ workbench-help:
 		'  workbench-status            What is running.' \
 		'  workbench-build             Build every image locally.' \
 		'  workbench-pull              Or pull the published images instead.'
-	@$(foreach a,$(WORKBENCH_ACCOUNTS),printf '  %-27s %s\n' 'claude-$(a), codex-$(a)' 'The same, logged in as $(a) (-shell, and claude-$(a)-remote, -plain, -assisted, -unattended).';)
+	@$(foreach a,$(WORKBENCH_ACCOUNTS),printf '  %-27s %s\n' 'claude-$(a), codex-$(a)' 'The same, logged in as $(a) (-shell, and claude-$(a)-remote, -plain, -supervised, -unattended).';)
 
 # One more set of targets per account in WORKBENCH_ACCOUNTS (claude-personal,
 # codex-personal and their shells), so Tab lists them too.
 WORKBENCH_ACCOUNTS := $(shell $(WORKBENCH) accounts 2>/dev/null)
 define workbench_account
-.PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-plain claude-$(1)-assisted claude-$(1)-unattended
+.PHONY: claude-$(1) codex-$(1) claude-$(1)-shell codex-$(1)-shell claude-$(1)-remote claude-$(1)-plain claude-$(1)-supervised claude-$(1)-unattended
 claude-$(1):
 	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) $$(if $$(filter 1,$$(REMOTE)),--remote) $$(RESUME_ARG)
 codex-$(1):
@@ -85,8 +85,8 @@ claude-$(1)-remote:
 	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --remote $$(RESUME_ARG)
 claude-$(1)-plain:
 	@WORKBENCH_VOICE=0 $$(WORKBENCH) session start claude-$(1) $$(RESUME_ARG)
-claude-$(1)-assisted:
-	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --level assisted $$(if $$(filter 1,$$(REMOTE)),--remote) $$(RESUME_ARG)
+claude-$(1)-supervised:
+	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --level supervised $$(if $$(filter 1,$$(REMOTE)),--remote) $$(RESUME_ARG)
 claude-$(1)-unattended:
 	@WORKBENCH_VOICE=$$(VOICE) $$(WORKBENCH) session start claude-$(1) --level unattended $$(if $$(filter 1,$$(REMOTE)),--remote) $$(HOURS_ARG) $$(RESUME_ARG)
 endef
@@ -104,8 +104,8 @@ claude-plain:
 # The session levels (docs/MODES.md). Every one has voice (VOICE=0: without):
 # an unattended run is often started with you still at the keyboard. Remote
 # control stays, to look in from a phone.
-claude-assisted:
-	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --level assisted $(if $(filter 1,$(REMOTE)),--remote) $(RESUME_ARG)
+claude-supervised:
+	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --level supervised $(if $(filter 1,$(REMOTE)),--remote) $(RESUME_ARG)
 
 claude-unattended:
 	@WORKBENCH_VOICE=$(VOICE) $(WORKBENCH) session start claude --level unattended $(if $(filter 1,$(REMOTE)),--remote) $(HOURS_ARG) $(RESUME_ARG)

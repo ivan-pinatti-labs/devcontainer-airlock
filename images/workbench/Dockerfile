@@ -72,7 +72,7 @@ FROM ${BASE_IMAGE} AS agent-policy
 # hadolint ignore=DL3002
 USER 0:0
 # renovate: datasource=github-tags depName=ivan-pinatti-labs/agent-policy
-ARG AGENT_POLICY_REF=v0.10.4@f522be69e9803ed95998f9774d8fa791d67b657b
+ARG AGENT_POLICY_REF=v1.0.0@e8923c8a2b74c705b10310596051ba9dc20249ba
 COPY claude/managed-settings.json /tmp/managed-settings.json
 COPY agent-policy/ /tmp/overlay/
 # The overlay's rule files join agent-policy's own before the render (which
@@ -87,7 +87,7 @@ COPY agent-policy/ /tmp/overlay/
 # sandbox path lists merged in (credentials never readable, PATH and startup
 # folders never writable). The rest of its sandbox file stays out: the
 # workbench's short list of commands that run outside the sandbox is
-# deliberate. That is the hardened level; the assisted and unattended levels'
+# deliberate. That is the hardened level; the supervised and unattended levels'
 # drop-in and allow file (agent-policy's modes) are kept beside it, for
 # host/workbench to mount over it in a session of that level (docs/MODES.md).
 RUN set -eu; \
@@ -103,7 +103,7 @@ RUN set -eu; \
   done; \
   python3 /src/tools/render.py --policy /src/policy --out /tmp/dist \
     --libexec /usr/local/libexec/agent-policy --no-scratch; \
-  for level in assisted unattended; do \
+  for level in supervised unattended; do \
     python3 /src/tools/render.py --policy /src/policy --out "/tmp/dist-${level}" \
       --libexec /usr/local/libexec/agent-policy --no-scratch --mode "${level}"; \
     mkdir -p "/out/levels/${level}"; \
