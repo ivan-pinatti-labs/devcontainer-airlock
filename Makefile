@@ -58,7 +58,7 @@ PODMAN ?= $(if $(CONTAINER_HOST),podman-remote,podman)
 # renovate: datasource=docker depName=docker.io/library/python
 PYTHON_IMAGE ?= docker.io/library/python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 # renovate: datasource=docker depName=docker.io/library/node
-NODE_IMAGE ?= docker.io/library/node:24-trixie@sha256:1278a37eb510ec1606fba0e80f554bcc941ae0b44f35ae373c4822ae7717c64d
+NODE_IMAGE ?= docker.io/library/node:24-trixie@sha256:8c761eca2bf7eec965f946cf47b8090143cb41f45f2f8699af0cc0298d2d2d19
 # renovate: datasource=docker depName=docker.io/kcov/kcov
 KCOV_IMAGE ?= docker.io/kcov/kcov:latest@sha256:481289ae32e55e5b733019515acd10948a4f76dfed381765577db909664fc603
 
