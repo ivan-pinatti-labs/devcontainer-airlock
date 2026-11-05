@@ -216,9 +216,11 @@ refute "with no level's drop-in" "${levels}/supervised/50-agent-policy.json:"
 assert "and its record says so" grep -qx "level=hardened" "${sessions}/${a}/session"
 rule 'ps --filter label=workbench.session *' "printf '%s\n' ${a}"
 run "${wb}" restart-broker
+check "restart-broker restarts it" 0 out "workbench: gh broker restarted"
 assert "so restart-broker no longer names it" sh -c '! grep -q "no longer serves" "$1"' _ "${__scratch}/err"
 sed -i 's/^level=hardened$/level=supervised/' "${sessions}/${a}/session"
 run "${wb}" restart-broker
+check "and again" 0 out "workbench: gh broker restarted"
 assert "but not one at a level it serves" sh -c '! grep -q "no longer serves" "$1"' _ "${__scratch}/err"
 unrule
 refute "copied once per image" "--entrypoint cat localhost"
