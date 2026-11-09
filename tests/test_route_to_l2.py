@@ -23,6 +23,13 @@ def hook():
         ("python -m pip install foo", True, True),
         ("python3 -c 1", True, False),
         ("npx cowsay", True, True),
+        # An infrastructure toolchain, only in its L2 image, with the network.
+        ("atmos describe stacks", True, True),
+        ("terraform validate", True, True),
+        ("AWS_PROFILE=x aws sts get-caller-identity", True, True),
+        ("kubectl get pods | grep web", True, True),
+        ("helmfile diff && tflint", True, True),
+        ("yq '.a' f.yaml", True, False),
         ("FOO=1 BAR=2 sudo /usr/bin/pytest", True, False),
         ("FOO=1", False, False),
         ("./run.sh", True, False),
