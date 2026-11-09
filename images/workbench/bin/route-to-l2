@@ -39,6 +39,15 @@ RUNS_CODE = {
     "pre-commit", "shellcheck", "hadolint", "actionlint", "yamllint",
     "markdownlint-cli2", "cspell", "bats",
 }
+# An infrastructure repository's toolchain, which only its L2 image
+# (l2-aws-devops) carries. Each one reaches a registry, a cloud API or a
+# cluster, so it runs with --net, limited to the workspace's egress sets.
+# yq only reads files, and runs without.
+INFRA_NET = {
+    "atmos", "terraform", "tflint", "aws", "kubectl", "helm", "helmfile",
+    "eksctl", "kubeseal", "pluto",
+}
+RUNS_CODE |= INFRA_NET | {"yq"}
 NEEDS_NET = [
     ("pip", "install"), ("pip3", "install"), ("uv", "sync"), ("uv", "pip"), ("uv", "add"),
     ("npm", "install"), ("npm", "ci"), ("npm", "i"), ("npm", "add"), ("pnpm", "install"),
@@ -46,7 +55,7 @@ NEEDS_NET = [
     ("go", "mod"), ("go", "get"), ("go", "install"), ("cargo", "fetch"), ("cargo", "install"),
     ("pre-commit", "install-hooks"), ("pre-commit", "autoupdate"), ("poetry", "install"),
 ]
-ALWAYS_NET = {"npx", "uvx"}
+ALWAYS_NET = {"npx", "uvx"} | INFRA_NET
 # What L2 never has: the gh broker, the ssh-agent, and a remote for git.
 WORKBENCH_ONLY = {"gh", "ssh", "scp", "ssh-add"}
 GIT_REMOTE = {"fetch", "pull", "push", "clone", "ls-remote"}

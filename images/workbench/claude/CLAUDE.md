@@ -12,6 +12,12 @@ devcontainer-airlock has the full picture):
   it says nothing about the host or the workbench. The whole command moves,
   so one that also needs the network or the workbench (`curl ... | python3`,
   `pytest && git push`) is refused: run the two parts as separate commands.
+- An infrastructure repository's tools (atmos, terraform, tflint, aws,
+  kubectl, helm, helmfile, eksctl, kubeseal, pluto, yq) are in the
+  l2-aws-devops L2 image, never in the workbench, and are moved to L2 the
+  same way, with the network for all but yq. Another L2 image has them only
+  if its Dockerfile adds them. L2 holds no cloud credentials, so a command that
+  needs an account (a plan, `aws sts get-caller-identity`) fails there.
 - `l2 --net -- ...` gives an L2 run the egress proxy, for installs.
   `l2 --engine -- ...` is for test suites that build or start containers.
 - `gh` works through a broker that holds the token and runs an allowlist of
