@@ -784,6 +784,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `alpine`, `fedora`, `trivy`, `sigstore` | Alpine and Fedora packages (and Alpine's GitLab, for aports issues), trivy's database, sigstore's trust root | |
 | `aws` | AWS service APIs, and ECR Public with its CloudFront download host | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
 | `sonarqube-cloud` | SonarQube for IDE in connected mode: SonarQube Cloud (EU region), its scanner and events hosts, SonarSource's analyzer downloads | |
+| `claude-connectors` | Claude Code's claude.ai connectors, through Anthropic's MCP proxy: every connector the account has linked, not one alone | |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it

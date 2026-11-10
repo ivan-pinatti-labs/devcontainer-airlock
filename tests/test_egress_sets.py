@@ -45,6 +45,9 @@ def domains(name):
         # docker-torrent-box-with-vpn's manual image releases check for an
         # image Renovate cannot age (its issue 321).
         ("gcr", "gcr.io"),
+        # Where Claude Code reaches every claude.ai connector (measured
+        # 2026-11-10, the proxy refusing it for each one).
+        ("claude-connectors", "mcp-proxy.anthropic.com"),
     ],
 )
 def test_the_set_holds_the_destination(name, domain):
