@@ -214,7 +214,7 @@ with the same conversation, after a reboot too. `make prune` removes the
 stopped ones whose clones hold no uncommitted change and no commit missing
 from every remote.
 
-Every session start and end also runs the secret scan (docs/SCRUB.md) over
+Every session end also runs the secret scan (docs/SCRUB.md) over
 the history that changed: a secret an agent printed is redacted once no
 session writes that file any more, from the host side, in a container with
 no network working on copies, and stays listed until it is rotated.

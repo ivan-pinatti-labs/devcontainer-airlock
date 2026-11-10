@@ -275,7 +275,7 @@ cmd_scan() {
   # The first scan reads all the history there is, which can take minutes:
   # not at a session's start or end, unasked.
   if [[ -z "${full}" ]] && [[ ! -f "${STATE}/index" ]]; then
-    echo "scrub: no secret scan has run here yet; make scrub runs the first, over all the history (it can take a while), and from then on every session start and end looks at what changed"
+    echo "scrub: no secret scan has run here yet; make scrub runs the first, over all the history (it can take a while), and from then on every session end looks at what changed"
     return 0
   fi
   if ! lock "${wait}"; then

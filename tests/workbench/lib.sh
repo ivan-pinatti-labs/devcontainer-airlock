@@ -59,7 +59,7 @@ unset XDG_CONFIG_HOME XDG_DATA_HOME WORKBENCH_TAG WORKBENCH_TZ WORKBENCH_VOICE \
   WORKBENCH_MIRROR_MIN_AGE WORKBENCH_MIRROR_HEAP WORKBENCH_PULL_TAG L2_EXTRA_IMAGES \
   GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE TERM COLORTERM \
   XDG_STATE_HOME WORKBENCH_SCRUB_HOMES WORKBENCH_SCRUB_SECRETS WORKBENCH_SCRUB_QUIET NO_COLOR
-# No secret scan at session start and end (host/scrub), but where a test
+# No secret scan at session end (host/scrub), but where a test
 # turns it on (tests/workbench/scrub.test.sh).
 export WORKBENCH_SCRUB=0
 REAL_MKFIFO="$(command -v mkfifo)"

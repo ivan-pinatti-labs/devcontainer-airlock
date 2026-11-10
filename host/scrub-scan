@@ -350,7 +350,7 @@ class Found:
 
     def report(self, check: bool, every: bool = True) -> str:
         """Its one line, or nothing when all it has is what a scan redacts and
-        leaves host/scrub to say, or (`every` false: a session start or
+        leaves host/scrub to say, or (`every` false: a session
         end) waiting, which the scan counts in one line instead."""
         parts = []
         if check and self.redacted:
@@ -452,7 +452,7 @@ class Ledger:
     def report_open(self, out: Output, listed: set[str], every: bool, among: set[str] | None = None) -> None:
         """The secrets not rotated yet: each one not already said this run
         (`listed`, by HMAC) on a manual run, only their count otherwise, so
-        a session start stays short. `among`: only those found in one of
+        a session end stays short. `among`: only those found in one of
         these files (a scan of one folder)."""
         still = [e for e in self.data["entries"] if e["status"] == "open"]
         if among is not None:
