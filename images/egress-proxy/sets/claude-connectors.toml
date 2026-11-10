@@ -1,0 +1,2 @@
+description = "Claude Code's claude.ai connectors (Slack, Asana, Shortcut and the others linked to the account), which it reaches through Anthropic's MCP proxy (measured 2026-11-10: every connector refused at mcp-proxy.anthropic.com). Every connector the account has linked becomes reachable, not one: which ones a session uses is the account's choice. Opt in per repository."
+domains = ["mcp-proxy.anthropic.com"]
