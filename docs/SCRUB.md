@@ -15,8 +15,7 @@ finding says "rotate it".
 
 | When | What it looks at | What it changes |
 | --- | --- | --- |
-| A session starts (before its workbench) | files new or changed since the last scan | redacts what no session holds, reports the rest |
-| A session ends (`make claude` exiting, `make stop-<name>`) | the same, and that session's conversation counts as ended | the same |
+| A session ends (`make claude` exiting, `make stop-<name>`) | files new or changed since the last scan, with that session's conversation counted as ended | redacts what no session holds, reports the rest |
 | `make scrub` | every file | the same |
 | `make scrub-check` | every file | nothing: a dry run, see below |
 | `make scrub-list` | the ledger | nothing: the secrets still to rotate, see below |
@@ -30,7 +29,7 @@ cannot be redacted in others has two: what was redacted is said once the
 files are replaced, after the rest (and a file that changed meanwhile is
 said to still hold it, with its number).
 `make scrub` and `make scrub-check` then list every secret found before and
-not rotated yet; a session start or end only counts them (and the secrets
+not rotated yet; a session end only counts them (and the secrets
 waiting for a running session or that cannot be redacted), and says each
 secret it redacted just then, which for the few files changed since the
 last scan is usually none or a handful. After rotating,
@@ -41,9 +40,9 @@ all). The GitHub token, the ssh key and the values of the files in
 host holds changes.
 
 The first scan reads all the history there is, which can take minutes, so a
-session start or end does not run it: until `make scrub` (or
+session end does not run it: until `make scrub` (or
 `make scrub-check`, which keeps nothing, so it does not count) has run once,
-they only say so. Run `make scrub-check` first to see what the first
+it only says so. Run `make scrub-check` first to see what the first
 `make scrub` would change.
 
 ### One folder at a time
@@ -71,7 +70,7 @@ against what each conversation recorded:
 
 The secrets still to rotate it lists are those found in the files it
 looked at. The index keeps what it knew of every other file, so the next
-session start goes on as before. A workbench's own folder records the
+session end goes on as before. A workbench's own folder records the
 paths inside the workbench, so give the folder as the workbench saw it to
 reach those.
 
@@ -144,8 +143,10 @@ It also lists the secrets already in the ledger and not rotated. The
 values themselves are never printed, only their rule and last four
 characters.
 
-A scan at session start or end never stops the session: if it fails, it
-says so and the session goes on. `WORKBENCH_SCRUB=0` turns those two off;
+There is no scan at session start: it held every session up (half a
+minute with a long history), and the end of each session already covers
+what changed. A scan at session end never fails the session's exit: if it
+fails, it says so and the stop goes on. `WORKBENCH_SCRUB=0` turns it off;
 `make scrub` still works. Only one scan runs at a time; one started while
 another runs is skipped (`make scrub` waits instead).
 
@@ -303,7 +304,7 @@ characters, when it was first and last seen, the files it was found in, and
 whether it is open or rotated. The same secret found again adds to its
 entry; found in a new file after it was marked rotated, it is open again.
 The folder also holds the size and time of every file already scanned, so a
-session start only looks at what changed.
+session end only looks at what changed.
 
 ## How it is isolated
 
@@ -324,7 +325,7 @@ other setting (`host/workbench help`):
 
 | Setting | Default | What |
 | --- | --- | --- |
-| `WORKBENCH_SCRUB` | `1` | `0`: no scan at session start and end |
+| `WORKBENCH_SCRUB` | `1` | `0`: no scan at session end |
 | `WORKBENCH_SCRUB_HOMES` | none | more `<agent>=<folder>` pairs to look in |
 | `WORKBENCH_SCRUB_SECRETS` | none | files of KEY=value lines whose values are secrets |
 | `WORKBENCH_SCRUB_QUIET` | `10` | minutes a host file must go unwritten to count as ended |

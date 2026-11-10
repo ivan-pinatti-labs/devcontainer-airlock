@@ -61,8 +61,8 @@
                                     a dry run; --entropy lists each random
                                     looking string, not just their count;
                                     --dir only the conversations that ran
-                                    in DIR or below it. Every session start
-                                    and end runs it over what changed
+                                    in DIR or below it. Every session end
+                                    runs it over what changed
     host/workbench scrub rotated ID... | all
                                     mark those secrets rotated, or every one
     host/workbench scrub list [--all] [--files]
@@ -192,8 +192,8 @@
     WORKBENCH_REGISTRY    where `pull` takes images from, with
                           WORKBENCH_PULL_TAG (default: latest).
                           Default: ghcr.io/ivan-pinatti-labs
-    WORKBENCH_SCRUB       0 to skip the secret scan at session start and
-                          end; `scrub` still runs. Default: 1
+    WORKBENCH_SCRUB       0 to skip the secret scan at session end;
+                          `scrub` still runs. Default: 1
     WORKBENCH_SCRUB_HOMES more folders agents keep history in, beyond
                           ~/.claude, ~/.codex, the WORKBENCH_HISTORY ones and
                           the workbenches own, as <agent>=<folder> pairs,
@@ -2221,9 +2221,8 @@ session_up() {
   local ws="$1" agent="$2"
   profiles "${ws}" >/dev/null || exit 1
   egress_sets "${ws}" >/dev/null || exit 1
-  # Before the lock, which a scan would hold up: what changed since the
-  # last one, while no workbench of this session runs yet.
-  scrub_auto
+  # No secret scan here: one at every session end covers what changed, and
+  # one at the start only held the session up.
   lock_state
   refresh_shared
   start_helpers

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# host/workbench scrub, and the secret scan at session start and end
+# host/workbench scrub, and the secret scan at session end
 # (docs/SCRUB.md): the context host/workbench hands host/scrub, which homes
 # it names, what it says is live, and which secrets it says the host holds.
 # host/scrub runs for real; its scan container is a rule that keeps what it
@@ -111,7 +111,7 @@ check "and is given" 1 err "--dir takes a folder that exists"
 assert "with no secret the host does not hold" test -z "$(ls "${got}/known")"
 touch "${PODMAN_STATE}/secret/gh-devcontainer" "${HOME}/.ssh/devcontainer/id_ed25519"
 
-# At a session's start and end.
+# At a session's end, never its start.
 app="${WORKBENCH_ROOT}/app"
 clone "${app}"
 cd "${app}"
@@ -121,8 +121,8 @@ export WORKBENCH_SCRUB=1
 run "${wb}" session start claude
 s="$(sed -n 's/^workbench: session \([^ ]*\) (.*/\1/p' "${__scratch}/out" | head -n 1)"
 id="$(sed -n 's/^claude_id=//p' "${sessions}/${s}/session")"
-check "on, a session start and end scan what changed" 0 calls "python3 -I - scan"
-assert "twice" test "$(grep -c 'python3 -I - scan' "${STUB_LOG}")" = 2
+check "on, a session end scans what changed" 0 calls "python3 -I - scan"
+assert "and its start does not, so only once" test "$(grep -c 'python3 -I - scan' "${STUB_LOG}")" = 1
 assert "the end knows its conversation ended" grep -qx "closed ${id}" "${got}/context"
 SCAN_EXIT=1 run "${wb}" session attach "${s}"
 check "a failed scan never stops a session" 0 err "workbench: the secret scan failed (above); make scrub-check shows what is left"
