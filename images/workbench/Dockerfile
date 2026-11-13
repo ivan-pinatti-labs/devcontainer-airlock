@@ -213,7 +213,7 @@ CMD ["/bin/bash"]
 # and what the package's signature does and does not prove.
 FROM common AS claude
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.318
+ARG CLAUDE_CODE_VERSION=2.1.319
 RUN set -eu; \
   export HOME=/root npm_config_cache=/tmp/npm-cache; \
   npm init --yes >/dev/null; \
@@ -291,7 +291,7 @@ LABEL org.opencontainers.image.description="The ivan-pinatti-labs Claude Code wo
 # Codex's workbench, installed the same way.
 FROM common AS codex
 # renovate: datasource=npm depName=@openai/codex
-ARG CODEX_VERSION=0.166.0
+ARG CODEX_VERSION=0.167.0
 RUN set -eu; \
   export HOME=/root npm_config_cache=/tmp/npm-cache; \
   npm init --yes >/dev/null; \
