@@ -55,7 +55,7 @@ PREFIX=airlock
 
 # Pinned by digest; Renovate keeps them current.
 # renovate: datasource=docker depName=docker.io/library/registry
-REGISTRY_IMAGE=docker.io/library/registry:3@sha256:21078ecfcba8a0cd7e1a384f75b3509899661dd21823bf1da21b5a4674aaceb9
+REGISTRY_IMAGE=docker.io/library/registry:3@sha256:1290056e2357eceb0c047cb60ae9abb370305a218e2df650eb8d3ea021b1c151
 # renovate: datasource=docker depName=docker.io/aquasec/trivy
 TRIVY_IMAGE=docker.io/aquasec/trivy:0.76.2@sha256:6fa071ef8daa2e58b90cbf1710bedca91adbb3bf98693533226f442035b836a6
 # renovate: datasource=docker depName=quay.io/skopeo/stable
