@@ -72,7 +72,7 @@ FROM ${BASE_IMAGE} AS agent-policy
 # hadolint ignore=DL3002
 USER 0:0
 # renovate: datasource=github-tags depName=ivan-pinatti-labs/agent-policy
-ARG AGENT_POLICY_REF=v1.0.25@3c3eb69e51f58e75a24900a1d834534700c0e6c9
+ARG AGENT_POLICY_REF=v1.0.29@23cdb4fdc9bc8bdbdba1eb497c3de7bcb18b3c3f
 COPY claude/managed-settings.json /tmp/managed-settings.json
 COPY agent-policy/ /tmp/overlay/
 # The overlay's rule files join agent-policy's own before the render (which
