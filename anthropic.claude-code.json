@@ -1,6 +1,10 @@
 {
   "releases": [
     {
+      "version": "2.1.327",
+      "releaseTimestamp": "2026-11-17T23:36:29.753000+00:00"
+    },
+    {
       "version": "2.1.326",
       "releaseTimestamp": "2026-11-16T22:22:55.763000+00:00"
     },
