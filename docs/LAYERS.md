@@ -788,6 +788,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `aws` | AWS service APIs, and ECR Public with its CloudFront download host | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
 | `sonarqube-cloud` | SonarQube for IDE in connected mode: SonarQube Cloud (EU region), its scanner and events hosts, SonarSource's analyzer downloads | |
 | `claude-connectors` | Claude Code's claude.ai connectors, through Anthropic's MCP proxy: every connector the account has linked, not one alone | |
+| `openai` | OpenAI's API and login hosts alone (already in `workbench`), for a network that should reach Codex and nothing else | |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it

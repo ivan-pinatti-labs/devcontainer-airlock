@@ -1,0 +1,2 @@
+description = "OpenAI's API and login hosts alone, for a network that should reach Codex and nothing else. The workbench set already carries them for the workbenches. Opt in."
+domains = ["api.openai.com", "auth.openai.com", "chatgpt.com"]
