@@ -48,6 +48,11 @@ def domains(name):
         # Where Claude Code reaches every claude.ai connector (measured
         # 2026-11-10, the proxy refusing it for each one).
         ("claude-connectors", "mcp-proxy.anthropic.com"),
+        # Codex's API, its login and the ChatGPT backend a ChatGPT login
+        # sends requests to, for the review broker.
+        ("openai", "api.openai.com"),
+        ("openai", "auth.openai.com"),
+        ("openai", "chatgpt.com"),
     ],
 )
 def test_the_set_holds_the_destination(name, domain):
