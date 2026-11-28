@@ -93,6 +93,15 @@
                                     it forgets the unlocked key
     host/workbench restart-mirror   restart the package mirror's gate alone
                                     (after rebuilding it)
+    host/workbench review-login     log the review broker in to Codex, once
+                                    (a login of its own, not a workbench's),
+                                    and start it. `l2 --review -- make
+                                    cross-review` then reviews from inside
+                                    a workbench (docs/LAYERS.md, Review
+                                    broker)
+    host/workbench restart-review-broker
+                                    restart the review broker alone (after
+                                    rebuilding it); a review running fails
     host/workbench install-units    install a systemd user unit that starts
                                     the helpers at login (changes your
                                     ~/.config/systemd/user; run it yourself)
@@ -205,6 +214,13 @@
     WORKBENCH_SCRUB_QUIET minutes a file in a host folder has to go unwritten
                           before the scan takes its session to have ended.
                           Default: 10
+    WORKBENCH_REVIEW_MODELS
+                          the Codex models a review may ask for, comma
+                          separated, besides Codex's own default. Default:
+                          none, so every review runs on that default
+    WORKBENCH_REVIEW_PER_HOUR
+                          reviews the review broker runs in an hour at
+                          most. Default: 10
 
   State kept on the host:
     ${XDG_DATA_HOME}/workbench/claude, codex  the agents logins and settings,
@@ -213,6 +229,8 @@
                                               sessions
     ${XDG_RUNTIME_DIR}/workbench-gh/supervised, unattended
                                               the sockets for the other levels
+    ${XDG_DATA_HOME}/workbench/review/codex   the review broker's Codex login
+    ${XDG_RUNTIME_DIR}/workbench-review       the review broker's socket
     ${XDG_RUNTIME_DIR}/workbench/egress       the workspaces the egress proxy
                                               serves, and their sets
     ${XDG_RUNTIME_DIR}/workbench/mirror       the workspaces the package mirror
@@ -343,6 +361,7 @@ ENGINE_IMAGE="localhost/airlock-l2-engine:${TAG}"
 BROKER_IMAGE="localhost/airlock-gh-broker:${TAG}"
 PROXY_IMAGE="localhost/airlock-egress-proxy:${TAG}"
 GATE_IMAGE="localhost/airlock-mirror-gate:${TAG}"
+REVIEW_IMAGE="localhost/airlock-review-broker:${TAG}"
 # The mirror backend, Nexus Repository Community Edition, pinned by digest.
 # Its gate (above) is the only part clients know, so another backend is
 # another routes file and provisioning under images/mirror-gate/backends/.
@@ -352,6 +371,10 @@ MIRROR="${WORKBENCH_MIRROR:-1}"
 MIRROR_NET=workbench-net-airlock-mirror
 # The one egress proxy of the host, shared by every workspace.
 PROXY=egress-proxy
+# The review broker's own network, whose only way out is the proxy with these
+# sets and nothing else (always=no: not even workbench, github and ghcr).
+REVIEW_NET=workbench-net-airlock-review
+REVIEW_SETS=openai
 
 # Egress sets every workspace gets when it names none of its own; workbench,
 # github and ghcr are always added by the proxy itself.
@@ -373,6 +396,10 @@ SSH_DIR="${RUN}/devcontainer-ssh"
 # Per Claude workbench, the folder a voice session's microphone pipe appears
 # in (docs/LAYERS.md, Voice).
 VOICE_ROOT="${RUN}/workbench/voice"
+# The review broker's socket, apart from ${RUN}/workbench, whose names a
+# workspace's own folders also take, and its Codex login.
+REVIEW_DIR="${RUN}/workbench-review"
+REVIEW_LOGIN="${DATA}/review/codex"
 # The key the ssh-agent holds, the podman secret holding the GitHub token, and
 # the GitHub owners the broker may act on.
 SSH_KEY="${WORKBENCH_SSH_KEY:-${HOME}/.ssh/devcontainer/id_ed25519}"
@@ -833,7 +860,7 @@ cmd_build() {
   for i in claude codex; do
     podman build --build-arg "BASE_IMAGE=${BASE}" --target "${i}" -t "$(wb_image "${i}")" "${HERE}/images/workbench"
   done
-  for i in l2 l2-engine gh-broker egress-proxy mirror-gate; do
+  for i in l2 l2-engine gh-broker egress-proxy mirror-gate review-broker; do
     podman build --build-arg "BASE_IMAGE=${BASE}" -t "localhost/airlock-${i}:${TAG}" "${HERE}/images/${i}"
   done
   # The L2 variants build on the L2 image just built.
@@ -850,7 +877,7 @@ cmd_build() {
 # digest, the one to pin by, rather than this platform's manifest.
 cmd_pull() {
   local i ref
-  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate l2-aws-devops podman-nested; do
+  for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate review-broker l2-aws-devops podman-nested; do
     ref="$(pull_published "${i}")" || die "could not pull ${REGISTRY}/airlock-${i}"
     echo "workbench: ${i} ${ref}"
   done
@@ -1100,9 +1127,11 @@ proxy_join() {
 }
 
 # Register network workbench-net-$1 with the proxy for owner $2 (a workspace
-# path, or the mirror) with sets $3, connect the proxy there and reload.
+# path, the mirror or the review broker) with sets $3, connect the proxy
+# there and reload. $4, when "no", leaves out the sets every other network
+# gets (workbench, github, ghcr).
 proxy_register() {
-  local slug="$1" ws="$2" sets="$3" net f owner
+  local slug="$1" ws="$2" sets="$3" always="${4:-yes}" net f owner
   net="workbench-net-${slug}"
   f="${EGRESS_DIR}/${slug}.conf"
   mkdir -p "${EGRESS_DIR}"
@@ -1114,7 +1143,7 @@ proxy_register() {
   # this fails, so a running workspace keeps its rules.
   rm -f "${f}.prev"
   if [ -f "${f}" ]; then cp -p "${f}" "${f}.prev"; fi
-  printf 'workspace=%s\nsubnet=%s\nsets=%s\n' "${ws}" "$(net_subnet "${net}")" "${sets}" >"${f}.tmp"
+  printf 'workspace=%s\nsubnet=%s\nsets=%s\nalways=%s\n' "${ws}" "$(net_subnet "${net}")" "${sets}" "${always}" >"${f}.tmp"
   chmod 644 "${f}.tmp"
   mv "${f}.tmp" "${f}"
   # In a child shell, so a start_proxy that dies comes back here to be undone.
@@ -1356,6 +1385,82 @@ start_broker() {
     "${BROKER_IMAGE}" >/dev/null
 }
 
+# The review broker (docs/LAYERS.md, "Review broker"): holds a Codex login
+# of its own and runs the blind cross review for an L2 run given its socket
+# (`l2 --review`). Every L2 engine mounts its socket folder, read only.
+review_login_ok() { [ -f "${REVIEW_LOGIN}/auth.json" ]; }
+
+# Its network and its registration with the proxy (openai and nothing else),
+# and the proxy's address there, in REVIEW_PROXY.
+review_net() {
+  create_net "${REVIEW_NET}"
+  check_sets "the review broker" "${REVIEW_SETS}"
+  proxy_register airlock-review review-broker "${REVIEW_SETS}" no
+  REVIEW_PROXY="http://$(net_proxy_ip "${REVIEW_NET}"):8888"
+}
+
+# The broker container's isolation, shared by the broker and its login run.
+review_opts() {
+  printf '%s\n' --userns=keep-id:uid=1000,gid=1000 "${LABEL_OPTS[@]}" \
+    --cap-drop=all --security-opt no-new-privileges --read-only --tmpfs /tmp \
+    --network "${REVIEW_NET}" \
+    -e "HTTPS_PROXY=${REVIEW_PROXY}" -e "https_proxy=${REVIEW_PROXY}" \
+    -v "${REVIEW_LOGIN}:/var/lib/review-broker/codex:Z"
+}
+
+# Started only once it has a login; until then an L2 run asking for a review
+# is told to run review-login. Codex's sandbox needs the container_engine_t
+# label it shares with the other socket helpers: under the default one,
+# bubblewrap cannot mount /dev/pts (measured).
+start_review_broker() {
+  local opts=()
+  mkdir -p "${REVIEW_DIR}"
+  chmod 700 "${REVIEW_DIR}"
+  running review-broker && return 0
+  review_login_ok || return 0
+  if ! podman image exists "${REVIEW_IMAGE}"; then
+    echo "workbench: no ${REVIEW_IMAGE}, so no review broker; host/workbench build or pull, then restart-review-broker" >&2
+    return 0
+  fi
+  review_net
+  mapfile -t opts < <(review_opts)
+  podman rm -f review-broker >/dev/null 2>&1 || true
+  # The one a stopped broker left, which would pass for the new one's.
+  rm -f "${REVIEW_DIR}/review.sock"
+  podman run -d --name review-broker "${opts[@]}" \
+    -e REVIEW_MODELS="${WORKBENCH_REVIEW_MODELS:-}" -e REVIEW_PER_HOUR="${WORKBENCH_REVIEW_PER_HOUR:-10}" \
+    -v "${REVIEW_DIR}:/run/review-broker:Z" \
+    "${REVIEW_IMAGE}" >/dev/null
+  for _ in $(seq 1 50); do
+    [ -S "${REVIEW_DIR}/review.sock" ] && podman logs review-broker 2>&1 | grep -q 'listening on' && return 0
+    running review-broker || break
+    sleep 0.2
+  done
+  podman logs review-broker 2>&1 | tail -5 >&2
+  die "the review broker did not open its socket; podman logs review-broker"
+}
+
+# Codex's device login, run in the broker's image, on its network, into its
+# login folder: the code to enter is shown here, and the login never passes
+# through a workbench.
+cmd_review_login() {
+  local opts=()
+  podman image exists "${REVIEW_IMAGE}" || die "no ${REVIEW_IMAGE}; host/workbench build or pull first"
+  mkdir -p "${REVIEW_LOGIN}"
+  chmod 700 "${DATA}/review" "${REVIEW_LOGIN}"
+  # A broker still running would write its own refreshed login over the
+  # new one when its review ends.
+  podman rm -f -t 5 review-broker >/dev/null 2>&1 || true
+  review_net
+  mapfile -t opts < <(review_opts)
+  podman run --rm -it --name review-login "${opts[@]}" \
+    -e HOME=/tmp -e CODEX_HOME=/var/lib/review-broker/codex \
+    "${REVIEW_IMAGE}" codex login --device-auth
+  review_login_ok || die "no login was saved in ${REVIEW_LOGIN}"
+  start_review_broker
+  echo "workbench: review broker logged in and running; from a workbench: l2 --review -- make cross-review"
+}
+
 start_ssh_agent() {
   running devcontainer-ssh-agent && return
   if [ ! -f "${SSH_KEY}" ]; then
@@ -1396,8 +1501,8 @@ start_engine() {
       ;;
     esac
   done
-  mkdir -p "${dir}"
-  chmod 700 "${dir}"
+  mkdir -p "${dir}" "${REVIEW_DIR}"
+  chmod 700 "${dir}" "${REVIEW_DIR}"
   set_proxy_env "${ws}" engine
   if mirror_on; then
     extra+=(-v "$(mirror_registries "${ws}"):/etc/containers/registries.conf.d/50-airlock-mirror.conf:ro,Z")
@@ -1413,6 +1518,7 @@ start_engine() {
     --network "$(net_name "${ws}")" "${PROXY_ENV[@]}" \
     "${gitdir[@]}" \
     -v "${dir}:/run/l2-engine:Z" \
+    -v "${REVIEW_DIR}:/run/review-broker:ro" \
     -v "${name}:/home/dev/.local/share/containers" \
     -v "${L2_STORE}:${L2_STORE_PATH}:ro" \
     "${ENGINE_IMAGE}" >/dev/null
@@ -1522,6 +1628,10 @@ start_helpers() {
   start_broker
   start_ssh_agent
   start_proxy
+  # Optional: one that cannot start is said, and every workspace still
+  # starts. In a child shell, so its die ends only that.
+  (start_review_broker) ||
+    echo "workbench: the review broker did not start, so l2 --review has none; podman logs review-broker" >&2
 }
 
 cmd_helpers() {
@@ -1532,7 +1642,7 @@ cmd_helpers() {
 # Stopping the proxy cuts every workspace off the network until it is back;
 # the registrations stay, so the next start puts them all back.
 cmd_helpers_down() {
-  podman rm -f -t 5 gh-broker devcontainer-ssh-agent "${PROXY}" >/dev/null 2>&1 || true
+  podman rm -f -t 5 gh-broker devcontainer-ssh-agent "${PROXY}" review-broker >/dev/null 2>&1 || true
 }
 
 cmd_restart_proxy() {
@@ -1557,6 +1667,14 @@ cmd_restart_ssh_agent() {
   restart_shared devcontainer-ssh-agent
   echo "workbench: ssh-agent restarted"
   key_dropped
+}
+
+cmd_restart_review_broker() {
+  review_login_ok || die "the review broker has no Codex login yet: host/workbench review-login"
+  podman image exists "${REVIEW_IMAGE}" ||
+    die "no ${REVIEW_IMAGE}, so no review broker: host/workbench build or pull"
+  restart_shared review-broker
+  echo "workbench: review broker restarted"
 }
 
 cmd_restart_mirror() {
@@ -1587,6 +1705,7 @@ restart_shared() {
   gh-broker) start_broker ;;
   devcontainer-ssh-agent) start_ssh_agent ;;
   mirror-gate) start_mirror ;;
+  review-broker) start_review_broker ;;
   esac
 }
 
@@ -1602,6 +1721,7 @@ shared_image() {
   gh-broker) echo "${BROKER_IMAGE}" ;;
   devcontainer-ssh-agent) wb_image claude ;;
   mirror-gate) echo "${GATE_IMAGE}" ;;
+  review-broker) echo "${REVIEW_IMAGE}" ;;
   esac
 }
 
@@ -1613,6 +1733,7 @@ shared_restart() {
   gh-broker) echo "host/workbench restart-broker (a gh command running then fails)" ;;
   devcontainer-ssh-agent) echo "host/workbench restart-ssh-agent, then unlock again (it forgets the key)" ;;
   mirror-gate) echo "host/workbench restart-mirror (an install running then fails)" ;;
+  review-broker) echo "host/workbench restart-review-broker (a review running then fails)" ;;
   esac
 }
 
@@ -1645,7 +1766,7 @@ shared_in_use() {
 # all.
 refresh_shared() {
   local s stale=()
-  for s in "${PROXY}" gh-broker devcontainer-ssh-agent mirror-gate; do
+  for s in "${PROXY}" gh-broker devcontainer-ssh-agent mirror-gate review-broker; do
     [ "${s}" != mirror-gate ] || mirror_on || continue
     if behind "${s}"; then stale+=("${s}"); fi
   done
@@ -1947,7 +2068,7 @@ sync_l2() {
 }
 
 cmd_status() {
-  podman ps -a --filter name='^(egress-proxy.*|mirror-.*|gh-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)$' \
+  podman ps -a --filter name='^(egress-proxy.*|mirror-.*|gh-broker|review-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)$' \
     --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 }
 
@@ -1987,13 +2108,13 @@ stop_shared_if_idle() {
   fi
 }
 
-# Every shared service: the package mirror, the egress proxy, the gh broker
-# and the ssh-agent. Their volumes (the proxy's cache, the mirror's cache,
+# Every shared service: the package mirror, the egress proxy, the gh broker,
+# the review broker and the ssh-agent. Their volumes (the proxy's cache, the mirror's cache,
 # admin password and malicious package lists) stay, so the next start is warm.
 stop_shared() {
-  podman rm -f -t 5 mirror-gate mirror-nexus "${PROXY}" gh-broker devcontainer-ssh-agent >/dev/null 2>&1 || true
-  rm -f "${EGRESS_DIR}/airlock-mirror.conf"
-  podman network rm "${MIRROR_NET}" >/dev/null 2>&1 || true
+  podman rm -f -t 5 mirror-gate mirror-nexus "${PROXY}" gh-broker review-broker devcontainer-ssh-agent >/dev/null 2>&1 || true
+  rm -f "${EGRESS_DIR}/airlock-mirror.conf" "${EGRESS_DIR}/airlock-review.conf"
+  podman network rm "${MIRROR_NET}" "${REVIEW_NET}" >/dev/null 2>&1 || true
 }
 
 # Sessions (docs/SESSIONS.md). A session is one agent run with a workbench,
@@ -2711,6 +2832,8 @@ restart-broker) cmd_restart_broker ;;
 restart-proxy) cmd_restart_proxy ;;
 restart-ssh-agent) cmd_restart_ssh_agent ;;
 restart-mirror) cmd_restart_mirror ;;
+review-login) cmd_review_login ;;
+restart-review-broker) cmd_restart_review_broker ;;
 install-units) cmd_install_units ;;
 -h | --help | help) sed -n '3,/^    2  usage error$/p' "$0" ;;
 *)

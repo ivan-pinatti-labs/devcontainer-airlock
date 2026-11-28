@@ -33,6 +33,7 @@ Reading the picture:
 | host | one | podman, the VS Code window, PipeWire (the microphone, for voice) | the ssh key file, the GitHub token (a podman secret), your own logins | all of it, which is why nothing else runs here |
 | ssh-agent | one per host | `ssh-agent`, read only, no capabilities | the ssh key, in memory for eight hours after `make unlock` | none |
 | gh-broker | one per host | `gh`, for the commands in its allowlist | the GitHub token | straight to GitHub |
+| review-broker | one per host, once logged in | `codex exec`, the one blind review command | a Codex login of its own | the `openai` set through the proxy, and nothing else |
 | egress-proxy | one per host | squid | nothing | every workspace's internal network, at `.2` on each, and out for the hosts of each workspace's egress sets |
 | workbench | one per agent and login, per workspace, and one per session | the agent, the VS Code server and extensions, git, a `gh` client of the broker | that agent's own login | the internal network only |
 | L2 engine | one per workspace, and one per session | rootless podman | nothing | the internal network only |
@@ -103,13 +104,17 @@ out.
 | workbench (`git`, `ssh`) | ssh-agent | `agent.sock` | signing requests; the key never leaves the agent |
 | workbench (`l2`, `podman`) | L2 engine | `podman.sock` | the podman API: start an L2 run, build an L2 image |
 | L2 engine | L2 run | inside the engine | the run gets the working tree, and nothing of the workbench (not its processes, not its localhost) |
+| L2 run (`l2 --review`) | review-broker | `review.sock`, through the engine | a review prompt and the tree at HEAD; the answer comes back, never the login |
 | PipeWire on the host | workbench | a named pipe | microphone audio for a session with voice (`make claude`), only while Claude Code records ([LAYERS.md](LAYERS.md), "Voice") |
 | workbench (`rec`) | `host/workbench` | a second named pipe | the words `start` and `stop`, nothing else understood; they switch the microphone on and off |
 | VS Code window | workbench | podman, from the host | the editor attaches to the running container; its server and extensions run there |
 
-What is deliberately missing: L2 has no socket to the broker, the agent or
-the engine unless a run asks for the engine (`l2 --engine`), and the
-workbench has no container runtime of its own, only a client of the engine.
+What is deliberately missing: L2 has no socket to the gh broker or the
+agent, none to the engine unless a run asks for it (`l2 --engine`) and none
+to the review broker unless a run asks for that (`l2 --review`) or for the
+engine (every engine has the broker's socket folder, so a run that can start
+containers can start one given it), and the workbench has no container
+runtime of its own, only a client of the engine.
 
 ## How anything reaches the internet
 

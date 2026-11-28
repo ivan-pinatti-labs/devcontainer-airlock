@@ -52,7 +52,7 @@ run "${wb}" down "${other}"
 check "down from anywhere, of the workspace named" 0 out \
   "workbench: nothing else running, so the shared services stopped too; the next start brings them back"
 check "the shared services stop with the last one" 0 calls \
-  "podman rm -f -t 5 mirror-gate mirror-nexus egress-proxy gh-broker devcontainer-ssh-agent"
+  "podman rm -f -t 5 mirror-gate mirror-nexus egress-proxy gh-broker review-broker devcontainer-ssh-agent"
 assert "the stopped ones are left as they are" test -d "${PODMAN_STATE}/ctr/workbench-claude-old"
 check "and the mirror's network" 0 calls "podman network rm workbench-net-airlock-mirror"
 assert "and the mirror's registration" test ! -e "${egress}/airlock-mirror.conf"

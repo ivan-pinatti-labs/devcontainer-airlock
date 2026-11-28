@@ -46,7 +46,7 @@ export PODMAN_STATE="${__scratch}/podman"
 mkdir -p "${PODMAN_STATE}"/{ctr,net,vol,secret,img,store,start-logs,dies,rules}
 printf '%s\n' 'python  PyPI' 'node    npm' 'golang  Go modules' 'docker-hub  Docker Hub' \
   'ghcr  GitHub' 'ubuntu  Ubuntu' 'debian  Debian' 'nodesource  NodeSource' 'alpine  Alpine' 'fedora  Fedora' \
-  'hashicorp  HashiCorp' >"${PODMAN_STATE}/sets"
+  'hashicorp  HashiCorp' 'openai  OpenAI' >"${PODMAN_STATE}/sets"
 
 # The host: a home, a runtime folder and the folder workspaces live under.
 export HOME="${__scratch}/home"
@@ -57,6 +57,7 @@ unset XDG_CONFIG_HOME XDG_DATA_HOME WORKBENCH_TAG WORKBENCH_TZ WORKBENCH_VOICE \
   WORKBENCH_AGENTS WORKBENCH_ACCOUNTS WORKBENCH_HISTORY WORKBENCH_GH_OWNERS \
   WORKBENCH_GH_SECRET WORKBENCH_SSH_KEY WORKBENCH_REGISTRY WORKBENCH_MIRROR \
   WORKBENCH_MIRROR_MIN_AGE WORKBENCH_MIRROR_HEAP WORKBENCH_PULL_TAG L2_EXTRA_IMAGES \
+  WORKBENCH_REVIEW_MODELS WORKBENCH_REVIEW_PER_HOUR \
   GIT_DIR GIT_COMMON_DIR GIT_WORK_TREE TERM COLORTERM \
   XDG_STATE_HOME WORKBENCH_SCRUB_HOMES WORKBENCH_SCRUB_SECRETS WORKBENCH_SCRUB_QUIET NO_COLOR
 # No secret scan at session end (host/scrub), but where a test
@@ -294,6 +295,9 @@ case "$1" in
               /*:/run/l2-engine:Z)
                 [ -n "${NO_ENGINE_SOCKET:-}" ] \
                   || python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "${v%%:*}/podman.sock" ;;
+              /*:/run/review-broker:Z)
+                [ -n "${NO_REVIEW_SOCKET:-}" ] \
+                  || python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "${v%%:*}/review.sock" ;;
               /*) ;;
               *) echo "${v%%:*}" >>"${d}/mounts" ;;
             esac ;;
@@ -312,6 +316,7 @@ case "$1" in
         case "${name}" in
           egress-proxy) echo "Accepting HTTP Socket connections" >"${d}/logs" ;;
           mirror-gate) echo "mirror-gate: listening on 8081" >"${d}/logs" ;;
+          review-broker) echo "review-broker: listening on /run/review-broker/review.sock" >"${d}/logs" ;;
         esac
       fi
       [ -f "${S}/dies/${name}" ] || touch "${d}/running"

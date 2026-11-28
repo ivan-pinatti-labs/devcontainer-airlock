@@ -47,7 +47,7 @@ container workbench-claude-app running
 container unrelated running
 run "${wb}" status
 check "status lists the workbench containers" 0 calls \
-  "podman ps -a --filter name=^(egress-proxy.*|mirror-.*|gh-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)\$ --format table {{.Names}}\t{{.Status}}\t{{.Image}}"
+  "podman ps -a --filter name=^(egress-proxy.*|mirror-.*|gh-broker|review-broker|devcontainer-ssh-agent|workbench-.*|l2-engine-.*)\$ --format table {{.Names}}\t{{.Status}}\t{{.Image}}"
 check "as a table" 0 out "workbench-claude-app"
 refute "nothing else is called" "podman rm"
 reset_podman

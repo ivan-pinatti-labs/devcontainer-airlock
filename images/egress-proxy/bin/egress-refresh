@@ -29,7 +29,9 @@ network and the sets it selected:
 
 A request passes only when it comes from a registered subnet, arrived at the
 proxy's own address on it, and names a host of one of that workspace's sets.
-"workbench", "github" and "ghcr" are always included.
+"workbench", "github" and "ghcr" are always included, unless the file says
+always=no: a helper's own network (the review broker's) that should reach
+its sets and nothing else.
 
 Usage:
   egress-refresh [--list | --cached]
@@ -182,7 +184,7 @@ def workspaces():
         fields = {}
         for line in path.read_text().splitlines():
             key, sep, value = line.partition("=")
-            if sep and key.strip() in ("subnet", "sets"):
+            if sep and key.strip() in ("subnet", "sets", "always"):
                 fields[key.strip()] = value.strip()
         try:
             subnet = ipaddress.ip_network(fields.get("subnet", ""))
@@ -192,8 +194,12 @@ def workspaces():
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or not subnet.subnet_of(WORKSPACE_RANGE):
             log(f"{path}: a workspace is a name and a subnet inside {WORKSPACE_RANGE}")
             sys.exit(2)
+        always = fields.get("always", "yes")
+        if always not in ("yes", "no"):
+            log(f"{path}: always= is yes or no, not {always!r}")
+            sys.exit(2)
         wanted = [s.strip() for s in fields.get("sets", "").split(",") if s.strip()]
-        found.append((name, subnet, list(dict.fromkeys(ALWAYS + wanted))))
+        found.append((name, subnet, list(dict.fromkeys((ALWAYS if always == "yes" else []) + wanted))))
     return found
 
 
