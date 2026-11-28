@@ -46,7 +46,7 @@ Exit status codes in the reply:
   126  refused (the message says why), or the reply was withheld
   any  otherwise, the exit status of the reviewer itself
 """
-# cspell:words killpg
+# cspell:words killpg signum
 import base64
 import collections
 import io
@@ -100,6 +100,9 @@ DISABLED = (
 _one_at_a_time = threading.Lock()
 _waiting = threading.BoundedSemaphore(MAX_WAITING)
 _conns = threading.BoundedSemaphore(MAX_CONNS)
+# The running review's login copy and the login it came from, for a stop
+# to save a refreshed token from.
+_running = {}
 _started = collections.deque()
 _started_lock = threading.Lock()
 
@@ -306,6 +309,14 @@ def run_codex(req, tree, answer, env, auth, login):
     )
     deadline = time.monotonic() + TIMEOUT
     pending = req["prompt"]
+    _running.update(auth=auth, login=login)
+    try:
+        return wait_codex(p, pending, deadline, auth, login)
+    finally:
+        _running.clear()
+
+
+def wait_codex(p, pending, deadline, auth, login):
     while True:
         try:
             _, err = p.communicate(pending, timeout=min(POLL, max(deadline - time.monotonic(), 0)))
@@ -433,7 +444,17 @@ def answer(conn, rid):
             log("GONE", rid)
 
 
+def on_stop(_signum, _frame):
+    """A stop (podman stop, restart-review-broker) saves a token the running
+    review refreshed since the last look, before the tmpfs holding it goes."""
+    if _running:
+        keep_login(_running["auth"], _running["login"])
+    log("review-broker: stopping")
+    sys.exit(0)
+
+
 def main():
+    signal.signal(signal.SIGTERM, on_stop)
     if not os.path.isdir(SOCK_DIR):
         print(f"review-broker: no {SOCK_DIR} to listen in; the host mounts it", file=sys.stderr)
         sys.exit(1)

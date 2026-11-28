@@ -17,7 +17,8 @@
 #   --review  give this run the review broker's socket, for the blind cross
 #             review (`l2 --review -- make cross-review`). The broker holds
 #             the reviewer's login and returns only review text; the run
-#             gets no credential and no network from it
+#             gets no credential and no network from it. An --engine run
+#             can reach it as well, by starting a container given it
 #   --protected-rw
 #             leave PROTECTED writable too. Only for the git hooks, which
 #             compare those paths before and after and refuse a commit a
@@ -102,7 +103,7 @@ while [[ $# -gt 0 ]]; do
     break
     ;;
   -h | --help)
-    sed -n '2,33s/^# \{0,1\}//p' "$0"
+    sed -n '2,34s/^# \{0,1\}//p' "$0"
     exit 0
     ;;
   -*)

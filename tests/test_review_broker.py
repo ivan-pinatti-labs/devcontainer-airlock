@@ -98,6 +98,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("SECRET_OF_OURS", "nope")
     monkeypatch.setattr(sys, "dont_write_bytecode", True)
     broker = load("images/review-broker/broker.py", "review_broker")
+    # main() installs a SIGTERM handler; never in the test process itself.
+    monkeypatch.setattr(broker.signal, "signal", lambda *_: None)
     monkeypatch.setattr(broker.tempfile, "tempdir", str(tmp_path))
 
     class Env:
@@ -603,10 +605,15 @@ def test_main_listens_and_serves(env, monkeypatch, capsys, stale, logged_in):
         def start(self):
             started.append(self.args)
 
+    handlers = {}
+    monkeypatch.setattr(
+        env.broker.signal, "signal", lambda sig, fn: handlers.update({sig: fn})
+    )
     monkeypatch.setattr(env.broker.socket, "socket", FakeSocket)
     monkeypatch.setattr(env.broker.threading, "Thread", Thread)
     with pytest.raises(Stop):
         env.broker.main()
+    assert handlers == {env.broker.signal.SIGTERM: env.broker.on_stop}
     assert started == [("conn", 1)]
     assert (sock / "review.sock").read_text() == ""
     assert oct((sock / "review.sock").stat().st_mode & 0o777) == "0o660"
@@ -697,6 +704,25 @@ def test_serve_gives_its_slot_back(env, monkeypatch):
     monkeypatch.setattr(env.broker, "answer", lambda conn, rid: None)
     env.broker.serve(None, 1)
     assert env.broker._conns.acquire(blocking=False)
+
+
+@pytest.mark.parametrize("running", [True, False])
+def test_a_stop_saves_a_refreshed_login(env, monkeypatch, capsys, running):
+    copy = env.tmp / "copy.json"
+    copy.write_text(json.dumps({"tokens": {"access_token": REFRESHED}}))
+    if running:
+        monkeypatch.setitem(env.broker._running, "auth", str(copy))
+        monkeypatch.setitem(env.broker._running, "login", str(env.login / "auth.json"))
+    with pytest.raises(SystemExit) as e:
+        env.broker.on_stop(15, None)
+    assert e.value.code == 0
+    assert (REFRESHED in (env.login / "auth.json").read_text()) == running
+    assert "review-broker: stopping" in capsys.readouterr().out
+
+
+def test_no_review_running_after_one_ends(env):
+    env.broker.handle(req(), 1)
+    assert env.broker._running == {}
 
 
 def test_main_needs_its_folder(env, capsys):

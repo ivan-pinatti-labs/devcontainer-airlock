@@ -111,8 +111,10 @@ out.
 
 What is deliberately missing: L2 has no socket to the gh broker or the
 agent, none to the engine unless a run asks for it (`l2 --engine`) and none
-to the review broker unless a run asks for that (`l2 --review`), and the
-workbench has no container runtime of its own, only a client of the engine.
+to the review broker unless a run asks for that (`l2 --review`) or for the
+engine (every engine has the broker's socket folder, so a run that can start
+containers can start one given it), and the workbench has no container
+runtime of its own, only a client of the engine.
 
 ## How anything reaches the internet
 

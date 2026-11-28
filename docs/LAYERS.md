@@ -745,7 +745,9 @@ prints the answer. The request chooses the reviewer (`codex` only, so far),
 the model (from `WORKBENCH_REVIEW_MODELS`, or Codex's default) and the
 effort; the command line is the broker's. A run with `--review` can send
 text to OpenAI through the broker and read back an answer, which is less
-than `--net` already gives it.
+than `--net` already gives it. Every L2 engine has the broker's socket
+folder, so a run given the engine (`l2 --engine`) can reach the broker too,
+by starting a container that mounts it.
 
 **What the reviewer sees.** Each review runs in a fresh folder on the
 broker's tmpfs: the tree, and a `CODEX_HOME` holding a copy of the login and
@@ -767,8 +769,8 @@ not `CODEX_HOME` and not the login folder, and no network (measured with
 it the same way is measured by the first live review). A reply holding any 24 characters of a token
 from the login is withheld as well, a second line rather than the
 boundary, since a reworded token would pass it. A login Codex refreshes is
-copied back within seconds, so stopping the broker mid review loses no
-rotated token. The broker runs one review
+copied back within seconds, and again when the broker is stopped, so a stop
+mid review loses no rotated token. The broker runs one review
 at a time, with at most four waiting, at most `WORKBENCH_REVIEW_PER_HOUR` an
 hour (default 10), each up to 15 minutes, with trees up to 50 MB, and logs each one with its size,
 model, effort, duration and verdict line: `podman logs review-broker`.
