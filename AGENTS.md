@@ -144,6 +144,7 @@ and consumed, docs/TOOL_SOURCES.md where every tool comes from.
 | l2-aws-devops | `images/l2-aws-devops/` | L2 for an Atmos and Terraform infrastructure repository: the l2 image plus its toolchain, built on the l2 of the same run |
 | l2-engine | `images/l2-engine/` | the rootless podman that starts L2 containers |
 | gh-broker | `images/gh-broker/` | holds the GitHub token; runs allowlisted gh commands |
+| review-broker | `images/review-broker/` | holds a Codex login of its own; runs the blind cross review for an L2 run given its socket (`l2 --review`) |
 | egress-proxy | `images/egress-proxy/` | one per host, the only way out to the network, by each workspace's egress sets |
 | mirror-gate | `images/mirror-gate/` | the package mirror's front (on by default) and its backend's provisioning; the backend (Nexus CE) is used by digest, never baked |
 | podman-nested | `images/podman-nested/` | not a layer: a test runner a repository starts directly, rootless podman in podman for a throwaway container stack, never the host's engine socket (docs/IMAGES.md) |

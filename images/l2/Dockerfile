@@ -116,7 +116,7 @@ COPY --from=go-modules /usr/local/share/go-modules /usr/local/share/go-modules
 # caught up with fails loudly instead of linting with the wrong release.
 ENV L2_BAKED_IMAGES="ghcr.io/hadolint/hadolint=v2.15.1 docker.io/hadolint/hadolint=v2.15.1 docker.io/rhysd/actionlint=1.7.12 docker.io/dotenvlinter/dotenv-linter=4.0.0"
 
-COPY bin/docker bin/l2-prepare-hooks bin/actionlint /usr/local/bin/
+COPY bin/docker bin/l2-prepare-hooks bin/actionlint bin/airlock-review /usr/local/bin/
 COPY engine-bin/ /usr/local/lib/l2/engine-bin/
 
 # The L2 wrapper runs everything here as uid 0 (--user 0:0, overriding the

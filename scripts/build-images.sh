@@ -43,7 +43,7 @@ set -o pipefail
 
 # workbench-<agent> is a target of images/workbench/Dockerfile; the two share
 # every layer below their agent stage, so the second build reuses the first.
-IMAGES=(workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate)
+IMAGES=(workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate review-broker)
 # Built on their own pinned upstream image rather than on base, so they are
 # given no BASE_IMAGE: podman-nested is quay.io/podman/stable with a test
 # runner's tools on top.

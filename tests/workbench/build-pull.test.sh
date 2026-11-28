@@ -10,7 +10,7 @@ check "build builds the base first" 0 calls "podman build -t localhost/airlock-b
 check "both workbenches from one Dockerfile, by target" 0 calls \
   "podman build --build-arg BASE_IMAGE=localhost/airlock-base:local --target claude -t localhost/airlock-workbench-claude:local ${__repo}/images/workbench"
 check "codex too" 0 calls "--target codex -t localhost/airlock-workbench-codex:local ${__repo}/images/workbench"
-for i in l2 l2-engine gh-broker egress-proxy mirror-gate; do
+for i in l2 l2-engine gh-broker egress-proxy mirror-gate review-broker; do
   check "and ${i}" 0 calls \
     "podman build --build-arg BASE_IMAGE=localhost/airlock-base:local -t localhost/airlock-${i}:local ${__repo}/images/${i}"
 done
@@ -32,7 +32,7 @@ reg=ghcr.io/ivan-pinatti-labs
 rule 'image inspect --format {{range .RepoDigests}}*' \
   'r="${*: -1}"; r="${r%:*}"; printf "%s\n" "${r}@sha256:mine" "${r}@sha256:index" "other/x@sha256:y"'
 run "${wb}" pull
-for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate l2-aws-devops podman-nested; do
+for i in base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate review-broker l2-aws-devops podman-nested; do
   check "pull takes ${i}, pinned by its index digest" 0 out "workbench: ${i} ${reg}/airlock-${i}@sha256:index"
 done
 check "from the registry" 0 calls "podman pull --quiet ${reg}/airlock-l2:latest"

@@ -73,6 +73,13 @@ check "--env passes each variable, --image picks the image" 0 calls "-e A=1 -e B
 check "the home is named after the clone" 0 calls "-v l2-home-main:/root"
 refute "--protected-rw leaves the protected paths writable" "${repo}/Makefile:ro"
 
+run "${l2}" --review -- make cross-review
+check "--review mounts the review broker's folder, read only" 0 calls \
+  "-v /run/review-broker:/run/review-broker:ro -e REVIEW_BROKER_SOCKET=/run/review-broker/review.sock"
+check "and still no network" 0 calls "--network=none --http-proxy=false"
+run "${l2}" make test
+refute "without --review, no review broker" calls "/run/review-broker"
+
 echo "ghcr.io/example/project-l2:3" >"${repo}/.devcontainer/l2-image"
 run "${l2}" true
 check ".devcontainer/l2-image names the image" 0 calls "ghcr.io/example/project-l2:3 true"

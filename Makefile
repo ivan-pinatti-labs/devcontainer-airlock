@@ -68,11 +68,13 @@ PYTHON_SOURCES := \
 	host/scrub-scan \
 	images/egress-proxy/bin/egress-refresh \
 	images/gh-broker/broker.py \
+	images/l2/bin/airlock-review \
 	images/l2/bin/l2-prepare-hooks \
 	images/mirror-gate/backends/nexus/provision \
 	images/mirror-gate/bin/mirror-gate \
 	images/mirror-gate/lib/filters.py \
 	images/mirror-gate/lib/osvdb.py \
+	images/review-broker/broker.py \
 	images/workbench/bin/gh \
 	images/workbench/bin/route-to-l2 \
 	scripts/extension-index.py \

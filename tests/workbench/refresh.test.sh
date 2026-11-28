@@ -11,6 +11,9 @@ mkdir -p "${HOME}/.ssh/devcontainer" "${XDG_RUNTIME_DIR}/devcontainer-ssh"
 touch "${HOME}/.ssh/devcontainer/id_ed25519"
 echo "github.com ssh-ed25519 KEY" >"${XDG_RUNTIME_DIR}/devcontainer-ssh/known_hosts"
 export WORKBENCH_GH_OWNERS=acme
+# The review broker has a login, so it is a shared service like the others.
+mkdir -p "${HOME}/.local/share/workbench/review/codex"
+echo "{}" >"${HOME}/.local/share/workbench/review/codex/auth.json"
 app="${WORKBENCH_ROOT}/app"
 clone "${app}"
 cd "${app}"
@@ -21,6 +24,7 @@ declare -A img=(
   ["gh-broker"]=localhost/airlock-gh-broker:local
   ["devcontainer-ssh-agent"]=localhost/airlock-workbench-claude:local
   ["mirror-gate"]=localhost/airlock-mirror-gate:local
+  ["review-broker"]=localhost/airlock-review-broker:local
 )
 # And the command that restarts it, as the warning names it.
 declare -A how=(
@@ -28,8 +32,9 @@ declare -A how=(
   ["gh-broker"]="host/workbench restart-broker (a gh command running then fails)"
   ["devcontainer-ssh-agent"]="host/workbench restart-ssh-agent, then unlock again (it forgets the key)"
   ["mirror-gate"]="host/workbench restart-mirror (an install running then fails)"
+  ["review-broker"]="host/workbench restart-review-broker (a review running then fails)"
 )
-services="egress-proxy gh-broker devcontainer-ssh-agent mirror-gate"
+services="egress-proxy gh-broker devcontainer-ssh-agent mirror-gate review-broker"
 
 # fresh: an empty host but for the token's secret.
 fresh() {

@@ -20,6 +20,7 @@ runner" below.
 | `l2-aws-devops` | l2, the build of the same run | everything in `l2`, plus atmos, terraform, tflint, the AWS CLI, kubectl, helm, helmfile, eksctl, kubeseal, pluto and yq |
 | `l2-engine` | base | rootless podman serving a socket (the nested runtime below) |
 | `gh-broker` | base | gh and the broker |
+| `review-broker` | base | Codex's native build and the review broker |
 | `egress-proxy` | base | squid, the egress sets and the program that refreshes them |
 | `mirror-gate` | base | the package mirror's gate (OSV malicious package filter, backend routes) and the provisioning of its backend; the backend itself is the official Nexus Repository CE image, pinned by digest in `host/workbench` |
 | `podman-nested` | `quay.io/podman/stable`, by digest | rootless podman serving its API socket, podman-compose, a health ticker, and the tools a test suite drives a stack with (make, jq, yq, xmlstarlet, pip) |

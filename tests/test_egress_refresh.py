@@ -225,10 +225,18 @@ def test_workspaces_reads_each_registration(er):
     ]
 
 
+def test_workspaces_always_no_leaves_out_the_default_sets(er):
+    register(er, "review", "subnet=10.203.9.0/24\nsets=openai\nalways=no\n")
+    register(er, "ws", "subnet=10.203.7.0/24\nalways=yes\n")
+    found = {n: sets for n, _, sets in er.workspaces()}
+    assert found == {"review": ["openai"], "ws": ["workbench", "github", "ghcr"]}
+
+
 @pytest.mark.parametrize(
     ("name", "text", "message"),
     [
         ("a", "sets=python\n", "no valid subnet"),
+        ("a", "subnet=10.203.7.0/24\nalways=maybe\n", "always= is yes or no"),
         ("a", "subnet=192.168.0.0/24\n", "a workspace is a name and a subnet"),
         ("bad name", "subnet=10.203.7.0/24\n", "a workspace is a name and a subnet"),
     ],

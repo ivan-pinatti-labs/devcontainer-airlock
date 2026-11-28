@@ -1,0 +1,120 @@
+#!/usr/bin/python3
+"""airlock-review: ask the review broker for a blind review of HEAD.
+
+Run in an L2 container given the review broker (`l2 --review`), from inside
+a git checkout. Reads the review prompt (with the diff) on standard input,
+sends it with the tree at HEAD to the broker, and prints the reviewer's
+answer on standard output. The broker holds the reviewer's login and runs
+the one review command it allows; this can choose only the reviewer, the
+model and the effort. docs/LAYERS.md, "Review broker".
+
+The tree is what HEAD holds, read from git, not the files on disk: regular
+files only. Symbolic links and submodules are left out, since the broker
+refuses links and a submodule's files are in another repository.
+
+Usage:
+  airlock-review [--reviewer codex] [--model MODEL] [--effort low|medium|high] < prompt
+
+Environment:
+  REVIEW_BROKER_SOCKET  the broker's socket (set by `l2 --review`)
+
+Exit status codes:
+  2    usage error, or not in a git checkout
+  124  no reply from the broker in time
+  127  the broker is not reachable (no `l2 --review`, or it is not running)
+  any  otherwise, the broker's (see images/review-broker/broker.py)
+"""
+# cspell:words addfile argparse fileobj getvalue surrogateescape
+import argparse
+import base64
+import io
+import json
+import os
+import socket
+import subprocess
+import sys
+import tarfile
+
+# The broker waits up to its REVIEW_TIMEOUT (900 s by default) for the review
+# before this one, then gives this one as long again.
+TIMEOUT = 1900
+
+
+def head_tree():
+    """A tar of the regular files at HEAD, read from git."""
+    try:
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "-z", "--full-tree", "HEAD"], capture_output=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as e:
+        sys.stderr.write(f"airlock-review: cannot read HEAD here ({e}); run it in a git checkout\n")
+        sys.exit(2)
+    entries = []
+    for rec in listing.split(b"\0"):
+        if not rec:
+            continue
+        meta, path = rec.split(b"\t", 1)
+        mode, kind, sha = meta.split()
+        if kind == b"blob" and mode in (b"100644", b"100755"):
+            entries.append((mode, sha, path.decode("utf-8", "surrogateescape")))
+    batch = subprocess.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for mode, sha, path in entries:
+            batch.stdin.write(sha + b"\n")
+            batch.stdin.flush()
+            header = batch.stdout.readline().split()
+            size = int(header[2])
+            body = batch.stdout.read(size)
+            batch.stdout.read(1)
+            info = tarfile.TarInfo(path)
+            info.size = size
+            info.mode = 0o755 if mode == b"100755" else 0o644
+            tar.addfile(info, io.BytesIO(body))
+    batch.stdin.close()
+    batch.wait()
+    return buf.getvalue()
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="airlock-review", description="Ask the review broker for a blind review of HEAD.")
+    ap.add_argument("--reviewer", default="codex")
+    ap.add_argument("--model", default="")
+    ap.add_argument("--effort", default="medium")
+    args = ap.parse_args()
+    path = os.environ.get("REVIEW_BROKER_SOCKET", "")
+    if not path or not os.path.exists(path):
+        sys.stderr.write(
+            "airlock-review: no review broker here; run this through `l2 --review`, and on the host "
+            "start the broker (host/workbench review-login, once)\n"
+        )
+        sys.exit(127)
+    prompt = sys.stdin.read()
+    req = {
+        "reviewer": args.reviewer,
+        "model": args.model,
+        "effort": args.effort,
+        "prompt": prompt,
+        "tree": base64.b64encode(head_tree()).decode(),
+    }
+    try:
+        s = socket.socket(socket.AF_UNIX)
+        s.settimeout(TIMEOUT)
+        s.connect(path)
+        s.sendall((json.dumps(req) + "\n").encode())
+        s.shutdown(socket.SHUT_WR)
+        raw = b"".join(iter(lambda: s.recv(65536), b""))
+    except socket.timeout:
+        sys.stderr.write(f"airlock-review: no reply from the review broker after {TIMEOUT}s\n")
+        sys.exit(124)
+    except OSError as e:
+        sys.stderr.write(f"airlock-review: the review broker is not reachable at {path} ({e.strerror})\n")
+        sys.exit(127)
+    reply = json.loads(raw or b'{"rc":1,"out":"","err":"airlock-review: empty reply from the broker\\n"}')
+    sys.stdout.write(reply["out"])
+    sys.stderr.write(reply["err"])
+    sys.exit(reply["rc"])
+
+
+if __name__ == "__main__":
+    main()

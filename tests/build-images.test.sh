@@ -57,7 +57,7 @@ esac'
 # shellcheck disable=SC2016
 stub jq 'case "$1" in -r) echo sha256:from-buildx ;; *) echo "{}" ;; esac'
 stub sleep
-images=(base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate l2-aws-devops podman-nested)
+images=(base workbench-claude workbench-codex l2 l2-engine gh-broker egress-proxy mirror-gate review-broker l2-aws-devops podman-nested)
 
 echo 0 >"${CURL_FAILS}"
 RUNTIME=podman run scripts/build-images.sh

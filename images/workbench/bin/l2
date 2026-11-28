@@ -3,7 +3,7 @@
 # and only the working tree mounted. docs/LAYERS.md explains the layers.
 #
 # Usage:
-#   l2 [--net] [--ro] [--engine] [--protected-rw] [--env NAME=VALUE] [--image IMAGE] [--] COMMAND [ARGS...]
+#   l2 [--net] [--ro] [--engine] [--review] [--protected-rw] [--env NAME=VALUE] [--image IMAGE] [--] COMMAND [ARGS...]
 #
 # Options:
 #   --net     give the container network access, through the egress proxy
@@ -14,6 +14,10 @@
 #             it talk to the engine) and a scratch directory, TMPDIR, that
 #             the containers it starts can mount at the same path. Those
 #             containers are L2 as well; the engine holds no credentials
+#   --review  give this run the review broker's socket, for the blind cross
+#             review (`l2 --review -- make cross-review`). The broker holds
+#             the reviewer's login and returns only review text; the run
+#             gets no credential and no network from it
 #   --protected-rw
 #             leave PROTECTED writable too. Only for the git hooks, which
 #             compare those paths before and after and refuse a commit a
@@ -60,6 +64,7 @@ net=false
 ro=false
 protect=true
 engine=false
+review=false
 image=""
 envs=()
 while [[ $# -gt 0 ]]; do
@@ -74,6 +79,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   --engine)
     engine=true
+    shift
+    ;;
+  --review)
+    review=true
     shift
     ;;
   --protected-rw)
@@ -93,7 +102,7 @@ while [[ $# -gt 0 ]]; do
     break
     ;;
   -h | --help)
-    sed -n '2,29s/^# \{0,1\}//p' "$0"
+    sed -n '2,33s/^# \{0,1\}//p' "$0"
     exit 0
     ;;
   -*)
@@ -187,6 +196,13 @@ if [[ "${engine}" = true ]]; then
   args+=(-e "CONTAINER_HOST=unix://${sock}" -e "DOCKER_HOST=unix://${sock}")
   args+=(-e "TMPDIR=${scratch}")
   args+=(-e "PATH=/usr/local/lib/l2/engine-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+fi
+
+if [[ "${review}" = true ]]; then
+  # The engine side's folder, which the host mounts into the engine; the
+  # folder rather than the socket, so a restarted broker's new socket is
+  # still the one this run sees.
+  args+=(-v /run/review-broker:/run/review-broker:ro -e REVIEW_BROKER_SOCKET=/run/review-broker/review.sock)
 fi
 
 if [[ "${net}" = true ]]; then

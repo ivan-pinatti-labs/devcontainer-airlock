@@ -24,6 +24,7 @@ The layers separate what you trust from what you only run.
 host         podman, the VS Code desktop, podman secrets. Nothing else runs here.
  ├─ ssh-agent        holds the ssh key; the key never leaves it
  ├─ gh-broker        holds the GitHub token; runs allowlisted gh commands
+ ├─ review-broker    holds a Codex login of its own; runs the blind review
  ├─ egress-proxy     one per host: the only way out, by each workspace's sets
  ├─ workbench-claude you, Claude Code, its editor extension, git
  ├─ workbench-codex  you, Codex, its editor extension, git
@@ -39,6 +40,7 @@ host         podman, the VS Code desktop, podman secrets. Nothing else runs here
 | host | podman, the editor's window | everything, which is why nothing else runs here |
 | ssh-agent | `ssh-agent` | nothing: no network, read only, no capabilities |
 | gh-broker | `gh` with the token | GitHub, for the commands in its allowlist |
+| review-broker | `codex exec`, read only, with a login of its own | OpenAI's hosts (the `openai` set) through the proxy, and nothing else |
 | egress-proxy | squid, one per host | for each workspace, the domains of that workspace's egress sets |
 | workbench (one per agent) | that agent, the VS Code server and that agent's extensions, git | the proxy, the broker socket, the agent socket, the engine socket, the workspace, that agent's own login |
 | L2 engine | rootless podman | the proxy, the workspace |
@@ -712,6 +714,74 @@ login without ever handing over the key. The connection runs to
 is checked against keys fetched from GitHub's own API. `host/workbench
 unlock` adds the key for twelve hours at a time, or as many as you give it
 up to 48 (an unattended session unlocks it for the hours it was given).
+
+## Review broker
+
+`make cross-review` (from github-template) has the change reviewed blind by
+the other vendor's agent before its pull request. In a workbench that is
+two problems at once: the script is project code, so it runs in L2, and the
+reviewer needs a login no workbench holds (a Claude workbench has no Codex
+login, by design). The review broker answers both. It is a helper like the
+gh broker: one container for the host, holding a Codex login of its own,
+running the one review command it allows.
+
+```shell
+host/workbench review-login                  # once, on the host
+l2 --review -- make cross-review             # in a workbench
+```
+
+`review-login` runs Codex's device login in the broker's image, on its
+network, into `~/.local/share/workbench/review/codex`, so the code to enter
+is shown on the host and the login never passes through a workbench. Until
+it has a login the broker does not start, and `airlock-review` in L2 says
+to run `review-login`.
+
+**What an L2 run gets.** `l2 --review` mounts the broker's socket folder
+into that one run, and nothing else: no network, no credential. The script
+pipes its prompt (the instructions and the diff) to `airlock-review`, in the
+L2 image, which sends it with a tar of the tree at HEAD (the regular files
+git holds there, not the files on disk; links and submodules left out) and
+prints the answer. The request chooses the reviewer (`codex` only, so far),
+the model (from `WORKBENCH_REVIEW_MODELS`, or Codex's default) and the
+effort; the command line is the broker's. A run with `--review` can send
+text to OpenAI through the broker and read back an answer, which is less
+than `--net` already gives it.
+
+**What the reviewer sees.** Each review runs in a fresh folder on the
+broker's tmpfs: the tree, and a `CODEX_HOME` holding a copy of the login and
+nothing else, so no configuration, instruction file, skill, MCP server or
+memory reaches it, and nothing it leaves reaches the next review. A tree
+holding a `.codex` path (Codex project configuration), a link, a device or a
+path outside itself is refused. A login Codex refreshed during the review is
+copied back. The command is `codex exec --sandbox read-only --ephemeral`
+with project docs, developer instructions, skills and web search off, and
+memories, apps, plugins, the browser and computer use disabled.
+
+**The login stays in the broker.** Codex's sandbox stops writes and the
+network, not reads, and the login is a file Codex reads, so a diff carrying
+instructions could ask the reviewer to print it. A reply holding any 24
+characters of any value in the login is withheld. The broker runs one review
+at a time, at most `WORKBENCH_REVIEW_PER_HOUR` an hour (default 10), each up
+to 15 minutes, with trees up to 50 MB, and logs each one with its size,
+model, effort, duration and verdict line: `podman logs review-broker`.
+
+**Its network.** The broker is on a network of its own, registered with the
+egress proxy with the `openai` set and `always=no`, so unlike every other
+registration it does not get `workbench`, `github` and `ghcr`: it reaches
+OpenAI's hosts and nothing else. Like every set, that allows hosts, not one
+client.
+
+**Codex's sandbox in a container, measured** (2026-11-27, Codex 0.171.0):
+with every capability dropped, `no-new-privileges` and a read only root,
+`codex sandbox` reads and refuses writes and the network under the
+`container_engine_t` label the socket helpers share. Under the default
+label, bubblewrap cannot mount `/dev/pts`, so the broker needs that label.
+
+The image carries only Codex's native build (copied out of the npm package
+in a build stage, so no Node), at the version the Codex workbench pins.
+`host/workbench restart-review-broker` restarts it after a rebuild. The
+Claude reviewer (for changes Codex wrote) is not served yet; it still runs
+on the host.
 
 ## Network
 
