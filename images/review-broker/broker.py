@@ -46,6 +46,7 @@ Exit status codes in the reply:
   126  refused (the message says why), or the reply was withheld
   any  otherwise, the exit status of the reviewer itself
 """
+# cspell:words killpg
 import base64
 import collections
 import io
@@ -53,6 +54,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -299,6 +301,8 @@ def run_codex(req, tree, answer, env, auth, login):
     p = subprocess.Popen(
         codex_command(req, tree, answer), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE, env=env, cwd=tree, text=True,
+        # A group of its own, so a timeout kills whatever it started too.
+        start_new_session=True,
     )
     deadline = time.monotonic() + TIMEOUT
     pending = req["prompt"]
@@ -311,9 +315,22 @@ def run_codex(req, tree, answer, env, auth, login):
             pending = None
             keep_login(auth, login)
             if time.monotonic() >= deadline:
-                p.kill()
-                p.communicate()
+                stop(p)
                 return 124, f"review-broker: the review took longer than {TIMEOUT}s\n"
+
+
+def stop(p):
+    """Kill the reviewer's whole process group, and wait for its pipes a few
+    seconds at most: a process that left the group could hold them open."""
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        p.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        p.stderr.close()
+        p.wait()
 
 
 def last_line(text):

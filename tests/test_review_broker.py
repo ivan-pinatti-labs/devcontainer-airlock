@@ -15,9 +15,11 @@ import json
 import re
 import socket
 import stat
+import subprocess
 import sys
 import tarfile
 import threading
+import time
 
 import pytest
 from conftest import load
@@ -64,6 +66,10 @@ elif do == "slow-refresh":
     open(answer, "w").write("VERDICT: CLEAN\\n")
 elif do == "hang":
     import time
+    time.sleep(30)
+elif do == "hang-child":
+    import subprocess, time
+    subprocess.Popen(["sleep", "30"])
     time.sleep(30)
 else:
     open(answer, "w").write("Looks fine.\\n\\n**VERDICT: CLEAN**\\n")
@@ -286,6 +292,32 @@ def test_a_review_that_takes_too_long_is_killed(env, monkeypatch):
     monkeypatch.setattr(env.broker, "POLL", 0.2)
     r = env.broker.handle(req(), 1)
     assert r["rc"] == 124 and "longer than 1s" in r["err"]
+
+
+def test_a_timeout_kills_what_the_reviewer_started(env, monkeypatch):
+    env.do("hang-child")
+    monkeypatch.setattr(env.broker, "TIMEOUT", 1)
+    monkeypatch.setattr(env.broker, "POLL", 0.2)
+    start = time.monotonic()
+    r = env.broker.handle(req(), 1)
+    assert r["rc"] == 124 and time.monotonic() - start < 5
+
+
+def test_stop_gives_up_on_pipes_held_open(env, monkeypatch):
+    class P:
+        pid = 999999999
+        stderr = io.StringIO()
+        waited = False
+
+        def communicate(self, timeout):
+            raise subprocess.TimeoutExpired("codex", timeout)
+
+        def wait(self):
+            self.waited = True
+
+    p = P()
+    env.broker.stop(p)
+    assert p.waited and p.stderr.closed
 
 
 def test_a_login_refreshed_mid_review_is_saved_while_it_runs(env, monkeypatch, capsys):
