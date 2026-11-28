@@ -1425,12 +1425,15 @@ start_review_broker() {
   review_net
   mapfile -t opts < <(review_opts)
   podman rm -f review-broker >/dev/null 2>&1 || true
+  # The one a stopped broker left, which would pass for the new one's.
+  rm -f "${REVIEW_DIR}/review.sock"
   podman run -d --name review-broker "${opts[@]}" \
     -e REVIEW_MODELS="${WORKBENCH_REVIEW_MODELS:-}" -e REVIEW_PER_HOUR="${WORKBENCH_REVIEW_PER_HOUR:-10}" \
     -v "${REVIEW_DIR}:/run/review-broker:Z" \
     "${REVIEW_IMAGE}" >/dev/null
   for _ in $(seq 1 50); do
-    [ -S "${REVIEW_DIR}/review.sock" ] && return 0
+    [ -S "${REVIEW_DIR}/review.sock" ] && podman logs review-broker 2>&1 | grep -q 'listening on' && return 0
+    running review-broker || break
     sleep 0.2
   done
   podman logs review-broker 2>&1 | tail -5 >&2

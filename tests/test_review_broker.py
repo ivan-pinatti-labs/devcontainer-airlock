@@ -398,7 +398,7 @@ def test_last_line_of_nothing(env):
 
 def serve(broker, payload):
     a, b = socket.socketpair()
-    t = threading.Thread(target=broker.serve, args=(a, 9))
+    t = threading.Thread(target=broker.answer, args=(a, 9))
     t.start()
     b.sendall(payload)
     b.shutdown(socket.SHUT_WR)
@@ -435,7 +435,7 @@ def test_serve_answers_an_error_of_its_own(env, monkeypatch, capsys):
 def test_serve_gives_up_on_a_request_that_never_arrives(env, monkeypatch, capsys):
     monkeypatch.setattr(env.broker, "READ_TIMEOUT", 0.2)
     a, b = socket.socketpair()
-    env.broker.serve(a, 5)
+    env.broker.answer(a, 5)
     b.close()
     assert "GONE 5 before the request arrived" in capsys.readouterr().out
 
@@ -457,7 +457,7 @@ def test_serve_logs_a_client_gone(env, capsys):
         def sendall(self, _data):
             raise OSError("gone")
 
-    env.broker.serve(Conn(), 4)
+    env.broker.answer(Conn(), 4)
     assert "GONE 4" in capsys.readouterr().out
 
 
@@ -513,6 +513,89 @@ def test_main_listens_and_serves(env, monkeypatch, capsys, stale, logged_in):
     assert f"listening on {sock}/review.sock" in out
     assert ("a login" if logged_in else "no login yet") in out
     assert "models: default, gpt-x, gpt-y, 100 an hour, 900s each" in out
+
+
+class ManySocket(FakeSocket):
+    """Three connections, then Stop."""
+
+    def __init__(self, family):
+        super().__init__(family)
+        self.n = 0
+        self.closed = []
+
+    def accept(self):
+        self.n += 1
+        if self.n > 3:
+            raise Stop
+        conn = FakeConn(self.closed, self.n)
+        return conn, None
+
+
+class FakeConn:
+    def __init__(self, closed, n):
+        self.closed, self.n = closed, n
+
+    def close(self):
+        self.closed.append(self.n)
+
+
+def test_main_bounds_the_connections_it_serves(env, monkeypatch, capsys):
+    (env.tmp / "sock").mkdir()
+    made = []
+
+    class Thread:
+        def __init__(self, target, args, daemon):
+            self.args = args
+
+        def start(self):
+            if self.args[1] == 2:
+                raise RuntimeError("can't start new thread")
+            made.append(self.args[1])
+
+    monkeypatch.setattr(env.broker, "_conns", threading.BoundedSemaphore(2))
+    monkeypatch.setattr(env.broker.socket, "socket", ManySocket)
+    monkeypatch.setattr(env.broker.threading, "Thread", Thread)
+    with pytest.raises(Stop):
+        env.broker.main()
+    out = capsys.readouterr().out
+    # 1 is served (and holds its slot), 2 fails to start and gives its slot
+    # back, 3 takes it.
+    assert made == [1, 3]
+    assert "BUSY 2 RuntimeError" in out
+    assert not env.broker._conns.acquire(blocking=False)
+
+
+def test_main_closes_a_connection_over_the_bound(env, monkeypatch, capsys):
+    (env.tmp / "sock").mkdir()
+    sockets = []
+
+    class Recording(ManySocket):
+        def __init__(self, family):
+            super().__init__(family)
+            sockets.append(self)
+
+    class Thread:
+        def __init__(self, target, args, daemon):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(env.broker, "_conns", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(env.broker.socket, "socket", Recording)
+    monkeypatch.setattr(env.broker.threading, "Thread", Thread)
+    with pytest.raises(Stop):
+        env.broker.main()
+    assert sockets[0].closed == [2, 3]
+    assert "BUSY 2 too many connections" in capsys.readouterr().out
+
+
+def test_serve_gives_its_slot_back(env, monkeypatch):
+    monkeypatch.setattr(env.broker, "_conns", threading.BoundedSemaphore(1))
+    env.broker._conns.acquire()
+    monkeypatch.setattr(env.broker, "answer", lambda conn, rid: None)
+    env.broker.serve(None, 1)
+    assert env.broker._conns.acquire(blocking=False)
 
 
 def test_main_needs_its_folder(env, capsys):

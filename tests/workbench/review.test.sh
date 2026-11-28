@@ -75,6 +75,25 @@ check "restart-review-broker still fails on it" 1 err \
   "workbench: the review broker did not open its socket; podman logs review-broker"
 rm "${PODMAN_STATE}/start-logs/review-broker"
 
+# The socket a stopped broker left is not taken for the new one's.
+gone review-broker
+python3 -c 'import socket, sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "${sock_dir}/review.sock"
+NO_REVIEW_SOCKET=1 run "${wb}" restart-review-broker
+check "a stale socket is removed, not waited on" 1 err \
+  "workbench: the review broker did not open its socket; podman logs review-broker"
+assert "it is gone" test ! -e "${sock_dir}/review.sock"
+# One that stops at once is not waited for.
+gone review-broker
+touch "${PODMAN_STATE}/dies/review-broker"
+run "${wb}" restart-review-broker
+check "a broker that stops at once is reported" 1 err \
+  "workbench: the review broker did not open its socket; podman logs review-broker"
+assert "without waiting out the fifty tries" test "$(grep -c 'podman logs review-broker' "${STUB_LOG}")" -le 2
+rm "${PODMAN_STATE}/dies/review-broker"
+gone review-broker
+run "${wb}" restart-review-broker
+check "and back" 0 out "workbench: review broker restarted"
+
 # A login but no image.
 gone review-broker
 rm "${PODMAN_STATE}/img/localhost_airlock-review-broker_local"

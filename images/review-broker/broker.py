@@ -35,7 +35,8 @@ path outside the tree), a tree holding a .codex path (Codex project
 configuration), and more than REVIEW_PER_HOUR reviews in an hour. One review
 runs at a time; a request waits for the one before it, up to REVIEW_TIMEOUT,
 and no more than MAX_WAITING wait at once. A request has READ_TIMEOUT
-seconds to arrive.
+seconds to arrive, and no more than MAX_CONNS connections are served at
+once: one over that is closed unread.
 
 Exit status codes in the reply:
   2    malformed request
@@ -80,6 +81,8 @@ WINDOW = 24
 # The login's credentials, by key, wherever they sit in auth.json.
 TOKEN_KEYS = frozenset({"access_token", "refresh_token", "id_token", "OPENAI_API_KEY"})
 MAX_WAITING = 4
+# Connections served at once, each a thread; one over it is closed unread.
+MAX_CONNS = 16
 READ_TIMEOUT = 60
 # How often a running review's login is looked at.
 POLL = 5
@@ -94,6 +97,7 @@ DISABLED = (
 
 _one_at_a_time = threading.Lock()
 _waiting = threading.BoundedSemaphore(MAX_WAITING)
+_conns = threading.BoundedSemaphore(MAX_CONNS)
 _started = collections.deque()
 _started_lock = threading.Lock()
 
@@ -339,6 +343,13 @@ def handle(req, rid):
 
 
 def serve(conn, rid):
+    try:
+        answer(conn, rid)
+    finally:
+        _conns.release()
+
+
+def answer(conn, rid):
     with conn:
         try:
             conn.settimeout(READ_TIMEOUT)
@@ -385,7 +396,16 @@ def main():
     while True:
         conn, _ = s.accept()
         n += 1
-        threading.Thread(target=serve, args=(conn, n), daemon=True).start()
+        if not _conns.acquire(blocking=False):
+            log("BUSY", n, "too many connections")
+            conn.close()
+            continue
+        try:
+            threading.Thread(target=serve, args=(conn, n), daemon=True).start()
+        except RuntimeError as e:
+            log("BUSY", n, repr(e))
+            _conns.release()
+            conn.close()
 
 
 if __name__ == "__main__":

@@ -316,6 +316,7 @@ case "$1" in
         case "${name}" in
           egress-proxy) echo "Accepting HTTP Socket connections" >"${d}/logs" ;;
           mirror-gate) echo "mirror-gate: listening on 8081" >"${d}/logs" ;;
+          review-broker) echo "review-broker: listening on /run/review-broker/review.sock" >"${d}/logs" ;;
         esac
       fi
       [ -f "${S}/dies/${name}" ] || touch "${d}/running"
