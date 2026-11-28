@@ -440,6 +440,75 @@ def test_serve_gives_up_on_a_request_that_never_arrives(env, monkeypatch, capsys
     assert "GONE 5 before the request arrived" in capsys.readouterr().out
 
 
+def test_serve_gives_a_trickling_client_a_deadline_in_all(env, monkeypatch, capsys):
+    monkeypatch.setattr(env.broker, "READ_TIMEOUT", 0.5)
+    a, b = socket.socketpair()
+    stop = threading.Event()
+
+    def trickle():
+        while not stop.is_set():
+            try:
+                b.send(b"x")
+            except OSError:
+                return
+            stop.wait(0.1)
+
+    t = threading.Thread(target=trickle)
+    t.start()
+    env.broker.answer(a, 6)
+    stop.set()
+    t.join()
+    b.close()
+    assert "GONE 6 before the request arrived" in capsys.readouterr().out
+
+
+def test_serve_takes_a_request_that_ends_without_a_newline(env):
+    a, b = socket.socketpair()
+    b.sendall(json.dumps(req(effort="max")).encode())
+    b.shutdown(socket.SHUT_WR)
+    env.broker.answer(a, 7)
+    assert json.loads(b.recv(65536))["rc"] == 126
+    b.close()
+
+
+def test_unpack_counts_what_the_files_would_take(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(env.broker, "MAX_BYTES", 10)
+    with pytest.raises(ValueError, match="come to more than"):
+        env.broker.unpack(base64.b64decode(tree({"a": b"0" * 11})), str(tmp_path / "t"))
+
+
+def test_unpack_refuses_a_sparse_file(env, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        tarfile.TarInfo, "issparse", lambda self: self.name == "src/a.py"
+    )
+    with pytest.raises(ValueError, match="a sparse file in the tree: src/a.py"):
+        env.broker.unpack(base64.b64decode(tree()), str(tmp_path / "t"))
+
+
+class Endless:
+    """A client that keeps sending, or one whose connection fails."""
+
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def settimeout(self, _t):
+        pass
+
+    def recv(self, _n):
+        if self.fail:
+            raise OSError("reset")
+        return b"x"
+
+
+def test_drain_stops_at_its_deadline(env, monkeypatch):
+    monkeypatch.setattr(env.broker, "READ_TIMEOUT", 0.05)
+    env.broker.drain(Endless())
+
+
+def test_drain_stops_on_a_failed_connection(env):
+    env.broker.drain(Endless(fail=True))
+
+
 def test_serve_logs_a_client_gone(env, capsys):
     class Conn:
         def __enter__(self):
@@ -451,8 +520,8 @@ def test_serve_logs_a_client_gone(env, capsys):
         def settimeout(self, _t):
             pass
 
-        def makefile(self, _mode):
-            return io.BytesIO((json.dumps(req(effort="max")) + "\n").encode())
+        def recv(self, _n):
+            return (json.dumps(req(effort="max")) + "\n").encode()
 
         def sendall(self, _data):
             raise OSError("gone")

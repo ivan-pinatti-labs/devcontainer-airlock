@@ -130,7 +130,13 @@ def unpack(data, dest):
     reviewer reads exactly the tree that was sent."""
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as tar:
         members = tar.getmembers()
+        # What the files would take once written, not what the archive
+        # takes: a sparse member declares a size it does not carry.
+        if sum(m.size for m in members) > MAX_BYTES:
+            raise ValueError(f"the tree's files come to more than REVIEW_MAX_BYTES ({MAX_BYTES})")
         for m in members:
+            if m.issparse():
+                raise ValueError(f"a sparse file in the tree: {m.name}")
             parts = m.name.split("/")
             if m.name.startswith("/") or ".." in parts:
                 raise ValueError(f"unsafe path in the tree: {m.name}")
@@ -342,6 +348,39 @@ def handle(req, rid):
         _one_at_a_time.release()
 
 
+def read_request(conn):
+    """The request line, read within READ_TIMEOUT seconds in all (not per
+    read, which a client sending a byte at a time would stretch for ever),
+    and at most MAX_LINE + 1 bytes of it."""
+    deadline = time.monotonic() + READ_TIMEOUT
+    buf = bytearray()
+    while b"\n" not in buf and len(buf) <= MAX_LINE:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError("the request did not arrive in time")
+        conn.settimeout(left)
+        chunk = conn.recv(min(1 << 20, MAX_LINE + 1 - len(buf)))
+        if not chunk:
+            break
+        buf += chunk
+    conn.settimeout(None)
+    return bytes(buf.split(b"\n", 1)[0] + b"\n" if b"\n" in buf else buf)
+
+
+def drain(conn):
+    """Read what is left of a refused request, for READ_TIMEOUT at most, so
+    closing does not reset the connection before the client reads the
+    refusal."""
+    deadline = time.monotonic() + READ_TIMEOUT
+    try:
+        while (left := deadline - time.monotonic()) > 0:
+            conn.settimeout(left)
+            if not conn.recv(1 << 20):
+                return
+    except OSError:
+        return
+
+
 def serve(conn, rid):
     try:
         answer(conn, rid)
@@ -352,11 +391,10 @@ def serve(conn, rid):
 def answer(conn, rid):
     with conn:
         try:
-            conn.settimeout(READ_TIMEOUT)
-            line = conn.makefile("rb").readline(MAX_LINE + 1)
-            conn.settimeout(None)
+            line = read_request(conn)
             if len(line) > MAX_LINE:
                 conn.sendall(json.dumps({"rc": 126, "out": "", "err": "review-broker: refused: request too large\n"}).encode())
+                drain(conn)
                 return
             req = json.loads(line)
             if not isinstance(req, dict):
