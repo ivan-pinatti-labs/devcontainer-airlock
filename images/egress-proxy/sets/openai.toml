@@ -1,2 +1,2 @@
-description = "OpenAI's API and login hosts alone, for a network that should reach Codex and nothing else. The workbench set already carries them for the workbenches. Opt in."
+description = "OpenAI's API and login hosts, the ones Codex reaches (all three already in the workbench set). The proxy allows these hosts to anything on the network, not to Codex alone, and a registration still gets workbench, github and ghcr beside it. Opt in."
 domains = ["api.openai.com", "auth.openai.com", "chatgpt.com"]
