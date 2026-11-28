@@ -273,12 +273,16 @@ def review(req, rid):
         keep = ("PATH", "LANG", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "SSL_CERT_FILE")
         env = {k: v for k, v in os.environ.items() if k in keep}
         env.update(HOME=home, CODEX_HOME=codex_home, TMPDIR=work)
-        rc, err = run_codex(req, tree, answer, env, os.path.join(codex_home, "auth.json"), login)
+        # Every token value the login held, before the run and at each look
+        # during it: a refresh replaces the stored one before the reply is
+        # checked, and a fragment of the old one must still be caught.
+        seen = login_values(login)
+        rc, err = run_codex(req, tree, answer, env, os.path.join(codex_home, "auth.json"), login, seen)
         out = ""
         if os.path.isfile(answer):
             with open(answer, encoding="utf-8", errors="replace") as f:
                 out = f.read()
-        secrets = login_values(login) + login_values(os.path.join(codex_home, "auth.json"))
+        secrets = seen + login_values(login) + login_values(os.path.join(codex_home, "auth.json"))
         # stderr goes back only when the review failed; when it did not,
         # it is not checked (Codex echoes the prompt there).
         if leaks(out, secrets) or (rc and leaks(err, secrets)):
@@ -297,7 +301,7 @@ def keep_login(src, login):
         log("LOGIN not saved:", e)
 
 
-def run_codex(req, tree, answer, env, auth, login):
+def run_codex(req, tree, answer, env, auth, login, seen):
     """Run the review: (status, stderr). A login Codex refreshes is copied
     back as soon as it changes, not only at the end, so a broker stopped
     mid review does not lose a rotated token."""
@@ -309,14 +313,14 @@ def run_codex(req, tree, answer, env, auth, login):
     )
     deadline = time.monotonic() + TIMEOUT
     pending = req["prompt"]
-    _running.update(auth=auth, login=login)
+    _running.update(auth=auth, login=login, proc=p)
     try:
-        return wait_codex(p, pending, deadline, auth, login)
+        return wait_codex(p, pending, deadline, auth, login, seen)
     finally:
         _running.clear()
 
 
-def wait_codex(p, pending, deadline, auth, login):
+def wait_codex(p, pending, deadline, auth, login, seen):
     while True:
         try:
             _, err = p.communicate(pending, timeout=min(POLL, max(deadline - time.monotonic(), 0)))
@@ -324,10 +328,13 @@ def wait_codex(p, pending, deadline, auth, login):
             return p.returncode, err
         except subprocess.TimeoutExpired:
             pending = None
-            keep_login(auth, login)
             if time.monotonic() >= deadline:
+                # Killed first, so no refresh lands after the last save.
                 stop(p)
+                keep_login(auth, login)
                 return 124, f"review-broker: the review took longer than {TIMEOUT}s\n"
+            keep_login(auth, login)
+            seen.extend(login_values(auth))
 
 
 def stop(p):
@@ -391,7 +398,9 @@ def read_request(conn):
         if not chunk:
             break
         buf += chunk
-    conn.settimeout(None)
+    # Replies are written under a timeout too, so a client that stops
+    # reading cannot hold its connection slot for ever.
+    conn.settimeout(READ_TIMEOUT)
     return bytes(buf.split(b"\n", 1)[0] + b"\n" if b"\n" in buf else buf)
 
 
@@ -428,7 +437,10 @@ def answer(conn, rid):
             if not isinstance(req, dict):
                 raise ValueError
         except ValueError:
-            conn.sendall(b'{"rc":2,"out":"","err":"review-broker: malformed request\\n"}')
+            try:
+                conn.sendall(b'{"rc":2,"out":"","err":"review-broker: malformed request\\n"}')
+            except OSError:
+                log("GONE", rid)
             return
         except OSError:
             log("GONE", rid, "before the request arrived")
@@ -448,6 +460,11 @@ def on_stop(_signum, _frame):
     """A stop (podman stop, restart-review-broker) saves a token the running
     review refreshed since the last look, before the tmpfs holding it goes."""
     if _running:
+        # The reviewer goes first, so no refresh lands after the save.
+        try:
+            os.killpg(_running["proc"].pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         keep_login(_running["auth"], _running["login"])
     log("review-broker: stopping")
     sys.exit(0)

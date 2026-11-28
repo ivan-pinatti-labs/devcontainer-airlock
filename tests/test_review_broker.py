@@ -12,7 +12,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import re
+import signal
 import socket
 import stat
 import subprocess
@@ -69,8 +71,13 @@ elif do == "hang":
     time.sleep(30)
 elif do == "hang-child":
     import subprocess, time
-    subprocess.Popen(["sleep", "30"])
+    child = subprocess.Popen(["sleep", "30"])
+    open(os.path.join(here, "child.pid"), "w").write(str(child.pid))
     time.sleep(30)
+elif do == "refresh-leak":
+    old = json.load(open(auth))["tokens"]["access_token"]
+    json.dump({{"tokens": {{"access_token": {refreshed!r}}}}}, open(auth, "w"))
+    open(answer, "w").write("token: " + old[5:40])
 else:
     open(answer, "w").write("Looks fine.\\n\\n**VERDICT: CLEAN**\\n")
 """
@@ -302,7 +309,60 @@ def test_a_timeout_kills_what_the_reviewer_started(env, monkeypatch):
     monkeypatch.setattr(env.broker, "POLL", 0.2)
     start = time.monotonic()
     r = env.broker.handle(req(), 1)
-    assert r["rc"] == 124 and time.monotonic() - start < 5
+    child = int((env.tmp / "child.pid").read_text())
+    try:
+        assert r["rc"] == 124 and time.monotonic() - start < 5
+        assert gone(child)
+    finally:
+        if not gone(child, 0):
+            os.kill(child, signal.SIGKILL)
+
+
+def gone(pid, wait=2.0):
+    """Whether process pid has exited (or is a zombie), looking for wait
+    seconds at most."""
+    end = time.monotonic() + wait
+    while True:
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                if f.read().rsplit(")", 1)[1].split()[0] == "Z":
+                    return True
+        except FileNotFoundError:
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.05)
+
+
+def test_a_timeout_saves_the_login_after_the_kill(env, monkeypatch):
+    env.do("hang")
+    monkeypatch.setattr(env.broker, "TIMEOUT", 0)
+    order = []
+    monkeypatch.setattr(
+        env.broker, "stop", lambda p: (order.append("stop"), p.kill(), p.wait())
+    )
+    monkeypatch.setattr(env.broker, "keep_login", lambda *_: order.append("save"))
+    assert env.broker.handle(req(), 1)["rc"] == 124
+    assert order == ["stop", "save"]
+
+
+def test_a_reply_holding_the_login_from_before_a_refresh_is_withheld(env):
+    env.do("refresh-leak")
+    r = env.broker.handle(req(), 1)
+    assert r["rc"] == 126 and "withheld" in r["err"]
+    assert REFRESHED in (env.login / "auth.json").read_text()
+
+
+def test_tokens_seen_mid_review_are_kept_for_the_check(env, monkeypatch):
+    env.do("slow-refresh")
+    monkeypatch.setattr(env.broker, "POLL", 0.2)
+    seen = []
+    real = env.broker.run_codex
+    monkeypatch.setattr(
+        env.broker, "run_codex", lambda *a: (seen.append(a[-1]), real(*a))[1]
+    )
+    assert env.broker.handle(req(), 1)["rc"] == 0
+    assert any(REFRESHED[-30:] in v for v in seen[0])
 
 
 def test_stop_gives_up_on_pipes_held_open(env, monkeypatch):
@@ -706,18 +766,62 @@ def test_serve_gives_its_slot_back(env, monkeypatch):
     assert env.broker._conns.acquire(blocking=False)
 
 
-@pytest.mark.parametrize("running", [True, False])
-def test_a_stop_saves_a_refreshed_login(env, monkeypatch, capsys, running):
+@pytest.mark.parametrize("running", ["alive", "exited", None])
+def test_a_stop_kills_the_reviewer_then_saves_a_refreshed_login(
+    env, monkeypatch, capsys, running
+):
     copy = env.tmp / "copy.json"
     copy.write_text(json.dumps({"tokens": {"access_token": REFRESHED}}))
+    p = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True
+    )
+    if running == "exited":
+        p.kill()
+        p.wait()
     if running:
         monkeypatch.setitem(env.broker._running, "auth", str(copy))
         monkeypatch.setitem(env.broker._running, "login", str(env.login / "auth.json"))
-    with pytest.raises(SystemExit) as e:
-        env.broker.on_stop(15, None)
-    assert e.value.code == 0
-    assert (REFRESHED in (env.login / "auth.json").read_text()) == running
-    assert "review-broker: stopping" in capsys.readouterr().out
+        monkeypatch.setitem(env.broker._running, "proc", p)
+    try:
+        with pytest.raises(SystemExit) as e:
+            env.broker.on_stop(15, None)
+        assert e.value.code == 0
+        assert (REFRESHED in (env.login / "auth.json").read_text()) == bool(running)
+        assert "review-broker: stopping" in capsys.readouterr().out
+        if running == "alive":
+            assert p.wait(timeout=5) == -signal.SIGKILL
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_replies_are_written_under_a_timeout(env):
+    a, b = socket.socketpair()
+    b.sendall(b"x\n")
+    with a, b:
+        env.broker.read_request(a)
+        assert a.gettimeout() == env.broker.READ_TIMEOUT
+
+
+def test_a_malformed_request_from_a_client_gone_is_logged(env, capsys):
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def recv(self, _):
+            return b"not json\n"
+
+        def sendall(self, _):
+            raise BrokenPipeError
+
+    env.broker.answer(Conn(), 9)
+    assert "GONE 9" in capsys.readouterr().out
 
 
 def test_no_review_running_after_one_ends(env):

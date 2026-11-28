@@ -1671,6 +1671,8 @@ cmd_restart_ssh_agent() {
 
 cmd_restart_review_broker() {
   review_login_ok || die "the review broker has no Codex login yet: host/workbench review-login"
+  podman image exists "${REVIEW_IMAGE}" ||
+    die "no ${REVIEW_IMAGE}, so no review broker: host/workbench build or pull"
   restart_shared review-broker
   echo "workbench: review broker restarted"
 }

@@ -101,5 +101,10 @@ run "${wb}" helpers
 check "no image, no broker, and how to get one" 0 err \
   "workbench: no localhost/airlock-review-broker:local, so no review broker; host/workbench build or pull, then restart-review-broker"
 refute "none is started" "--name review-broker"
+podman_calls_before=$(wc -l <"${STUB_LOG}")
+run "${wb}" restart-review-broker
+check "restart-review-broker fails on it" 1 err \
+  "workbench: no localhost/airlock-review-broker:local, so no review broker: host/workbench build or pull"
+assert "before removing anything" test -z "$(tail -n +"$((podman_calls_before + 1))" "${STUB_LOG}" | grep -E 'rm -f review-broker|stop review-broker')"
 
 finish
