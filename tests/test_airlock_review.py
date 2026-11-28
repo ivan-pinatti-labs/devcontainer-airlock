@@ -155,6 +155,16 @@ def test_main_sends_the_prompt_and_tree_and_prints_the_answer(
     assert "a.txt" in members(base64.b64decode(b.req["tree"]))
 
 
+def test_main_with_a_reply_that_is_not_json(
+    client, repo, tmp_path, monkeypatch, capsys
+):
+    sock = tmp_path / "review.sock"
+    Broker(sock, b"<html>")
+    monkeypatch.setenv("REVIEW_BROKER_SOCKET", str(sock))
+    assert run_main(client, monkeypatch, [], "p") == 1
+    assert "not JSON" in capsys.readouterr().err
+
+
 def test_main_with_an_empty_reply(client, repo, tmp_path, monkeypatch, capsys):
     sock = tmp_path / "review.sock"
     Broker(sock, b"")

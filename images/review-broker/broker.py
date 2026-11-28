@@ -22,22 +22,26 @@ reviewer, and nothing it leaves behind reaches the next review. When Codex
 refreshes its login during a review, the new one is copied back to the login
 folder.
 
-Codex's read only sandbox stops writes and the network, not reads, and the
-login is a file Codex reads. So a reply that holds any part of it (any 24
-characters of any of its values) is withheld: a diff carrying instructions
-could ask the reviewer to print it.
+What keeps the login from the reviewer's shell is Codex's own sandbox, given
+a permissions profile (config.toml in that CODEX_HOME, default_permissions)
+that reads only the system folders, Codex's own folder and the tree: not
+CODEX_HOME, not the login folder, and no network. A reply that holds any 24
+characters of a token from the login is withheld as well, a second line in
+case a shell ever reads more than the profile says.
 
 Refused: a reviewer other than codex, a model or effort not allowed, a tree
 over REVIEW_MAX_BYTES or with an unsafe member (a link, an absolute path, a
 path outside the tree), a tree holding a .codex path (Codex project
 configuration), and more than REVIEW_PER_HOUR reviews in an hour. One review
-runs at a time; a request waits for the one before it, up to REVIEW_TIMEOUT.
+runs at a time; a request waits for the one before it, up to REVIEW_TIMEOUT,
+and no more than MAX_WAITING wait at once. A request has READ_TIMEOUT
+seconds to arrive.
 
 Exit status codes in the reply:
   2    malformed request
   124  the review, or the wait for the one before it, took longer than
         REVIEW_TIMEOUT seconds
-  125  the broker cannot review: no login, or the tree could not be unpacked
+  125  the broker cannot review: no login, or an error of its own (logged)
   126  refused (the message says why), or the reply was withheld
   any  otherwise, the exit status of the reviewer itself
 """
@@ -59,6 +63,9 @@ import time
 SOCK_DIR = os.environ.get("REVIEW_BROKER_DIR", "/run/review-broker")
 LOGIN_DIR = os.environ.get("REVIEW_LOGIN_DIR", "/var/lib/review-broker/codex")
 CODEX = os.environ.get("REVIEW_CODEX", "/usr/local/bin/codex")
+# Codex's own folder (bin/codex in it), which its sandbox has to read: the
+# sandbox runs Codex itself again inside.
+CODEX_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(CODEX)))
 PER_HOUR = int(os.environ.get("REVIEW_PER_HOUR", "10"))
 TIMEOUT = int(os.environ.get("REVIEW_TIMEOUT", "900"))
 MAX_BYTES = int(os.environ.get("REVIEW_MAX_BYTES", str(50 * 1024 * 1024)))
@@ -68,8 +75,14 @@ EFFORTS = frozenset({"low", "medium", "high"})
 REVIEWERS = frozenset({"codex"})
 # Base64 grows the tree by a third; the prompt carries the diff.
 MAX_LINE = MAX_BYTES * 4 // 3 + 16 * 1024 * 1024
-# How much of a login value a reply may not hold.
+# How much of a login token a reply may not hold.
 WINDOW = 24
+# The login's credentials, by key, wherever they sit in auth.json.
+TOKEN_KEYS = frozenset({"access_token", "refresh_token", "id_token", "OPENAI_API_KEY"})
+MAX_WAITING = 4
+READ_TIMEOUT = 60
+# How often a running review's login is looked at.
+POLL = 5
 # The Codex features that reach the network or other programs, or carry
 # memory. Its shell stays, to read the code, inside the read only sandbox.
 DISABLED = (
@@ -80,6 +93,7 @@ DISABLED = (
 )
 
 _one_at_a_time = threading.Lock()
+_waiting = threading.BoundedSemaphore(MAX_WAITING)
 _started = collections.deque()
 _started_lock = threading.Lock()
 
@@ -90,6 +104,9 @@ def log(*words):
 
 def check(req):
     """Why the request is refused, or None."""
+    for key in ("reviewer", "model", "effort"):
+        if not isinstance(req.get(key, ""), str):
+            return f"{key} is not a string"
     if req.get("reviewer") not in REVIEWERS:
         return f"reviewer {req.get('reviewer')!r} is not served here (only: {', '.join(sorted(REVIEWERS))})"
     if req.get("model", "") not in MODELS:
@@ -121,21 +138,28 @@ def unpack(data, dest):
 
 
 def login_values(path):
-    """Every string in the login file long enough to be a credential."""
+    """The secret parts of the login's tokens: the whole of an opaque one,
+    and of a JWT its payload and signature, not the header every JWT of the
+    same kind shares. Nothing when the file is gone or half written."""
     out = []
 
     def walk(v):
-        if isinstance(v, str) and len(v) >= WINDOW:
-            out.append(v)
-        elif isinstance(v, dict):
-            for x in v.values():
-                walk(x)
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if k in TOKEN_KEYS and isinstance(x, str):
+                    parts = x.split(".")
+                    out.extend(p for p in (parts[1:] if len(parts) == 3 else [x]) if len(p) >= WINDOW)
+                else:
+                    walk(x)
         elif isinstance(v, list):
             for x in v:
                 walk(x)
 
-    with open(path, encoding="utf-8") as f:
-        walk(json.load(f))
+    try:
+        with open(path, encoding="utf-8") as f:
+            walk(json.load(f))
+    except (OSError, ValueError):
+        pass
     return out
 
 
@@ -157,9 +181,21 @@ def over_rate():
         return False
 
 
+def codex_config(tree):
+    """config.toml for the review's CODEX_HOME: the permissions profile its
+    shell runs under. No --sandbox on the command line, which could stand in
+    for the profile."""
+    q = json.dumps
+    return (
+        'default_permissions = "review"\n'
+        "[permissions.review.filesystem]\n"
+        f'":minimal" = "read"\n{q(CODEX_ROOT)} = "read"\n{q(tree)} = "read"\n'
+    )
+
+
 def codex_command(req, tree, answer):
     cmd = [
-        CODEX, "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
+        CODEX, "exec", "--skip-git-repo-check", "--ephemeral",
         "--cd", tree, "--output-last-message", answer,
         "-c", f'model_reasoning_effort="{req["effort"]}"',
         "-c", "project_doc_max_bytes=0",
@@ -209,40 +245,65 @@ def review(req, rid):
         os.makedirs(codex_home, mode=0o700)
         try:
             unpack(data, tree)
-        except (ValueError, tarfile.TarError) as e:
+        except (ValueError, OSError, tarfile.TarError) as e:
             return {"rc": 126, "out": "", "err": f"review-broker: refused: {e}\n"}
         # Counted here, once the request is one that would really run.
         if over_rate():
             log("REFUSE", rid, "hourly cap")
             return {"rc": 126, "out": "", "err": f"review-broker: refused: {PER_HOUR} reviews in the last hour (REVIEW_PER_HOUR)\n"}
         shutil.copy2(login, os.path.join(codex_home, "auth.json"))
+        with open(os.path.join(codex_home, "config.toml"), "w", encoding="utf-8") as f:
+            f.write(codex_config(tree))
         answer = os.path.join(work, "answer.md")
         keep = ("PATH", "LANG", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "SSL_CERT_FILE")
         env = {k: v for k, v in os.environ.items() if k in keep}
         env.update(HOME=home, CODEX_HOME=codex_home, TMPDIR=work)
-        try:
-            p = subprocess.run(
-                codex_command(req, tree, answer), input=req["prompt"], env=env,
-                cwd=tree, capture_output=True, text=True, timeout=TIMEOUT,
-            )
-            rc, err = p.returncode, p.stderr
-        except subprocess.TimeoutExpired:
-            rc, err = 124, f"review-broker: the review took longer than {TIMEOUT}s\n"
-        try:
-            save_login(os.path.join(codex_home, "auth.json"), login)
-        except OSError as e:
-            log("LOGIN not saved:", e)
+        rc, err = run_codex(req, tree, answer, env, os.path.join(codex_home, "auth.json"), login)
         out = ""
         if os.path.isfile(answer):
             with open(answer, encoding="utf-8", errors="replace") as f:
                 out = f.read()
         secrets = login_values(login) + login_values(os.path.join(codex_home, "auth.json"))
-        if leaks(out, secrets) or leaks(err, secrets):
+        # stderr goes back only when the review failed; when it did not,
+        # it is not checked (Codex echoes the prompt there).
+        if leaks(out, secrets) or (rc and leaks(err, secrets)):
             return {"rc": 126, "out": "", "err": "review-broker: the reply held part of the reviewer's login and was withheld\n"}
         # Codex's own log on stderr is long; its tail says what went wrong.
         return {"rc": rc, "out": out, "err": err[-4000:] if rc else ""}
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def keep_login(src, login):
+    """save_login, logging rather than failing."""
+    try:
+        save_login(src, login)
+    except OSError as e:
+        log("LOGIN not saved:", e)
+
+
+def run_codex(req, tree, answer, env, auth, login):
+    """Run the review: (status, stderr). A login Codex refreshes is copied
+    back as soon as it changes, not only at the end, so a broker stopped
+    mid review does not lose a rotated token."""
+    p = subprocess.Popen(
+        codex_command(req, tree, answer), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE, env=env, cwd=tree, text=True,
+    )
+    deadline = time.monotonic() + TIMEOUT
+    pending = req["prompt"]
+    while True:
+        try:
+            _, err = p.communicate(pending, timeout=min(POLL, max(deadline - time.monotonic(), 0)))
+            keep_login(auth, login)
+            return p.returncode, err
+        except subprocess.TimeoutExpired:
+            pending = None
+            keep_login(auth, login)
+            if time.monotonic() >= deadline:
+                p.kill()
+                p.communicate()
+                return 124, f"review-broker: the review took longer than {TIMEOUT}s\n"
 
 
 def last_line(text):
@@ -258,7 +319,14 @@ def handle(req, rid):
         return {"rc": 126, "out": "", "err": f"review-broker: refused: {why}\n"}
     log("REVIEW", rid, req["reviewer"], req.get("model") or "default", req["effort"],
         f"prompt={len(req['prompt'])}", f"tree={len(req['tree']) * 3 // 4}")
-    if not _one_at_a_time.acquire(timeout=TIMEOUT):
+    if not _waiting.acquire(blocking=False):
+        log("BUSY", rid, "queue full")
+        return {"rc": 126, "out": "", "err": f"review-broker: refused: {MAX_WAITING} requests already wait\n"}
+    try:
+        got = _one_at_a_time.acquire(timeout=TIMEOUT)
+    finally:
+        _waiting.release()
+    if not got:
         log("BUSY", rid)
         return {"rc": 124, "out": "", "err": f"review-broker: the review before this one still runs after {TIMEOUT}s\n"}
     try:
@@ -273,7 +341,9 @@ def handle(req, rid):
 def serve(conn, rid):
     with conn:
         try:
+            conn.settimeout(READ_TIMEOUT)
             line = conn.makefile("rb").readline(MAX_LINE + 1)
+            conn.settimeout(None)
             if len(line) > MAX_LINE:
                 conn.sendall(json.dumps({"rc": 126, "out": "", "err": "review-broker: refused: request too large\n"}).encode())
                 return
@@ -283,7 +353,14 @@ def serve(conn, rid):
         except ValueError:
             conn.sendall(b'{"rc":2,"out":"","err":"review-broker: malformed request\\n"}')
             return
-        reply = handle(req, rid)
+        except OSError:
+            log("GONE", rid, "before the request arrived")
+            return
+        try:
+            reply = handle(req, rid)
+        except Exception as e:  # noqa: BLE001 # whatever it was, the client gets an answer
+            log("ERROR", rid, repr(e))
+            reply = {"rc": 125, "out": "", "err": f"review-broker: failed: {e!r}\n"}
         try:
             conn.sendall(json.dumps(reply).encode())
         except OSError:

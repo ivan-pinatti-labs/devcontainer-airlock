@@ -753,16 +753,24 @@ nothing else, so no configuration, instruction file, skill, MCP server or
 memory reaches it, and nothing it leaves reaches the next review. A tree
 holding a `.codex` path (Codex project configuration), a link, a device or a
 path outside itself is refused. A login Codex refreshed during the review is
-copied back. The command is `codex exec --sandbox read-only --ephemeral`
+copied back. The command is `codex exec --ephemeral` under the profile below,
 with project docs, developer instructions, skills and web search off, and
 memories, apps, plugins, the browser and computer use disabled.
 
-**The login stays in the broker.** Codex's sandbox stops writes and the
-network, not reads, and the login is a file Codex reads, so a diff carrying
-instructions could ask the reviewer to print it. A reply holding any 24
-characters of any value in the login is withheld. The broker runs one review
-at a time, at most `WORKBENCH_REVIEW_PER_HOUR` an hour (default 10), each up
-to 15 minutes, with trees up to 50 MB, and logs each one with its size,
+**The login stays in the broker.** Codex's read only sandbox stops writes
+and the network but not reads, and a diff carrying instructions could ask
+the reviewer to print its login. So the review's `CODEX_HOME` holds a
+`config.toml` giving Codex a permissions profile (`default_permissions`)
+whose shell reads only the system folders, Codex's own folder and the tree:
+not `CODEX_HOME` and not the login folder, and no network (measured with
+`codex sandbox` under that configuration, 2026-11-28; `codex exec` reading
+it the same way is measured by the first live review). A reply holding any 24 characters of a token
+from the login is withheld as well, a second line rather than the
+boundary, since a reworded token would pass it. A login Codex refreshes is
+copied back within seconds, so stopping the broker mid review loses no
+rotated token. The broker runs one review
+at a time, with at most four waiting, at most `WORKBENCH_REVIEW_PER_HOUR` an
+hour (default 10), each up to 15 minutes, with trees up to 50 MB, and logs each one with its size,
 model, effort, duration and verdict line: `podman logs review-broker`.
 
 **Its network.** The broker is on a network of its own, registered with the
@@ -858,7 +866,7 @@ What a proxy allows is built from **egress sets**, one per service, in
 | `aws` | AWS service APIs, and ECR Public with its CloudFront download host | AWS's ranges from `ip-ranges.amazonaws.com`, enforced |
 | `sonarqube-cloud` | SonarQube for IDE in connected mode: SonarQube Cloud (EU region), its scanner and events hosts, SonarSource's analyzer downloads | |
 | `claude-connectors` | Claude Code's claude.ai connectors, through Anthropic's MCP proxy: every connector the account has linked, not one alone | |
-| `openai` | OpenAI's API and login hosts, the ones Codex reaches (all three already in `workbench`). Like every set it allows hosts, not one client, and a registration still gets `workbench`, `github` and `ghcr` beside it | |
+| `openai` | OpenAI's API and login hosts, the ones Codex reaches (all three already in `workbench`). Like every set it allows hosts, not one client, and a registration still gets `workbench`, `github` and `ghcr` beside it, unless it says `always=no`, as the review broker's does | |
 
 `podman run --rm localhost/airlock-egress-proxy:local egress-refresh
 --list` prints them with their descriptions. A repository lists the sets it

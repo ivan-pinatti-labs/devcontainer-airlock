@@ -110,7 +110,10 @@ def main():
     except OSError as e:
         sys.stderr.write(f"airlock-review: the review broker is not reachable at {path} ({e.strerror})\n")
         sys.exit(127)
-    reply = json.loads(raw or b'{"rc":1,"out":"","err":"airlock-review: empty reply from the broker\\n"}')
+    try:
+        reply = json.loads(raw or b'{"rc":1,"out":"","err":"airlock-review: empty reply from the broker\\n"}')
+    except ValueError:
+        reply = {"rc": 1, "out": "", "err": "airlock-review: the broker's reply is not JSON\n"}
     sys.stdout.write(reply["out"])
     sys.stderr.write(reply["err"])
     sys.exit(reply["rc"])

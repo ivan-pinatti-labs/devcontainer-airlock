@@ -79,6 +79,11 @@ check "--review mounts the review broker's folder, read only" 0 calls \
 check "and still no network" 0 calls "--network=none --http-proxy=false"
 run "${l2}" make test
 refute "without --review, no review broker" calls "/run/review-broker"
+RUN_STATUS=125 run "${l2}" --review -- make cross-review
+check "a podman failure under --review points at an old engine" 125 err \
+  "l2: if podman could not mount /run/review-broker, this workspace's engine predates the review broker"
+RUN_STATUS=125 run "${l2}" make test
+refute "not without --review" err "predates the review broker"
 
 echo "ghcr.io/example/project-l2:3" >"${repo}/.devcontainer/l2-image"
 run "${l2}" true

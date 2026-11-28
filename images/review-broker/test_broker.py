@@ -30,6 +30,7 @@ rec = {{"argv": argv, "stdin": sys.stdin.read(), "home": os.environ["CODEX_HOME"
         "home_files": sorted(os.listdir(os.environ["CODEX_HOME"])), "cwd": os.getcwd(),
         "tree_files": sorted(os.listdir("."))}}
 json.dump(rec, open({os.path.join(work, "record.json")!r}, "w"))
+open({os.path.join(work, "config.toml")!r}, "w").write(open(os.path.join(os.environ["CODEX_HOME"], "config.toml")).read())
 answer = argv[argv.index("--output-last-message") + 1]
 do = open({os.path.join(work, "do")!r}).read() if os.path.exists({os.path.join(work, "do")!r}) else ""
 text = "No problems found.\\n\\nVERDICT: CLEAN\\n"
@@ -91,7 +92,10 @@ r = handle(req(), 1)
 expect("a review returns the answer", r["rc"] == 0 and r["out"].rstrip().endswith("VERDICT: CLEAN"))
 rec = record()
 argv = rec["argv"]
-expect("read only sandbox", argv[argv.index("--sandbox") + 1] == "read-only")
+expect("no --sandbox to stand in for the profile", "--sandbox" not in argv)
+config = open(os.path.join(work, "config.toml")).read()
+expect("the permissions profile is the default", 'default_permissions = "review"' in config)
+expect("its shell reads the tree, not Codex's home", f'"{rec["cwd"]}" = "read"' in config and ".codex" not in config)
 expect("ephemeral", "--ephemeral" in argv)
 expect("no project docs", "project_doc_max_bytes=0" in argv)
 expect("no developer instructions", 'developer_instructions=""' in argv)
@@ -100,7 +104,7 @@ expect("no web search", 'web_search="disabled"' in argv)
 expect("memories off", "memories" in argv and argv[argv.index("memories") - 1] == "--disable")
 expect("the effort asked for", 'model_reasoning_effort="medium"' in argv)
 expect("the prompt on standard input", rec["stdin"] == "Review this.\n+diff\n")
-expect("a fresh Codex home holding only the login", rec["home_files"] == ["auth.json"])
+expect("a fresh Codex home holding only the login and the profile", rec["home_files"] == ["auth.json", "config.toml"])
 expect("the reviewer runs in the tree", rec["tree_files"] == ["README.md", "src"])
 expect("nothing left behind", not os.path.exists(rec["cwd"]))
 

@@ -63,9 +63,16 @@ gone review-broker
 rm -f "${sock_dir}/review.sock"
 echo "review-broker: boom" >"${PODMAN_STATE}/start-logs/review-broker"
 NO_REVIEW_SOCKET=1 run "${wb}" helpers
-check "a broker that opens no socket is reported" 1 err \
+check "a broker that opens no socket is reported" 0 err \
   "workbench: the review broker did not open its socket; podman logs review-broker"
-check "with its last log lines" 1 err "review-broker: boom"
+check "with its last log lines" 0 err "review-broker: boom"
+check "and the other helpers start anyway" 0 err \
+  "workbench: the review broker did not start, so l2 --review has none; podman logs review-broker"
+gone review-broker
+echo "review-broker: boom" >"${PODMAN_STATE}/start-logs/review-broker"
+NO_REVIEW_SOCKET=1 run "${wb}" restart-review-broker
+check "restart-review-broker still fails on it" 1 err \
+  "workbench: the review broker did not open its socket; podman logs review-broker"
 rm "${PODMAN_STATE}/start-logs/review-broker"
 
 # A login but no image.

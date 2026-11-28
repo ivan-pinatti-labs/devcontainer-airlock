@@ -15,7 +15,6 @@ import json
 import re
 import socket
 import stat
-import subprocess
 import sys
 import tarfile
 import threading
@@ -36,6 +35,7 @@ record = {{
     "argv": argv, "stdin": sys.stdin.read(), "env": dict(os.environ),
     "home_files": sorted(os.listdir(os.environ["CODEX_HOME"])),
     "cwd": os.getcwd(), "tree_files": sorted(os.listdir(".")),
+    "config": open(os.path.join(os.environ["CODEX_HOME"], "config.toml")).read(),
 }}
 json.dump(record, open(os.path.join(here, "record.json"), "w"))
 answer = argv[argv.index("--output-last-message") + 1]
@@ -54,6 +54,17 @@ elif do == "fail":
     sys.exit(3)
 elif do == "silent":
     pass
+elif do == "echo-err":
+    sys.stderr.write(json.load(open(auth))["tokens"]["access_token"])
+    open(answer, "w").write("VERDICT: CLEAN\\n")
+elif do == "slow-refresh":
+    import time
+    json.dump({{"tokens": {{"access_token": {refreshed!r}}}}}, open(auth, "w"))
+    time.sleep(1)
+    open(answer, "w").write("VERDICT: CLEAN\\n")
+elif do == "hang":
+    import time
+    time.sleep(30)
 else:
     open(answer, "w").write("Looks fine.\\n\\n**VERDICT: CLEAN**\\n")
 """
@@ -124,13 +135,12 @@ def test_a_review_runs_blind_and_returns_the_answer(env, capsys):
     assert r == {"rc": 0, "out": "Looks fine.\n\n**VERDICT: CLEAN**\n", "err": ""}
     rec = env.record()
     argv = rec["argv"]
-    assert argv[:5] == [
-        "exec",
-        "--sandbox",
-        "read-only",
-        "--skip-git-repo-check",
-        "--ephemeral",
-    ]
+    assert argv[:3] == ["exec", "--skip-git-repo-check", "--ephemeral"]
+    assert "--sandbox" not in argv
+    assert rec["config"] == (
+        'default_permissions = "review"\n[permissions.review.filesystem]\n'
+        f'":minimal" = "read"\n"{env.broker.CODEX_ROOT}" = "read"\n"{rec["cwd"]}" = "read"\n'
+    )
     for flag in (
         "project_doc_max_bytes=0",
         'developer_instructions=""',
@@ -144,7 +154,7 @@ def test_a_review_runs_blind_and_returns_the_answer(env, capsys):
     assert argv[-1] == "-"
     assert not any(a.startswith("model=") for a in argv)
     assert rec["stdin"] == "Review.\n+diff\n"
-    assert rec["home_files"] == ["auth.json"]
+    assert rec["home_files"] == ["auth.json", "config.toml"]
     assert rec["tree_files"] == ["README.md", "src"]
     assert rec["env"]["HTTPS_PROXY"] == "http://proxy:8888"
     assert "SECRET_OF_OURS" not in rec["env"]
@@ -270,13 +280,85 @@ def test_no_answer_is_an_empty_one(env, capsys):
     assert re.search(r"^DONE 1 rc=0 \d+s -$", capsys.readouterr().out, re.MULTILINE)
 
 
-def test_a_review_that_takes_too_long(env, monkeypatch):
-    def slow(*_a, **_k):
-        raise subprocess.TimeoutExpired("codex", 1)
-
-    monkeypatch.setattr(env.broker.subprocess, "run", slow)
+def test_a_review_that_takes_too_long_is_killed(env, monkeypatch):
+    env.do("hang")
+    monkeypatch.setattr(env.broker, "TIMEOUT", 1)
+    monkeypatch.setattr(env.broker, "POLL", 0.2)
     r = env.broker.handle(req(), 1)
-    assert r["rc"] == 124 and "longer than" in r["err"]
+    assert r["rc"] == 124 and "longer than 1s" in r["err"]
+
+
+def test_a_login_refreshed_mid_review_is_saved_while_it_runs(env, monkeypatch, capsys):
+    env.do("slow-refresh")
+    monkeypatch.setattr(env.broker, "POLL", 0.2)
+    assert env.broker.handle(req(), 1)["rc"] == 0
+    assert REFRESHED in (env.login / "auth.json").read_text()
+    assert capsys.readouterr().out.count("LOGIN refreshed") == 1
+
+
+def test_stderr_of_a_review_that_worked_is_not_checked(env):
+    env.do("echo-err")
+    assert env.broker.handle(req(), 1) == {
+        "rc": 0,
+        "out": "VERDICT: CLEAN\n",
+        "err": "",
+    }
+
+
+@pytest.mark.parametrize(
+    ("login", "want"),
+    [
+        (
+            {"tokens": {"id_token": ".".join(["H" * 30, "P" * 30, "S" * 30])}},
+            ["P" * 30, "S" * 30],
+        ),
+        (
+            {
+                "OPENAI_API_KEY": "sk-" + "k" * 30,  # pragma: allowlist secret
+                "last_refresh": "2026-11-28T00:00:00.000000000Z",
+                "tokens": {"account_id": "u" * 36, "refresh_token": "short"},
+            },
+            ["sk-" + "k" * 30],
+        ),
+        ([{"tokens": {"access_token": TOKEN}}, 3], [TOKEN]),
+    ],
+)
+def test_only_the_tokens_are_secrets(env, login, want):
+    (env.login / "auth.json").write_text(json.dumps(login))
+    assert env.broker.login_values(str(env.login / "auth.json")) == want
+
+
+@pytest.mark.parametrize("text", [None, "{half"])
+def test_a_login_gone_or_half_written_has_no_secrets(env, text):
+    path = env.login / "auth.json"
+    if text is None:
+        path.unlink()
+    else:
+        path.write_text(text)
+    assert env.broker.login_values(str(path)) == []
+
+
+@pytest.mark.parametrize("key", ["reviewer", "model", "effort"])
+def test_a_field_that_is_not_a_string(env, key):
+    r = env.broker.handle(req(**{key: []}), 1)
+    assert r["rc"] == 126 and f"{key} is not a string" in r["err"]
+
+
+def test_a_full_queue_is_refused(env, monkeypatch, capsys):
+    monkeypatch.setattr(env.broker, "_waiting", threading.BoundedSemaphore(1))
+    env.broker._waiting.acquire()
+    r = env.broker.handle(req(), 2)
+    assert r["rc"] == 126 and "already wait" in r["err"]
+    assert "BUSY 2 queue full" in capsys.readouterr().out
+
+
+def test_a_tree_that_cannot_be_written_is_refused(env, monkeypatch):
+    def fail(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(env.broker.tarfile.TarFile, "extractall", fail)
+    r = env.broker.handle(req(), 1)
+    assert r["rc"] == 126 and "disk full" in r["err"]
 
 
 def test_the_hourly_cap_counts_only_reviews_that_ran(env, monkeypatch):
@@ -340,6 +422,24 @@ def test_serve_refuses_a_request_too_large(env, monkeypatch):
     assert serve(env.broker, b'{"reviewer": "codex", "x": 1}\n')["rc"] == 126
 
 
+def test_serve_answers_an_error_of_its_own(env, monkeypatch, capsys):
+    def boom(*_):
+        raise RuntimeError("bad state")
+
+    monkeypatch.setattr(env.broker, "handle", boom)
+    r = serve(env.broker, (json.dumps(req()) + "\n").encode())
+    assert r["rc"] == 125 and "bad state" in r["err"]
+    assert "ERROR 9 RuntimeError('bad state')" in capsys.readouterr().out
+
+
+def test_serve_gives_up_on_a_request_that_never_arrives(env, monkeypatch, capsys):
+    monkeypatch.setattr(env.broker, "READ_TIMEOUT", 0.2)
+    a, b = socket.socketpair()
+    env.broker.serve(a, 5)
+    b.close()
+    assert "GONE 5 before the request arrived" in capsys.readouterr().out
+
+
 def test_serve_logs_a_client_gone(env, capsys):
     class Conn:
         def __enter__(self):
@@ -347,6 +447,9 @@ def test_serve_logs_a_client_gone(env, capsys):
 
         def __exit__(self, *_):
             return False
+
+        def settimeout(self, _t):
+            pass
 
         def makefile(self, _mode):
             return io.BytesIO((json.dumps(req(effort="max")) + "\n").encode())

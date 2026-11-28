@@ -254,6 +254,11 @@ fi
 before="$(snapshot)"
 status=0
 podman "${args[@]}" "${envs[@]}" "${image}" "$@" || status=$?
+# 125 is podman's own failure; with --review, the likely one is an engine
+# started before the review broker existed, which has no folder to mount.
+if [[ "${review}" = true && "${status}" -eq 125 ]]; then
+  echo "l2: if podman could not mount /run/review-broker, this workspace's engine predates the review broker; on the host: host/workbench down, then up" >&2
+fi
 after="$(snapshot)"
 if [[ "${before}" != "${after}" ]]; then
   echo "" >&2

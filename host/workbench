@@ -1445,13 +1445,15 @@ cmd_review_login() {
   podman image exists "${REVIEW_IMAGE}" || die "no ${REVIEW_IMAGE}; host/workbench build or pull first"
   mkdir -p "${REVIEW_LOGIN}"
   chmod 700 "${DATA}/review" "${REVIEW_LOGIN}"
+  # A broker still running would write its own refreshed login over the
+  # new one when its review ends.
+  podman rm -f -t 5 review-broker >/dev/null 2>&1 || true
   review_net
   mapfile -t opts < <(review_opts)
   podman run --rm -it --name review-login "${opts[@]}" \
     -e HOME=/tmp -e CODEX_HOME=/var/lib/review-broker/codex \
     "${REVIEW_IMAGE}" codex login --device-auth
   review_login_ok || die "no login was saved in ${REVIEW_LOGIN}"
-  podman rm -f -t 5 review-broker >/dev/null 2>&1 || true
   start_review_broker
   echo "workbench: review broker logged in and running; from a workbench: l2 --review -- make cross-review"
 }
@@ -1623,7 +1625,10 @@ start_helpers() {
   start_broker
   start_ssh_agent
   start_proxy
-  start_review_broker
+  # Optional: one that cannot start is said, and every workspace still
+  # starts. In a child shell, so its die ends only that.
+  (start_review_broker) ||
+    echo "workbench: the review broker did not start, so l2 --review has none; podman logs review-broker" >&2
 }
 
 cmd_helpers() {
