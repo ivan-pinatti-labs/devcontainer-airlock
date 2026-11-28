@@ -556,6 +556,21 @@ def test_serve_gives_a_trickling_client_a_deadline_in_all(env, monkeypatch, caps
     assert "GONE 6 before the request arrived" in capsys.readouterr().out
 
 
+def test_read_request_stops_at_its_deadline_between_reads(env, monkeypatch):
+    clock = iter([0.0, 0.0, env.broker.READ_TIMEOUT + 1])
+    monkeypatch.setattr(env.broker.time, "monotonic", lambda: next(clock))
+
+    class Conn:
+        def settimeout(self, _):
+            pass
+
+        def recv(self, _):
+            return b"x"
+
+    with pytest.raises(TimeoutError):
+        env.broker.read_request(Conn())
+
+
 def test_serve_takes_a_request_that_ends_without_a_newline(env):
     a, b = socket.socketpair()
     b.sendall(json.dumps(req(effort="max")).encode())
