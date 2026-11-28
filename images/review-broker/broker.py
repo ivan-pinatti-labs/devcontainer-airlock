@@ -459,13 +459,15 @@ def answer(conn, rid):
 def on_stop(_signum, _frame):
     """A stop (podman stop, restart-review-broker) saves a token the running
     review refreshed since the last look, before the tmpfs holding it goes."""
-    if _running:
+    # One copy: the review's own thread clears the record when it ends.
+    running = dict(_running)
+    if running:
         # The reviewer goes first, so no refresh lands after the save.
         try:
-            os.killpg(_running["proc"].pid, signal.SIGKILL)
+            os.killpg(running["proc"].pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        keep_login(_running["auth"], _running["login"])
+        keep_login(running["auth"], running["login"])
     log("review-broker: stopping")
     sys.exit(0)
 

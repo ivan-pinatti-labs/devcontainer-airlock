@@ -767,7 +767,9 @@ whose shell reads only the system folders, Codex's own folder and the tree:
 not `CODEX_HOME` and not the login folder, and no network (measured with
 `codex sandbox` under that configuration, 2026-11-28; `codex exec` reading
 it the same way is measured by the first live review). A reply holding any 24 characters of a token
-the login held before or during the review is withheld as well, a second line rather than the
+the login was seen holding, before the review and at each look during
+it, is withheld as well (a token Codex rotated through between two looks
+is not among them), a second line rather than the
 boundary, since a reworded token would pass it. A login Codex refreshes is
 copied back within seconds, and again when the broker is stopped or the
 review times out, after the reviewer is killed, so a stop mid review loses
